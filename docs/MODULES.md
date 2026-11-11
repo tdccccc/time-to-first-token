@@ -6,8 +6,8 @@
 |---|---|---|---|---|
 | [M0 · 基础与度量](modules/M0-foundations/README.md) | Roofline、TTFT/ITL/吞吐、profiling、可复现的压测脚本 | 一份基线报告 + `scripts/bench_openai.py` | 无（不需要 GPU） | ✅ 内容已完成 |
 | [M1 · 推理框架](../README.md) | 10 周路线图：vLLM → SGLang → 量化 → 投机解码 → 解耦部署 → 路由器 → 发表 | 一个不断长大的 OpenAI 兼容推理服务 + 一份 benchmark 写作 | M0 | ✅ 内容已完成（中文翻译版） |
-| [M2 · 算子优化](modules/M2-operators/README.md) | CUDA → Triton → FlashAttention/CUTLASS → 自写 kernel 接入引擎 | 一份“自写 kernel 端到端加速报告” | M0、M1 第 1–2 周 | 📝 大纲已定，完整内容待写 |
-| [M3 · 国产芯片适配](modules/M3-domestic-chips/README.md) | 软件栈地图 → Ascend 跑通 → 算子覆盖分析 → 移植 → 精度回归与调优报告 | 一份跨芯片对比报告（初稿） | M0、M1 | 📝 大纲已定，完整内容待写 |
+| [M2 · 算子优化](modules/M2-operators/README.md) | CUDA 优化阶梯 → Triton → fused attention / 量化 matmul → FlashAttention/CUTLASS → 自写 kernel 接入引擎 | 一份“自写 kernel 端到端加速报告” | M0、M1 第 1–2 周 | ✅ 内容已完成（加深版，6 周） |
+| [M3 · 国产芯片适配](modules/M3-domestic-chips/README.md) | 软件栈地图 → CANN/AscendC → Ascend 跑通与插件架构 → 算子覆盖分析 → 移植案例 → 精度归因与调优报告 | 一份跨芯片对比报告（初稿） | M0、M1 | ✅ 内容已完成（加深版，6 周） |
 | M4 · 综合项目 | 同一模型 + 同一评测集，在 NVIDIA 与至少一种国产芯片上端到端部署、压测，写出可复现的对比报告 | 一份完整的、可复现的跨芯片推理优化报告（本仓库的毕业设计） | M0–M3 | 📝 仅有目标，内容待写 |
 
 ## 建议顺序
@@ -15,12 +15,12 @@
 ```
 M0（1 周，无 GPU 可做）
  → M1（10 周，主线）
- → M2（5 周，与 M1 第 6–8 周并行或之后做）
- → M3（5 周，Ascend 环境就绪后做）
+ → M2（6 周，与 M1 第 6–8 周并行或之后做）
+ → M3（6 周，Ascend 环境就绪后做）
  → M4（毕业设计）
 ```
 
-M2 与 M1 后半段可以并行：M1 第 6 周讲量化时，正好做 M2 第 3 周的量化 matmul；M1 第 7 周讲投机解码时，可以对照 M2 第 4 周读的 kernel 实现。M3 建议放在 M1 之后，因为它需要你已经会部署、会压测、会读 profiler 输出。
+M2 与 M1 后半段可以并行：M1 第 6 周讲量化时，正好做 M2 第 4 周的量化 matmul；M1 第 7 周讲投机解码时，可以对照 M2 第 5 周读的 kernel 实现。M3 建议放在 M1 之后，因为它需要你已经会部署、会压测、会读 profiler 输出。
 
 ## 每个模块的共同规则
 
@@ -33,6 +33,6 @@ M2 与 M1 后半段可以并行：M1 第 6 周讲量化时，正好做 M2 第 3 
 ## 待办
 
 - [ ] index.html 目前仍渲染英文版路线图，需同步为中文版（含 M0–M4 入口）
-- [ ] M2 完整内容：逐节讲解与练习
-- [ ] M3 完整内容：逐节讲解与实验，含第一份真实的 Ascend 实测记录
+- [x] M2 完整内容：逐节讲解与练习（已完成，6 周加深版）
+- [x] M3 完整内容：逐节讲解与实验（已完成，6 周加深版；第一份真实的 Ascend 实测记录仍待有卡后补测）
 - [ ] M4 完整内容：毕业设计的评测集选择与报告模板
