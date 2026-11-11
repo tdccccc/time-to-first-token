@@ -17,6 +17,7 @@
 > - **算子与国产芯片**：新增 [M2 算子优化](docs/modules/M2-operators/README.md)与 [M3 国产芯片适配](docs/modules/M3-domestic-chips/README.md)的课程大纲，补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
 > - **第 8 周加深**：新增第 8 周（续）：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
 > - **TensorRT-LLM 深入周**：第 11 周是可选的一周，讲编译式推理引擎 TensorRT-LLM 的架构、部署、量化、投机解码与解耦式服务，最后产出一份三引擎（vLLM / SGLang / TensorRT-LLM）对比报告。这一周引用的论文一律标为选读，正文直接给出深度总结。
+> - **论文变选读**：每篇论文的核心思想、核心逻辑、关键机制和关键数字都已在正文对应章节写成详细总结，读完全文是可选的加深步骤；第 10 周养成阅读习惯的部分仍按原设计直接读论文。
 > - **原项目授权与出处不变**：本仓库沿用上游的 CC BY 4.0 协议，原作者与原仓库链接见文末。
 
 ---
@@ -98,7 +99,7 @@ pip install sglang
 
 ## 路线图
 
-图例：**读**表示这节课是输入背景知识，**做**表示这节课要产出东西。**略读**表示相关概念你可能已经知道，价值在动手部分。
+图例：**读**表示这节课是输入背景知识，**做**表示这节课要产出东西。**略读**表示相关概念你可能已经知道，价值在动手部分。论文标记为**选读**：正文对应章节已有详细总结，读原文是可选的加深步骤。
 
 ---
 
@@ -131,12 +132,16 @@ pip install sglang
 
 | 天 | 课程 |
 |---|---|
-| 周一 | *读，略读* · [PagedAttention 发布文章](https://blog.vllm.ai/2023/06/20/vllm.html)。以前的系统在 KV 显存碎片和过度预留上浪费 60–80%，固定大小的 block 把浪费压到 4% 以下。然后略读 [SOSP 论文](https://arxiv.org/abs/2309.06180)的 block table 部分。 |
+| 周一 | *读，略读* · [PagedAttention 发布文章](https://blog.vllm.ai/2023/06/20/vllm.html)。以前的系统在 KV 显存碎片和过度预留上浪费 60–80%，固定大小的 block 把浪费压到 4% 以下。然后（选读）[SOSP 论文](https://arxiv.org/abs/2309.06180)的 block table 部分，核心内容见下方总结。 |
 | 周二 | *做* · 用 vLLM 的 OpenAI 兼容服务跑起 Llama-3.1-8B-Instruct 或 Qwen2.5-7B。把启动命令存下来，十周都要复用。[Modal 示例](https://modal.com/docs/examples/vllm_inference)。 |
 | 周三 | *读* · [vLLM Office Hours 22：Intro to vLLM V1](https://www.youtube.com/watch?v=jmzIvQZCLZM)（Michael Goin，Red Hat）。文字版：[vLLM V1 架构](https://blog.vllm.ai/2025/01/27/v1-alpha-release.html)。 |
 | 周四 | *读* · [Inside vLLM: Anatomy of a High-Throughput Inference System](https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html)，调度器与 block manager 部分。 |
 | 周五 | *做* · 跟着 [这个仓库](https://github.com/vllm-project/vllm)里的 block table 代码走一遍。写三句话，讲清一个请求的 block 是怎么被查到的。写不出来就再读一遍。 |
 | 缓冲 | 对照代码重读 V1 博客的调度器部分，记下博客做了哪些简化。 |
+
+#### 论文精读（原文均为选读）
+
+**PagedAttention / vLLM（SOSP 2023）**——问题：解码时每个请求的 KV 缓存又大（LLaMA-13B 单个序列可达 1.7GB）又随序列长度动态伸缩，旧系统因碎片和过度预留浪费 60–80% 的显存，批大小上不去。核心思想：借用操作系统的虚拟内存与分页——block 是页、token 是字节、序列是进程；每个序列的 KV 缓存切成固定大小的 block，逻辑 block 通过 block table 映射到不连续的物理 block，并按需分配。关键机制：浪费只发生在序列的最后一个 block，实测浪费不到 4%；block table 加引用计数与写时复制（copy-on-write）让不同序列共享物理 block，并行采样、beam search 这类多输出采样的显存开销最多降 55%、吞吐最多升 2.2 倍。关键数字：论文称同等延迟下 vLLM 比 FasterTransformer 和 Orca 吞吐高 2–4 倍，序列越长、模型越大、解码算法越复杂优势越明显；发布文章称比 HF Transformers 高 24 倍、比 TGI 高 3.5 倍。为什么重要：它是整个计划的地基——KV 缓存分页加连续批处理是 vLLM 与 SGLang 的默认配置，读懂 block table 才能理解调度器为什么能把批做大。原文选读：[arXiv:2309.06180](https://arxiv.org/abs/2309.06180)。
 
 ---
 
@@ -171,10 +176,20 @@ pip install sglang
 |---|---|
 | 周一 | *读* · [RadixAttention and SGLang](https://lmsys.org/blog/2024-01-17-sglang/)。在前缀很重的负载上吞吐最高可达 5 倍，没有缓存命中时也没有明显开销，这就告诉你它赢在哪些负载上。 |
 | 周二 | *做* · 用 [SGLang](https://docs.sglang.io)部署和第 2 周相同的模型。同一硬件、同一 prompt，唯一的变量是引擎。 |
-| 周三 | *读* · [Efficient LLM Inference with SGLang](https://www.youtube.com/watch?v=Ny4xxErgFgQ)（Lianmin Zheng，SGLang 负责人）。论文：[SGLang，NeurIPS 2024](https://arxiv.org/abs/2312.07104)。 |
-| 周四 | *读，略读* · [Continuous batching](https://www.anyscale.com/blog/continuous-batching-llm-inference)（Anyscale），然后 [Orca，OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu)。重点是迭代级调度和重尾长度假设——正是它让那些数字成立。 |
-| 周五 | *读* · [Sarathi-Serve](https://arxiv.org/abs/2403.02310)，关于分块 prefill 和无停顿调度。这就是分块 prefill 成为两个引擎默认策略的原因。 |
+| 周三 | *读* · [Efficient LLM Inference with SGLang](https://www.youtube.com/watch?v=Ny4xxErgFgQ)（Lianmin Zheng，SGLang 负责人）。论文（选读）：[SGLang，NeurIPS 2024](https://arxiv.org/abs/2312.07104)，核心内容见下方总结。 |
+| 周四 | *读，略读* · [Continuous batching](https://www.anyscale.com/blog/continuous-batching-llm-inference)（Anyscale），然后（选读）[Orca，OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu)，核心内容见下方总结。重点是迭代级调度和重尾长度假设——正是它让那些数字成立。 |
+| 周五 | *读* · （选读）[Sarathi-Serve](https://arxiv.org/abs/2403.02310)，关于分块 prefill 和无停顿调度，核心内容见下方总结。这就是分块 prefill 成为两个引擎默认策略的原因。 |
 | 缓冲 | [SGLang v0.4 零开销调度器](https://lmsys.org/blog/2024-12-04-sglang-v0-4/)，然后用一个共享 system prompt 的负载同时跑两个引擎，看 TTFT 的差距。 |
+
+#### 论文精读（原文均为选读）
+
+**SGLang（NeurIPS 2024）**——问题：复杂 LLM 程序（多轮调用、控制流、结构化输入输出）缺少高效的编程与执行系统。核心思想：前端语言与后端运行时协同设计。前端是内嵌于 Python 的 DSL（fork 并行分支、gen 生成、choices 约束、run 执行，可解释执行或编译成数据流图）；后端是 RadixAttention 与压缩有限状态机（结构化输出解码加速）。关键机制：RadixAttention 把 prompt 与生成结果的 KV 缓存保留在一棵基数树里（token 序列为键、KV 张量为值，GPU 上按页存放、每页一个 token），自动做前缀匹配与复用；LRU 淘汰（递归淘汰叶子节点）加缓存感知的调度提升命中率；树结构存在 CPU 上，维护开销小；无缓存命中时也没有明显开销，所以默认开启；与连续批处理、PagedAttention 兼容。关键数字：论文称在 agent、推理、few-shot、JSON 解码、RAG、多轮对话等任务上比当时最先进的推理系统吞吐最高高 6.4 倍；博客在 Llama-7B 与 Mixtral-8x7B 上称比 Guidance 和 vLLM 最高高 5 倍。为什么重要：前缀复用是本周与 vLLM 对比的核心维度；它说明 KV 缓存复用不只是省显存，在前缀很重的负载上直接决定吞吐。原文选读：[arXiv:2312.07104](https://arxiv.org/abs/2312.07104)。
+
+**Orca（OSDI 2022）**——问题：生成式模型按请求级批处理——一批里的请求必须等整批跑完才能返回，先跑完的请求不能提前返回，新到的请求必须等整批跑完；多轮迭代的负载下调度不灵活。核心思想：迭代级调度——以一次模型迭代为调度粒度，每次只对当前批跑一次迭代，调度器每次迭代都能重组 batch；选择性批处理——只对一部分算子做批处理。逻辑链：已完成的请求立即返回、新请求立即加入 → GPU 不再空等整批 → 批大小与延迟解耦。关键数字：GPT-3 175B 上，同等延迟下比 NVIDIA FasterTransformer 吞吐高 36.9 倍。为什么重要：连续批处理（vLLM 与 SGLang 的默认调度）的源头思想；理解它才能理解为什么“批”不再是固定的请求集合。原文选读：[OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu)。
+
+**SARATHI（OSDI 2024，分块 prefill 的源头）**——问题：prefill 算满、decode 算不满；流水线并行时 prefill 与 decode 时间不一导致 micro-batch 不均衡、产生气泡。核心思想：分块 prefill（把一个 prefill 请求切成等大的 chunk）加 decode-maximal 批处理（每个 batch 由一个 prefill chunk 加尽可能多的 decode 组成，让 decode“搭便车”）。逻辑链：prefill chunk 把 GPU 算力打满，decode 搭上去的成本比纯 decode batch 低一个量级；一个 prefill 可切出多个 decode-maximal batch；等大的 batch 让流水线各段计算量均匀，气泡大幅减少。关键数字：LLaMA-13B 加 A6000 上 decode 吞吐最高 10 倍、端到端 1.33 倍；LLaMA-33B 加 A100 上端到端 1.25 倍、decode 吞吐最高 4.25 倍；GPT-3 流水线并行下气泡减少 6.29 倍、端到端 1.91 倍。为什么重要：分块 prefill 就是 vLLM 与 SGLang 默认调度策略的来源；它是理解“吞吐与延迟如何兼得”的关键。原文选读：[arXiv:2308.16369](https://arxiv.org/abs/2308.16369)。
+
+**Sarathi-Serve（OSDI 2024）**——问题：把 prefill 与 decode 混批能提吞吐，但会互相拖累延迟——吞吐与延迟的权衡。核心思想：在 SARATHI 的分块 prefill 之上做无停顿调度（stall-free scheduling）：加新请求进 batch 时不暂停正在进行的 decode；batch 保持均匀计算量，减少流水线气泡。逻辑链：chunk 切得近似等大 → 每个 iteration 的计算量可预测 → 调度器能在不暂停 decode 的前提下塞入新请求 → 大 batch 提吞吐的同时不恶化尾延迟。关键数字：在尾延迟约束下，Mistral-7B 单 A100 上比 vLLM 服务容量高 2.6 倍；Yi-34B 双 A100 上最高 3.7 倍；Falcon-180B 流水线并行下端到端服务容量最高 5.6 倍。为什么重要：本周五的落点——分块 prefill 成为两个引擎默认策略的原因；也是第 5 周压测时理解“拐点”的背景。原文选读：[arXiv:2403.02310](https://arxiv.org/abs/2403.02310)。
 
 ---
 
@@ -229,9 +244,15 @@ pip install sglang
 | 周一 | *读，略读* · [投机解码文档](https://docs.vllm.ai/en/latest/features/speculative_decoding/)里的方法选择表，然后读 [vLLM 的 benchmark 文章](https://blog.vllm.ai/2024/10/17/spec-decode.html)：QPS 为 1 时最高 2.8 倍，但高 QPS 时会慢 1.4–1.8 倍。交叉点才是发现，不是加速比。 |
 | 周二 | *读* · [GPU MODE 第 22 讲：Hacker's Guide to Speculative Decoding in vLLM](https://www.youtube.com/watch?v=9wNAgpX6z_4)（Cade Daniel，Anyscale），前半部分：提议器、打分器、验证器、草稿模型 worker。 |
 | 周三 | *做* · 打开投机解码，在低 QPS 和高 QPS 下分别测 token 间延迟。找到你自己的交叉点，这就是这节课。 |
-| 周四 | *读* · [StreamingLLM](https://arxiv.org/abs/2309.17453)（Guangxuan Xiao 等，ICLR 2024）：相对滑动窗口重算最高 22.2 倍加速，超过 400 万 token 依然稳定。可选视频：[StreamingLLM and DuoAttention](https://www.csail.mit.edu/event/scale-ml-guangxuan-xiao-streamingllm-and-duoattention-efficient-and-effective-long-sequence)（MIT CSAIL）。 |
+| 周四 | *读* · （选读）[StreamingLLM](https://arxiv.org/abs/2309.17453)（Guangxuan Xiao 等，ICLR 2024），核心内容见下方总结：相对滑动窗口重算最高 22.2 倍加速，超过 400 万 token 依然稳定。可选视频：[StreamingLLM and DuoAttention](https://www.csail.mit.edu/event/scale-ml-guangxuan-xiao-streamingllm-and-duoattention-efficient-and-effective-long-sequence)（MIT CSAIL）。 |
 | 周五 | *做* · 配一个长上下文负载和一套淘汰策略，测显存和 TTFT。长上下文是淘汰从理论变成现实的地方。 |
 | 缓冲 | 读完 GPU MODE 第 22 讲，然后略读 [speculators](https://github.com/vllm-project/speculators) 和[它的 office hours](https://www.youtube.com/watch?v=2ISAr_JVGLs)。 |
+
+#### 论文精读（原文均为选读）
+
+**StreamingLLM（ICLR 2024）**——问题：流式场景（多轮对话）要缓存历史 token 的 KV，显存吃不消；窗口注意力（只留最近的 KV）看似自然，但文本长度超过缓存时性能会崩。核心思想：注意力汇（attention sink）——模型对开头的几个 token 有很强的注意力分数，哪怕它们语义上不重要；只要保留开头 token 的 KV，窗口注意力就能基本恢复性能。逻辑链：发现 attention sink 现象 → 保留开头 token 加最近窗口的 KV → 无需微调，训练时有限窗口的模型能泛化到无限长度；预训练时加一个占位 token 作为专用的 sink，还能进一步提升。关键数字：Llama-2、MPT、Falcon、Pythia 在 400 万 token 以上仍能稳定高效建模；流式场景下比滑动窗口重算基线最高快 22.2 倍。为什么重要：它是本周 KV 淘汰的理论依据——“淘汰什么”不是随便丢，丢了不该丢的会崩、留住 sink 就能稳住。原文选读：[arXiv:2309.17453](https://arxiv.org/abs/2309.17453)。
+
+**EAGLE（arXiv 2024，投机采样的代表性方法）**——问题：自回归解码慢；投机采样能加速，但草稿模型在 token 层面做自回归预测有瓶颈。核心思想：两个观察——（1）在特征层面（倒数第二层）做自回归比在 token 层面更直接；（2）特征层自回归固有的不确定性限制了性能。EAGLE 用“提前一个时间步的 token 序列”消除这种不确定性，让特征预测变精确，且开销很小。逻辑链：草稿模型预测下一特征 → 目标模型一次验证多个 token → 接受的 token 直接采用；特征预测准了，接受率就高，加速比就上去；同时保持生成文本的分布不变。关键数字：LLaMA2-Chat 70B 上延迟加速 2.7–3.5 倍、吞吐翻倍；在 Vicuna、LLaMA2-Chat 全系、Mixtral 8x7B 上验证过。为什么重要：本周投机解码的代表性方法；理解它就理解了“投机解码的加速比取决于草稿预测的接受率”这个关键。本周正文未单独安排 EAGLE 的阅读节，放在这里作为投机解码方法的补充。原文选读：[arXiv:2401.15077](https://arxiv.org/abs/2401.15077)。
 
 ---
 
@@ -245,12 +266,18 @@ pip install sglang
 
 | 天 | 课程 |
 |---|---|
-| 周一 | *读* · [DistServe at OSDI 2024](https://www.youtube.com/watch?v=WwJvecXOeUA)（Yinmin Zhong，报告人）。报告称可多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍。[论文](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)。 |
-| 周二 | *读* · [Splitwise](https://arxiv.org/abs/2311.18677)（Microsoft，ISCA 2024）：prefill 用 H100、decode 用降功耗 A100，吞吐 1.4 倍、成本低 20%。然后读 [vLLM 解耦式 prefill](https://docs.vllm.ai/en/latest/features/disagg_prefill/)。 |
-| 周三 | *读* · [Mooncake](https://arxiv.org/abs/2407.00079)（FAST 2025 最佳论文），以 KV 缓存为中心，已在 Kimi 生产使用。然后读 [SGLang PD 解耦](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)。比较每个引擎怎么拆分这两个阶段。 |
+| 周一 | *读* · [DistServe at OSDI 2024](https://www.youtube.com/watch?v=WwJvecXOeUA)（Yinmin Zhong，报告人）。报告称可多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍。（选读）[论文](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)，核心内容见下方总结。 |
+| 周二 | *读* · （选读）[Splitwise](https://arxiv.org/abs/2311.18677)（Microsoft，ISCA 2024），核心内容见第 8 周（续）的总结：prefill 用 H100、decode 用降功耗 A100，吞吐 1.4 倍、成本低 20%。然后读 [vLLM 解耦式 prefill](https://docs.vllm.ai/en/latest/features/disagg_prefill/)。 |
+| 周三 | *读* · （选读）[Mooncake](https://arxiv.org/abs/2407.00079)（FAST 2025 最佳论文），核心内容见第 8 周（续）的总结，以 KV 缓存为中心，已在 Kimi 生产使用。然后读 [SGLang PD 解耦](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)。比较每个引擎怎么拆分这两个阶段。 |
 | 周四 | *做* · 用 [vLLM production stack](https://github.com/vllm-project/production-stack) 的 Helm chart 部署，在托管集群或 `kind` 上。 |
 | 周五 | *做* · 用 `num_requests_waiting` 这个自定义指标做扩缩容，[而不是 CPU](https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda)。在 GPU 服务上按 CPU 扩缩容，正是这节课要防止的错误。 |
 | 缓冲 | 把生态图谱补上：[PyTorch 解耦式推理](https://pytorch.org/blog/disaggregated-inference-at-scale-with-pytorch-vllm/)、[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo)、[llm-d](https://llm-d.ai)。 |
+
+#### 论文精读（原文均为选读）
+
+**DistServe（OSDI 2024）**——问题：prefill 与 decode 拼在同一批 GPU 上会互相干扰（prefill 的大计算拖慢 decode 的逐 token 生成），且两者的资源分配与并行策略被绑在一起；应用对两阶段的延迟要求不同（TTFT 与 TPOT），旧系统只能顾一头或过度配资源。核心思想：把 prefill 与 decode 拆到不同 GPU 上，消除干扰；按应用的 TTFT 与 TPOT 要求，分别为两阶段协同优化资源分配与并行策略；按集群带宽放置两阶段，最小化拆分带来的通信。关键指标：goodput——在 TTFT 与 TPOT 约束内能服务的最大请求速率，而不是裸吞吐。关键数字：同等条件下比当时最先进的系统多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍，同时 90% 以上请求满足延迟约束。为什么重要：第 8 周解耦架构的起点；它把“第 1 周的 prefill/decode 不对称”变成了一套可部署的架构，也是后边 Mooncake、vLLM 与 SGLang 解耦功能的对照。原文选读：[OSDI 2024](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)。
+
+Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周论文精读”里（那里的版本更深，含 Conductor 的 TTFT 估算式、256 token 的 KV 块、热块复制与传输引擎细节），这里不再重复。
 
 ---
 
@@ -415,17 +442,19 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 
 ### 论文
 
-| 论文 | 会议 | 主题 |
-|---|---|---|
-| [PagedAttention / vLLM](https://arxiv.org/abs/2309.06180) | SOSP 2023 | KV 缓存分页 |
-| [Orca](https://www.usenix.org/conference/osdi22/presentation/yu) | OSDI 2022 | 连续批处理 |
-| [SGLang](https://arxiv.org/abs/2312.07104) | NeurIPS 2024 | RadixAttention、前缀复用 |
-| [SARATHI](https://arxiv.org/abs/2308.16369) / [Sarathi-Serve](https://arxiv.org/abs/2403.02310) | OSDI 2024 | 分块 prefill |
-| [DistServe](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin) | OSDI 2024 | prefill/decode 解耦 |
-| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU |
-| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 |
-| [StreamingLLM](https://arxiv.org/abs/2309.17453) | ICLR 2024 | 注意力汇、长上下文 |
-| [EAGLE](https://arxiv.org/abs/2401.15077) | arXiv | 投机采样 |
+本表所有论文均为选读：正文对应章节已有详细总结，读原文是加深理解的可选步骤。
+
+| 论文 | 会议 | 主题 | 本计划总结 |
+|---|---|---|---|
+| [PagedAttention / vLLM](https://arxiv.org/abs/2309.06180) | SOSP 2023 | KV 缓存分页 | 第 2 周 |
+| [Orca](https://www.usenix.org/conference/osdi22/presentation/yu) | OSDI 2022 | 连续批处理 | 第 4 周 |
+| [SGLang](https://arxiv.org/abs/2312.07104) | NeurIPS 2024 | RadixAttention、前缀复用 | 第 4 周 |
+| [SARATHI](https://arxiv.org/abs/2308.16369) / [Sarathi-Serve](https://arxiv.org/abs/2403.02310) | OSDI 2024 | 分块 prefill | 第 4 周 |
+| [DistServe](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin) | OSDI 2024 | prefill/decode 解耦 | 第 8 周 |
+| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU | 第 8 周 |
+| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 | 第 8 周 |
+| [StreamingLLM](https://arxiv.org/abs/2309.17453) | ICLR 2024 | 注意力汇、长上下文 | 第 7 周 |
+| [EAGLE](https://arxiv.org/abs/2401.15077) | arXiv | 投机采样 | 第 7 周 |
 
 GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention 系列，请用 [Lilian Weng 的综述](https://lilianweng.github.io/posts/2023-01-10-inference-optimization/)和 [NVIDIA 优化综述](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/)，它们直接引用了这些工作。搜精确标题，不要猜 arXiv 编号。
 

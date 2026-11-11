@@ -7,6 +7,8 @@ labels: progress
 
 Tick sessions as you finish them. GitHub saves checkbox state to your account, so this works across every device you sign in from.
 
+论文均为选读：README 对应章节已有每篇论文的详细总结（核心思想、逻辑链、关键机制、关键数字），打勾跟踪的是课程本身，读不读全文不影响进度。
+
 Started on:
 
 ### Week 1: The mental model
