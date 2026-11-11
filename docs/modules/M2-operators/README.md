@@ -1,132 +1,176 @@
 # M2 · 算子优化
 
-> 状态：**内容进行中**——第 1–2 周（CUDA、Triton）为完整内容，第 3–5 周仍为大纲，见下文各周表格。
+> 状态：**内容进行中**——第 1–2 周为完整内容（加深版），第 3–6 周仍为大纲，见下文各周表格。
 >
 > 前置：M0（Roofline、profiling、压测脚本）与 M1 第 1–2 周（vLLM 服务已跑起来）。M2 的终点不是“会写 kernel”，而是“自己写的 kernel 跑进了推理引擎，端到端变快了”。
 >
-> 每节 30 分钟，每周 5 节，沿用 M1 的节奏。**每节开头标硬件门槛**：无卡可做 / 需 GPU / 需租卡，并给出无卡替代路径。代码示例分两种：能直接跑的（已按官方教程核对过写法）和示意性的（标明“示意”二字，只讲结构不保证编译通过）——不要把示意代码当可运行代码。
+> 每节 30 分钟，每周 5 节，沿用 M1 的节奏。**每节开头标硬件门槛**：无卡可做 / 需 GPU / 需租卡，并给出无卡替代路径。代码示例分两种：能直接跑的（已按官方教程与源码核对过写法）和示意性的（标明“示意”二字，只讲结构不保证编译通过）——不要把示意代码当可运行代码。
+>
+> **本模块的深度标准**：优化做成阶梯，每一步都有实测数字，并且用 M0 的 Roofline 定位每一步卡在哪里；优化由 profiling（`ncu`）驱动，先定位瓶颈再改 kernel，而不是只看时间。原来的 5 周塞不下这些内容，M2 已扩为 6 周：第 3 周专讲 fused attention 的数学推导，第 4 周专讲量化 matmul 的量化方案，第 5 周专讲 FlashAttention 与 CUTLASS 的工业级实现，第 6 周收口到引擎接入。
 
 ## 为什么单开一个模块
 
 M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。M2 的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用 M0 的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，**“接入引擎”这一步目前没有现成课程**，是本模块要补的关键一节。
 
-## 第 1 周 · CUDA 基础：先理解 GPU 再写代码
+## 第 1 周 · CUDA 优化阶梯：一个 GEMM，四次提速
 
-> 硬件：需要一块 NVIDIA GPU（租卡或本地卡均可；Colab 免费 GPU 也能跑 GPU Puzzles）。无卡时先读题、看题解，不要跳过——第 2 周的 Triton 部分无需 GPU。
+> 硬件：**本周需要 GPU 与 CUDA 工具链（`nvcc`）**。租卡或本地卡均可；Colab 免费 GPU 能跑 GPU Puzzles，但阶梯实验建议在自己能装 `ncu` 的机器上做（`ncu` 在容器里可能需要 `sudo` 或 `CAP_SYS_ADMIN` 权限，跑不起来先查权限，见第 2 节）。
+>
+> 本周的主线是一个 4096×4096 的 FP32 矩阵乘法（记为 GEMM），从朴素版一路优化到接近硬件上限。每一节的结构都一样：**先用 `ncu` 读瓶颈 → 改 kernel → 再测 → 把点标到 Roofline 上**。不要跳过“读瓶颈”这一步——没有 profile 的优化是猜。
 
-### 第 1 节 · GPU 执行模型：thread、block、grid
+### 第 1 节 · GPU 执行模型与第一个 kernel
 
-**目标**：能画出一次 kernel 启动的数据流向：数据从哪来、经过哪些线程、结果写回哪。
+**目标**：能画出一次 kernel 启动的数据流向，并跑通第一个 kernel。
 
 **怎么做**（30 分钟）：
 
 1. 读 [GPU Puzzles](https://github.com/srush/GPU-Puzzles) 的前言：它用 Numba 把 Python 代码直接映射成 CUDA kernel，“看起来像 Python，实际就是 CUDA”。再看 [Stanford CS336 第 5 讲](https://www.youtube.com/watch?v=6OBtO9niT00)前 30 分钟（GPU 与显存层级）。
-2. 记住三层结构：**thread**（最小执行单位，每个线程算一个或几个元素）、**block**（一组线程，共享一块 shared memory，block 内可以同步）、**grid**（所有 block 的集合）。一个 kernel 启动 = 一个 grid；`blockIdx` 告诉你现在是第几个 block，`threadIdx` 告诉你是 block 里的第几个线程。
+2. 记住三层结构：**thread**（最小执行单位）、**block**（一组线程，共享一块 shared memory，block 内可以同步）、**grid**（所有 block 的集合）。`blockIdx` 是第几个 block，`threadIdx` 是 block 里的第几个线程。
 3. 记住显存层级：global memory（大、慢，所有线程可见）→ shared memory（小、快，block 内共享）→ register（最快，每个线程私有）。M0 的 Roofline 在这里落地：一次访存没进 shared memory，就等于又去 global memory 搬了一遍。
-4. 对照 M0 第 1 节的手算：decode 时每个 token 要把 7B 权重读一遍——这就是为什么“访存合并”和“分块”是本章唯二的主题。
+4. 做 Puzzle 1（Map）、Puzzle 2（Zip）、Puzzle 3（Guards）：一个线程负责一个元素；线程数多于元素数时加边界判断 `if i < size`。每个谜题的验收都是 `problem.check()`——把你的 kernel 输出与 NumPy 参考实现逐项对比。**以后你写的每个 kernel 都要配一个这样的参考实现**，这是本模块的铁律。
+5. 环境注意：Numba 内置的 CUDA 目标已被标记为弃用（后续开发移到了 NVIDIA 的 `numba-cuda` 包），所以**以 GPU Puzzles 仓库自己锁定的 numba 版本与安装说明为准**，不要自行升级 numba。按仓库 README 的说明装好环境（Colab：把 GPU 运行时打开；本地：clone 仓库后用 Jupyter 跑）。
 
-**产出**：一张手画的数据流向图：输入向量在 global memory → 按 block 分片 → 每个 thread 算一个元素 → 写回 global memory，并标出 threadIdx、blockIdx、blockDim 各自的含义。
+**产出**：Puzzle 1–3 通过 + 一张数据流向图（输入在 global memory → 按 block 分片 → 每个 thread 算一个元素 → 写回），并标出 threadIdx、blockIdx、blockDim 各自的含义。
 
-**延伸**：[NUMBA CUDA 指南](https://numba.readthedocs.io/en/stable/cuda/index.html)（GPU Puzzles 官方推荐的参考文档）。
+### 第 2 节 · 搭测量台：计时、Roofline、第一次 ncu 读数
 
-### 第 2 节 · 第一个 kernel：向量加法与正确性检查
-
-**目标**：跑通第一个 kernel，理解“正确性检查”是 kernel 开发的默认动作——先对，再快。
+**目标**：有一套“先算、再测、再定位”的测量台，本周后面四节全部复用它。
 
 **怎么做**（30 分钟，需 GPU）：
 
-1. 打开 [GPU Puzzles](https://github.com/srush/GPU-Puzzles) 的 notebook（推荐 Colab：把 GPU 运行时打开，`Runtime / Change runtime type` → `Hardware accelerator` 选 GPU；也可以本地 clone 仓库后用 Jupyter 跑，需要一块 NVIDIA 卡与 numba）。按仓库 README 的说明装好环境（`pip install` 一个 chalk 分支、下载 `lib.py` 与 `robot.png` 两个文件）。注意：Numba 内置的 CUDA 目标已被标记为弃用（后续开发移到了 NVIDIA 的 `numba-cuda` 包），所以**以 GPU Puzzles 仓库自己锁定的 numba 版本与安装说明为准**，不要自行升级 numba——本题集的价值在思路，不在追新版本。
-2. 做 Puzzle 1（Map）：给向量每个位置加 10，一个线程负责一个位置。解法只有一行：
-
-```python
-def map_test(cuda):
-    def call(out, a) -> None:
-        i = cuda.threadIdx.x
-        out[i] = a[i] + 10
-    return call
-```
-
-3. 理解检查机制：每个谜题都有一个 `spec`（NumPy 写的参考实现）和 `problem.check()`——它把你的 kernel 输出与参考实现逐项对比，错了会把“你的结果”和“期望结果”都打印出来。**以后你写的每个 kernel 都要配一个这样的参考实现**，这是本模块的铁律。
-4. 再做 Puzzle 2（Zip，两个向量相加）与 Puzzle 3（Guards，线程数多于元素数时要加边界判断 `if i < size`）。第 3 题的教训：多出来的线程如果不守边界，就会越界写坏内存——这是 GPU 编程最常见的 bug 形态。
-
-**产出**：Puzzle 1–3 通过（`problem.check()` 全部显示通过），并能说清 `problem.show()` 里那张“每个线程访存次数”表在量什么。
-
-**对照**：同一个向量加法，用原生 CUDA 写出来是这样（示意，只讲结构）：
+1. 写朴素版 GEMM（一个线程算一个输出元素，直接读 global memory）：
 
 ```cpp
-__global__ void vec_add(const float* a, const float* b, float* out, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) out[i] = a[i] + b[i];
+__global__ void gemm_naive(const float* A, const float* B, float* C, int M, int N, int K) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= M || col >= N) return;
+    float acc = 0.f;
+    for (int k = 0; k < K; ++k) acc += A[row * K + k] * B[k * N + col];
+    C[row * N + col] = acc;
 }
-// 启动：vec_add<<<(n + 255) / 256, 256>>>(d_a, d_b, d_out, n);
 ```
 
-Numba 版和 CUDA 版是同一回事：`threadIdx.x`、`blockIdx.x`、`blockDim.x` 逐一对应。看懂这个对应关系，后面读任何 CUDA 代码都不怕。
+2. 写计时 harness：用 CUDA Events（不要用 CPU 时钟量 GPU，中间隔着启动延迟）：
 
-### 第 3 节 · 访存合并：为什么连续访存快
+```cpp
+cudaEvent_t start, stop;
+cudaEventCreate(&start); cudaEventCreate(&stop);
+cudaEventRecord(start);
+gemm_naive<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+cudaEventRecord(stop);
+cudaEventSynchronize(stop);
+float ms = 0; cudaEventElapsedTime(&ms, start, stop);
+```
 
-**目标**：亲手量出“连续访存”与“跨步访存”的速度差，并理解 GPU 的合并访存机制。
+3. **先算**：M=N=K=4096，FP32。计算量 = 2×4096³ ≈ 137.4 GFLOP。朴素版每个输出元素读 K 个 A 元素 + K 个 B 元素，搬运量 = 8×4096³ ≈ 550 GB，算术强度 = 0.25 FLOP/字节。以 A100 为例（FP32 峰值约 19.5 TFLOPS，HBM 带宽约 2 TB/s，数字以厂商公开规格为准）：Roofline 上界 = min(0.25 × 2000, 19500) = 500 GFLOP/s，4096³ 至少要跑 274 ms。**先把这个数写下来，再跑**——实测比它慢得多是正常的（访存还没合并），实测比它快是不可能的（说明你的计时或计算错了）。
+4. **再读 ncu**：`ncu`（Nsight Compute）是定位 kernel 瓶颈的工具，先看 SpeedOfLight 一节的两个数：
+
+```bash
+ncu --section SpeedOfLight --section Occupancy --kernel-name regex:gemm -o gemm_v1 ./gemm_bench
+```
+
+也可以直接取两个指标：
+
+```bash
+ncu --metrics sm__throughput.avg.pct_of_peak_sustained_elapsed,dram__throughput.avg.pct_of_peak_sustained_elapsed,sm__warps_active.avg.pct_of_peak_sustained_active --kernel-name regex:gemm ./gemm_bench
+```
+
+分类规则（两个数对照着看）：SM% 高（>60）、DRAM% 低（<40）→ 计算受限；SM% 低、DRAM% 高（>70）→ 访存受限；两个都低（<40）→ 延迟受限（等数据、等同步，不是算力也不是带宽的问题）。朴素版你应该看到 DRAM% 很高、SM% 很低——这是预期，说明瓶颈在访存，不在计算。
+5. 注意：`ncu` 默认会 profile 所有 kernel 启动，用 `--launch-skip` 跳过热身、`--launch-count` 只采几次，避免采到初始化代码。容器里跑不起来时先查权限（`ncu` 可能需要 `sudo` 或 `CAP_SYS_ADMIN`），而不是怀疑工具。
+
+**产出**：一份测量台记录——朴素版的实测耗时、实测算力（GFLOP/s = 137.4 / 秒数）、占 Roofline 上界的百分比、ncu 的 SM% 与 DRAM%，以及一句话瓶颈判断。
+
+### 第 3 节 · 第一步：Shared memory 分块
+
+**目标**：把重复读的数据搬进 shared memory，量出访存量下降带来的提速，并把点在 Roofline 上向右移。
 
 **怎么做**（30 分钟，需 GPU）：
 
-1. 做 GPU Puzzles 的 Puzzle 4（Map 2D）与 Puzzle 5（Broadcast），理解二维索引与广播的访存模式。
-2. 写一个对比实验：同一个向量加法 kernel，分别用“每个线程读连续地址”和“每个线程隔 32 个元素读一个地址”两种方式跑，计时对比。计时用 Numba 的同步 + 系统时钟：
+1. **先读 ncu**：第 2 节的结论是访存受限。为什么？朴素版里 A 的同一行被 N 个输出元素重复读，B 的同一列被 M 个输出元素重复读——每次重复都是一次 global memory 访问。
+2. 改 kernel：分块（tiling）。把 A 的一块（BLOCK×BLOCK）与 B 的一块先搬进 shared memory，在 shared memory 里算部分和，再搬下一块：
 
-```python
-import time
-from numba import cuda
-
-start = time.perf_counter()
-kernel[blocks, threads](d_out, d_a, d_b, n)
-cuda.synchronize()  # 必须同步，否则只量到了“启动”而不是“跑完”
-elapsed = time.perf_counter() - start
+```cpp
+#define BLOCK 32
+__global__ void gemm_tiled(const float* A, const float* B, float* C, int M, int N, int K) {
+    __shared__ float As[BLOCK][BLOCK];
+    __shared__ float Bs[BLOCK][BLOCK];
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int row = blockIdx.y * BLOCK + ty;
+    int col = blockIdx.x * BLOCK + tx;
+    float acc = 0.f;
+    for (int t = 0; t < (K + BLOCK - 1) / BLOCK; ++t) {
+        int a_col = t * BLOCK + tx;
+        int b_row = t * BLOCK + ty;
+        As[ty][tx] = (row < M && a_col < K) ? A[row * K + a_col] : 0.f;
+        Bs[ty][tx] = (b_row < K && col < N) ? B[b_row * N + col] : 0.f;
+        __syncthreads();
+        for (int k = 0; k < BLOCK; ++k)
+            acc += As[ty][k] * Bs[k][tx];
+        __syncthreads();
+    }
+    if (row < M && col < N) C[row * N + col] = acc;
+}
 ```
 
-3. 理解原理：GPU 把相邻 32 个线程（一个 warp）的访存合并成一次事务。连续访问时 32 个线程一次搬完；跨步访问时 32 个线程要发 32 次事务，带宽直接除以 32。**这个数字不是理论，是你刚才量出来的。**
-4. 把结论写回 M0 的 Roofline 语言：一次没合并的访存，等于把算术强度除以 32——一个本来算力受限的 kernel，可能因为访存模式直接掉进带宽受限区。
+3. **先算**：分块后 A 的每个元素被读 N/BLOCK 次，B 的每个元素被读 M/BLOCK 次，搬运量 = 8×4096³/32 ≈ 17.2 GB，算术强度 = BLOCK/4 = 8 FLOP/字节。Roofline 上界 = min(8 × 2000, 19500) = 16 TFLOPS，4096³ 至少 8.6 ms——比朴素版的上界快了 32 倍。**这个 32 倍不是实测，是分块省掉的重复搬运算出来的**；实测能拿到多少，看 ncu。
+4. **再测再读**：跑计时 + ncu。你应该看到 DRAM% 明显下降、SM% 上升。把两个版本的点都标到同一张 Roofline 图上：朴素版在左下（低算术强度、低算力），分块版向右上方移动。
+5. 理解两个细节：`__syncthreads()` 必须成对出现（搬完同步一次、算完同步一次），否则有的线程会读到别的线程还没写完的 shared memory；`As[ty][k]` 是广播（同一 warp 的线程读同一地址，不冲突），`Bs[k][tx]` 是连续地址（不冲突）——这个布局是故意选的，下一节会故意写错一次给你看后果。
 
-**产出**：一份两行对比表（连续 vs 跨步，各自的耗时与带宽），加一句话结论。
+**产出**：分块版的实测耗时与算力、ncu 前后对比（SM% / DRAM% 各变了多少）、更新后的 Roofline 图（两个点）。
 
-**无卡替代**：读 Puzzle 4–5 的题解，理解为什么二维索引要按行优先排布；计时实验留到有卡时补做，标注“待补测”。
+### 第 4 节 · 第二步：向量化访存与 bank conflict
 
-### 第 4 节 · Shared memory 与分块：矩阵乘法
-
-**目标**：理解分块（tiling）——把反复读的数据先搬进 shared memory，再算。
+**目标**：把访存从“每次 4 字节”改成“每次 16 字节”，并亲手制造一次 bank conflict、再修掉它。
 
 **怎么做**（30 分钟，需 GPU）：
 
-1. 做 GPU Puzzles 的 Puzzle 6（Blocks：block 数量多于线程数，用 `blockIdx` 算全局索引）、Puzzle 7（Blocks 2D）与 Puzzle 8（Shared：第一次用 `cuda.shared.array` 与 `cuda.syncthreads()`）。
-2. 理解 Puzzle 8 的关键规则：shared memory 的大小必须是**字面常量**（不能是变量），写完 shared memory 必须调 `cuda.syncthreads()`，否则有的线程会读到别的线程还没写完的数据。
-3. 做 Puzzle 14（Matrix Multiply，矩阵乘法）：先写朴素版（每个线程算一个输出元素，直接读 global memory），再按分块思路改写——把 A 的一行块和 B 的一列块先搬进 shared memory，在 shared memory 里算部分和。对比两版的 `problem.show()` 访存计数：分块版的 global 读数应该明显下降。
-4. 把分块与 M0 的 Roofline 连起来：分块没有减少总计算量，它减少的是**重复搬运**——A 的同一行被 B 的很多列复用，每复用一次，算术强度就涨一分。
+1. **先读 ncu**：分块版之后，瓶颈一般还在访存一侧（MemoryWorkloadAnalysis 一节），但换了一个形态：不是搬运总量，而是**访存指令数**——每个线程每次只读 4 字节，要发很多次 load 指令。
+2. 改 kernel：向量化加载。把分块搬运时的标量读改成 `float4`（一次读 16 字节，4 个 float）：
 
-**产出**：一份朴素版 vs 分块版矩阵乘法的访存对比（global 读数 + 耗时），加一句话：分块省的是什么。
-
-### 第 5 节 · 占用率与 launch 开销 + 本周小结
-
-**目标**：知道什么时候 kernel 启动本身就是瓶颈，并写出本周的检查清单。
-
-**怎么做**（30 分钟，需 GPU；读的部分无卡可做）：
-
-1. 用 M0 第 3 节的 profiling 方法（`torch.profiler` 或 `nsys`），对一次小模型推理做一次 timeline：数一数有多少次 kernel 启动，每次启动之间有多少空隙。
-2. 理解两个概念：**占用率**（occupancy，SM 上同时驻留的 warp 数占最大值的比例——block 太大或 shared memory 用太多都会拉低它）和 **launch 开销**（一次 kernel 启动本身的固定成本，约数微秒；kernel 越小、启动越频繁，开销占比越高）。
-3. 判断：解码阶段 batch=1 时，每个 kernel 只算一个 token，计算量极小——这时 launch 开销和访存就是全部成本。这就是为什么推理引擎要做 kernel 融合（第 2–3 周）与 CUDA Graph（M1 第 8 周会遇到）。
-4. 写一份“CUDA 性能检查清单”，后面每节对照：
-
-```text
-□ 边界守好了吗（线程数 > 元素数时有没有 if 保护）
-□ 访存连续吗（warp 内 32 个线程读的是连续地址吗）
-□ 重复读的数据进 shared memory 了吗
-□ 同步加了吗（写 shared memory 之后有没有 syncthreads）
-□ kernel 是不是太小了（launch 开销占比是不是超过 10%）
-□ 正确性检查跑了吗（先对，再快）
+```cpp
+// 示意：分块搬运时，一次搬 4 个 float
+float4 a4 = *reinterpret_cast<const float4*>(&A[row * K + a_col]);
+// a4.x, a4.y, a4.z, a4.w 是连续的 4 个元素，写入 As[ty][tx*4 .. tx*4+3]
 ```
 
-**产出**：这份检查清单 + 一份 profiling 笔记（一次推理里 launch 开销的占比）。
+`float4` 要求地址 16 字节对齐（`cudaMalloc` 返回的地址天然对齐；行内偏移是 4 的倍数时也对齐）。改完再测：load 指令数降到约 1/4，耗时应该继续下降。
+3. **故意制造一次 bank conflict**：把 `Bs[k][tx]` 的布局改成转置的 `Bs[tx][k]` 写法跑一遍，再改回来。shared memory 有 32 个 bank，连续地址落在不同 bank；转置写法让同一 warp 的 32 个线程同时读同一个 bank 的不同地址——32 路冲突，串行化 32 倍。用 ncu 的 Shared Memory 相关计数看变化（`--set full` 报告里找 Shared Memory / bank conflict 一节），再对照改回来的版本。
+4. 记住结论：**访存合并解决的是 global memory 的合并问题，bank conflict 解决的是 shared memory 的并行问题**，两者都要对，缺一个都会在 ncu 里露出来。
+
+**产出**：向量化前后的耗时对比 + 一次 bank conflict 的实测记录（改错版 vs 改回版的耗时与 ncu 计数），加一句话：你的 kernel 现在卡在哪。
+
+### 第 5 节 · 第三步：Occupancy 调优 + 阶梯总表
+
+**目标**：调 block 大小与寄存器用量，让 SM 上同时驻留的 warp 数上去，并把四步的结果汇总成一张阶梯表。
+
+**怎么做**（30 分钟，需 GPU）：
+
+1. **先读 ncu**：Occupancy 一节看两个数——理论占用率（受寄存器数、shared memory 用量、block 大小限制）与实测占用率（`sm__warps_active.avg.pct_of_peak_sustained_active`）。如果理论占用率本身就低，问题在资源用量；如果理论高、实测低，问题在延迟隐藏不足（等访存时没有别的 warp 可切）。
+2. 调两个旋钮：block 大小（256 线程 vs 512 线程，改 `dim3 block` 的启动配置）与寄存器上限（`__launch_bounds__(256)` 告诉编译器每个 block 最多 256 线程，让它控制寄存器用量以换取更多驻留 block）。每改一次，用 `cudaOccupancyMaxActiveBlocksPerMultiprocessor` 查理论值，再用 ncu 看实测值：
+
+```cpp
+int num_blocks = 0;
+cudaOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks, gemm_tiled, 256, 0);
+```
+
+3. 注意：占用率不是越高越好。分块版的 shared memory 用量（两块 32×32×4B = 8KB）本身就会限制驻留 block 数；盲目追高占用率而缩小 BLOCK，反而会把算术强度打回去。**调优的目标是实测耗时下降，不是某个指标好看。**
+4. 写阶梯总表（本周的可交付物），每一行都要有实测数，没有实测的写“待补测”：
+
+| 版本 | 算术强度 | 实测耗时 | 实测算力 | 占 Roofline 上界 | ncu SM% / DRAM% | 瓶颈判断 |
+|---|---|---|---|---|---|---|
+| 朴素版 | 0.25 | | | | / | 访存受限 |
+| 分块版 | 8 | | | | / | |
+| 向量化版 | 8 | | | | / | |
+| Occupancy 调优版 | 8 | | | | / | |
+
+5. 把本周的检查清单并进第 1 节的清单，加三条：“ncu 读了吗（先定位再改）”“Roofline 点标了吗（每改一步标一次）”“实测数填表了吗（没测的写待补测）”。
+
+**产出**：这张阶梯总表 + 更新后的检查清单。本周结束时，你应该能讲清：GEMM 的每一步优化省的是什么（重复搬运 / 访存指令数 / 延迟隐藏），以及 ncu 的哪个数证明了它。
 
 ## 第 2 周 · Triton 入门：用 Python 写 kernel
 
-> 硬件：**本周无需 GPU**。Triton Puzzles 用解释器跑；跑性能对比时再上 GPU。
+> 硬件：**本周无需 GPU**。Triton Puzzles 用解释器跑；跑性能对比时再上 GPU。计时方法用 `triton.testing.do_bench`（见第 3 节），它与第 1 周的 CUDA Events 是同一回事：热身、多次重复、取中位数。
 
 ### 第 1 节 · Triton 语法与 block 编程模型
 
@@ -182,7 +226,7 @@ def add(x, y):
 
 ### 第 3 节 · Fused softmax 与数值稳定性 + Autotune
 
-**目标**：写一个 fused softmax，理解“融合省的是访存”，并学会用 autotune 扫配置。
+**目标**：写一个 fused softmax，理解“融合省的是访存”，并学会用 autotune 与 `do_bench` 计时。
 
 **怎么做**（30 分钟，无 GPU 可写，跑起来需 GPU 或解释器）：
 
@@ -215,7 +259,15 @@ def softmax(x):
 
 3. 理解数值稳定性：`row - tl.max(row)` 这一步不是优化，是正确性——不减最大值，`tl.exp` 在大输入下会溢出成 inf。`other=-float('inf')` 让 mask 掉的位置不参与 max 与求和。
 4. 正确性检查：与 `torch.softmax(x, dim=-1)` 做 `torch.allclose` 对比（注意浮点误差容限，`atol=1e-5` 左右）。
-5. 加 autotune：给 kernel 套一层 `@triton.autotune`，让 Triton 自动扫配置：
+5. 计时用 `triton.testing.do_bench`（热身 + 多次重复取中位数，与第 1 周的 CUDA Events 对应）：
+
+```python
+ms = triton.testing.do_bench(
+    lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK)
+)
+```
+
+6. 加 autotune：给 kernel 套一层 `@triton.autotune`，让 Triton 自动扫配置：
 
 ```python
 @triton.autotune(
@@ -235,7 +287,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 
 `key` 是“输入形状变化时重新调优”的依据；同一形状下 autotune 只在第一次调用时扫一遍，后面直接用最优配置。**调优是自动的，但“调什么”是你定的**：BLOCK 大小与 num_warps 就是你要理解的两个旋钮。
 
-**产出**：一个 fused softmax（与 PyTorch 版数值对齐）+ 一份 autotune 扫出来的最优配置记录。
+**产出**：一个 fused softmax（与 PyTorch 版数值对齐）+ 一份 autotune 扫出来的最优配置记录。注意：这个 softmax kernel 也是 M3 第 5 周移植案例的候选之一（与第 6 周的 SiluAndMul 二选一），先把它存好。
 
 ### 第 4 节 · 中文讲解对照
 
@@ -264,53 +316,67 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 | 要榨干最后一滴性能（比如 FlashAttention 3 级别） | CUDA / CUTLASS | 需要 warp specialization、手写流水线 |
 | 快速验证一个融合想法 | Triton | 写起来快，解释器还能无卡跑 |
 
-2. 记住判断标准：**瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA**。第 3–4 周会在这个判断上继续加码。
+2. 记住判断标准：**瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA**。第 3–5 周会在这个判断上继续加码。
 3. 把本周的检查清单并进第 1 周的清单：加两条——“mask 写对了吗（尾巴处理）”与“BLOCK 是不是 2 的幂（tl.arange 要求）”。
 
 **产出**：一页取舍笔记 + 更新后的检查清单。
 
-## 第 3 周 · Fused Attention 与量化 Matmul（大纲）
+## 第 3 周 · Fused Attention 深讲：先推导，再写 kernel（大纲）
 
 | 节 | 内容 | 资源 | 产出 |
 |---|---|---|---|
-| 1 | FlashAttention 的思路：分块 + 在线 softmax | [Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)（fused attention） | 读懂分块 attention 的数据流 |
-| 2 | 动手写 fused attention | 同上；[GPU MODE 讲座](https://github.com/gpu-mode/lectures)中 FlashAttention 相关章节 | 一个能跑的 fused attention，与 PyTorch 数值对齐 |
-| 3 | 量化 matmul：INT8/FP8 的访存收益 | [GPU MODE 讲座](https://github.com/gpu-mode/lectures) | 一份量化前后访存量的手算 |
-| 4 | 刷题验收 | [LeetGPU](https://leetgpu.com)（题库：[leetgpu-challenges](https://github.com/AlphaGPU/leetgpu-challenges)，提供免费 GPU 运行提交） | 至少 3 道 attention / matmul 相关题通过 |
-| 5 | 小结：把本周 kernel 的 Roofline 点标到 M0 的图上 | M0 的 Roofline 图 | 更新后的 Roofline 图 |
+| 1 | Online softmax 的数学推导：running max / running sum 如何让 softmax 分块算 | FlashAttention 论文（Dao 等，arXiv:2205.14135）；[Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)（fused attention） | 一份推导笔记：rescale 公式与正确性证明思路 |
+| 2 | SRAM 容量约束如何决定 block 大小：按你的 GPU 算出 BLOCK_M / BLOCK_N | 同上；`nvidia-smi` 与设备参数（每 SM 的 shared memory 大小） | 一张“block 大小 vs SRAM 占用”计算表 |
+| 3 | 动手写 fused attention（单 head、单序列版） | 同上；[GPU MODE 讲座](https://github.com/gpu-mode/lectures)中 FlashAttention 相关章节 | 一个能跑的 fused attention，与 PyTorch 数值对齐 |
+| 4 | 验收：正确性 + `do_bench` 计时 + Roofline 定位 | M0 的 Roofline 方法；[LeetGPU](https://leetgpu.com)（题库：[leetgpu-challenges](https://github.com/AlphaGPU/leetgpu-challenges)） | 至少 3 道 attention / matmul 相关题通过 + 一份实测记录 |
+| 5 | 小结：把本周 kernel 的 Roofline 点标到 M0 的图上；causal mask 作为练习 | M0 的 Roofline 图 | 更新后的 Roofline 图 |
 
-**硬件**：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证。
+**硬件**：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证；推导部分无卡可做。
 
-## 第 4 周 · FlashAttention 与 CUTLASS：读工业级实现（大纲）
-
-| 节 | 内容 | 资源 | 产出 |
-|---|---|---|---|
-| 1 | FlashAttention 2/3 的工程取舍 | [GPU MODE 讲座](https://github.com/gpu-mode/lectures) | 一份“论文做法 vs 工程做法”对照笔记 |
-| 2 | CUTLASS / CuTe 的角色：模板化高性能 GEMM | [GPU MODE 讲座](https://github.com/gpu-mode/lectures) | 能讲清 CUTLASS 解决什么问题 |
-| 3 | 读 vLLM / FlashInfer 里一个 attention kernel 的调用链 | vLLM 仓库源码；[vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/) | 一张调用链图：请求 → 调度 → kernel |
-| 4 | 对比：Triton 版 vs CUTLASS 版 attention 的性能与可维护性 | 第 3 周的实测数据 | 一页对比表 |
-| 5 | 小结：什么时候自己写 kernel，什么时候直接用库 | — | 取舍笔记 |
-
-**硬件**：以读代码为主，无卡可做；有卡可复现第 3 周的对比。
-
-## 第 5 周 · 收口：把自写 kernel 接入推理引擎（大纲）
-
-> 注意：大纲原计划是“把第 3 周的 fused attention 包成 CustomOp”。核实 vLLM 的 `CustomOp` 源码（`vllm/model_executor/custom_op.py`）后，这个写法需要修正：vLLM 的 attention 走 Attention 后端，不走 CustomOp；CustomOp 的可替换面是激活、归一化这类算子。完整内容会在第 2 阶段按修正后的方案写——接入引擎的载体改为 Triton 版 SiluAndMul，fused attention 仍在第 3 周做 standalone 验证。
+## 第 4 周 · 量化 Matmul 深讲：量化方案本身（大纲）
 
 | 节 | 内容 | 资源 | 产出 |
 |---|---|---|---|
-| 1 | vLLM 的 CustomOp 机制：算子如何被替换 | [vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/) | 能讲清插件算子的注册与调用路径 |
-| 2 | 动手：把第 3 周的 fused attention 包成 CustomOp | 同上 | 可加载的 CustomOp |
-| 3 | 端到端验证：同一模型、同一评测集，接入前后的 TTFT / ITL / 吞吐 | M0 的 `scripts/bench_openai.py` 与基线报告 | 一份接入前后对比表 |
-| 4 | 负面结果也要写下来：没变快的原因分析（launch 开销？访存没省下来？batch 太小？） | M0 第 3 节的 profiling 方法 | 一份原因分析 |
-| 5 | 小结：M2 毕业——一份“自写 kernel 端到端加速报告” | — | **M2 的可交付物** |
+| 1 | Scale 怎么来：per-tensor / per-channel / per-token 三种粒度，误差从哪来 | [GPU MODE 讲座](https://github.com/gpu-mode/lectures)中量化相关章节 | 一份三种粒度的误差直觉 + 手算 |
+| 2 | INT8 `tl.dot` 路径：int8 输入、int32 累加、epilogue 再乘 scale | [Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)（matmul） | 一个 INT8 matmul，与 FP16 参考数值对齐（容限内） |
+| 3 | Fused dequant+matmul：dequant 融进 matmul，不单独物化 FP16 权重 | 同上 | 一个 fused dequant kernel + 与两步基线（先 dequant 再 matmul）的访存对比 |
+| 4 | Autotune + 实测：BLOCK 配置扫一遍，`do_bench` 计时 | 第 2 周的 autotune 方法 | 一份配置-耗时对照表 |
+| 5 | 小结：量化省的是什么（搬运量），代价是什么（精度），Roofline 点标图 | M0 的 Roofline 图 | 更新后的 Roofline 图 |
 
-**硬件**：本周需要 GPU（租卡）。无卡时先完成第 1–2 节的机制学习，端到端验证标注“待有卡后补测”。
+**硬件**：本周需要 GPU；无卡时先做第 1 节的手算与第 2–3 节的代码编写，实测标注“待补测”。
+
+## 第 5 周 · FlashAttention 2/3 与 CUTLASS：读工业级实现（大纲）
+
+| 节 | 内容 | 资源 | 产出 |
+|---|---|---|---|
+| 1 | FlashAttention 1→2→3 的工程演进：FA2 的并行与 work partitioning，FA3 的 warp specialization、异步拷贝与 FP8 | FlashAttention 论文：[FA1 arXiv:2205.14135](https://arxiv.org/abs/2205.14135)、[FA2 arXiv:2307.08691](https://arxiv.org/abs/2307.08691)、[FA3 arXiv:2407.08608](https://arxiv.org/abs/2407.08608)；[GPU MODE 讲座](https://github.com/gpu-mode/lectures) | 一份“论文做法 vs 工程做法”对照笔记 |
+| 2 | 读 flash-attn 源码：`flash_fwd_kernel.h` 里的主循环长什么样 | [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)（`csrc/flash_attn/src/flash_fwd_kernel.h`、`flash_fwd_launch_template.h`） | 一张前向 kernel 的结构图 |
+| 3 | CUTLASS 三级结构：threadblock / warp / thread + MMA pipeline | [NVIDIA/cutlass](https://github.com/NVIDIA/cutlass)（`examples/00_basic_gemm/basic_gemm.cu`、`cutlass/gemm/device/gemm.h`） | 能画出三级分工与数据流向 |
+| 4 | 动手改一个 CUTLASS GEMM：改 tile 配置（ThreadblockShape / WarpShape / InstructionShape），重编，测出变化 | 同上；第 1 周的计时与 ncu 方法 | 一份“改前改后”实测记录 |
+| 5 | 小结：Triton 版 vs CUTLASS 版 attention 的性能与可维护性；什么时候自己写 kernel，什么时候直接用库 | 第 3–4 周的实测数据 | 一页对比表 + 取舍笔记 |
+
+**硬件**：以读代码为主，无卡可做；第 4 节改配置实测需要 GPU（有 nvcc 的机器）。
+
+## 第 6 周 · 收口：把自写 kernel 接入推理引擎（大纲）
+
+> 注意：大纲原计划是“把第 3 周的 fused attention 包成 CustomOp”。核实 vLLM 的 `CustomOp` 源码（`vllm/model_executor/custom_op.py`）后，这个写法需要修正：vLLM 的 attention 走 Attention 后端，不走 CustomOp；CustomOp 的可替换面是激活、归一化这类算子。完整内容会按修正后的方案写——接入引擎的载体改为 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程），fused attention 仍在第 3 周做 standalone 验证。
+
+| 节 | 内容 | 资源 | 产出 |
+|---|---|---|---|
+| 1 | vLLM 的 CustomOp 机制：注册、分发、启用三件事，及它的边界（attention 不走这条路） | [vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)；vLLM 源码 `vllm/model_executor/custom_op.py` | 能讲清插件算子的注册与调用路径 + 边界 |
+| 2 | 动手：写 Triton 版 SiluAndMul（参考 vLLM 自带的 Triton kernel 写法），standalone 正确性 + 微基准 | vLLM 源码 `vllm/model_executor/layers/activation.py`（内含 Triton 版实现可对照） | 可独立验证的 Triton kernel |
+| 3 | 包成 CustomOp 子类并注册：`register_oot` 按类名替换，进程内验证替换真的发生了 | 同上；[vLLM 插件机制](https://github.com/vllm-project/vllm/blob/main/vllm/plugins/__init__.py)（`vllm.general_plugins` entry point） | 可加载的插件包 |
+| 4 | 端到端验证：同一模型、同一评测集，接入前后的 TTFT / ITL / 吞吐（M0 的 `scripts/bench_openai.py`）+ profiler 确认 Triton kernel 真的跑了 | M0 的压测脚本与基线报告 | 一份接入前后对比表 |
+| 5 | 小结：M2 毕业——一份“自写 kernel 端到端加速报告”（含负面结果分析：没变快的原因） | M0 第 3 节的 profiling 方法 | **M2 的可交付物** |
+
+**硬件**：本周需要 GPU（租卡）。无卡时先完成第 1–3 节的机制学习与代码编写，端到端验证标注“待有卡后补测”。
 
 ## 本模块检查清单
 
-- [ ] GPU Puzzles 核心谜题通过，能讲清访存合并与分块
-- [ ] Triton Puzzles（解释器版）通过，写出过 fused attention
-- [ ] LeetGPU 上至少 3 道相关题通过
-- [ ] 能画出 vLLM 里一个 attention kernel 的调用链
+- [ ] 有一张 GEMM 优化阶梯总表：四个版本各自的算术强度、实测耗时、实测算力、ncu 读数与瓶颈判断
+- [ ] 能用 ncu 的两个数（SM% / DRAM%）判断一个 kernel 是计算受限、访存受限还是延迟受限
+- [ ] 能手推 online softmax 的 rescale 公式，并按 SRAM 容量算出自己 GPU 的分块参数
+- [ ] 写出过 fused attention 与 fused dequant matmul，数值都对齐过
+- [ ] 改过一个 CUTLASS GEMM 的 tile 配置并测出了变化
+- [ ] 能画出 vLLM 里一个 CustomOp 从注册到分发的完整链路
 - [ ] 有一份“自写 kernel 接入引擎前后”的端到端对比报告（含负面结果）
