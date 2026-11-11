@@ -1,6 +1,6 @@
 # M2 · 算子优化
 
-> 状态：**内容进行中**——第 1–2 周为完整内容（加深版），第 3–6 周仍为大纲，见下文各周表格。
+> 状态：**内容进行中**——第 1–4 周为完整内容（加深版），第 5–6 周仍为大纲，见下文各周表格。
 >
 > 前置：M0（Roofline、profiling、压测脚本）与 M1 第 1–2 周（vLLM 服务已跑起来）。M2 的终点不是“会写 kernel”，而是“自己写的 kernel 跑进了推理引擎，端到端变快了”。
 >
@@ -321,29 +321,361 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 
 **产出**：一页取舍笔记 + 更新后的检查清单。
 
-## 第 3 周 · Fused Attention 深讲：先推导，再写 kernel（大纲）
+## 第 3 周 · Fused Attention 深讲：先推导，再写 kernel
 
-| 节 | 内容 | 资源 | 产出 |
-|---|---|---|---|
-| 1 | Online softmax 的数学推导：running max / running sum 如何让 softmax 分块算 | FlashAttention 论文（Dao 等，arXiv:2205.14135）；[Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)（fused attention） | 一份推导笔记：rescale 公式与正确性证明思路 |
-| 2 | SRAM 容量约束如何决定 block 大小：按你的 GPU 算出 BLOCK_M / BLOCK_N | 同上；`nvidia-smi` 与设备参数（每 SM 的 shared memory 大小） | 一张“block 大小 vs SRAM 占用”计算表 |
-| 3 | 动手写 fused attention（单 head、单序列版） | 同上；[GPU MODE 讲座](https://github.com/gpu-mode/lectures)中 FlashAttention 相关章节 | 一个能跑的 fused attention，与 PyTorch 数值对齐 |
-| 4 | 验收：正确性 + `do_bench` 计时 + Roofline 定位 | M0 的 Roofline 方法；[LeetGPU](https://leetgpu.com)（题库：[leetgpu-challenges](https://github.com/AlphaGPU/leetgpu-challenges)） | 至少 3 道 attention / matmul 相关题通过 + 一份实测记录 |
-| 5 | 小结：把本周 kernel 的 Roofline 点标到 M0 的图上；causal mask 作为练习 | M0 的 Roofline 图 | 更新后的 Roofline 图 |
+> 硬件：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证；第 1–2 节的推导与计算无卡可做。
 
-**硬件**：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证；推导部分无卡可做。
+### 第 1 节 · Online softmax 的数学推导
 
-## 第 4 周 · 量化 Matmul 深讲：量化方案本身（大纲）
+**目标**：手推 online softmax 的 rescale 公式，并证明分块算出的 attention 与标准 attention 完全相等（不是近似）。
 
-| 节 | 内容 | 资源 | 产出 |
-|---|---|---|---|
-| 1 | Scale 怎么来：per-tensor / per-channel / per-token 三种粒度，误差从哪来 | [GPU MODE 讲座](https://github.com/gpu-mode/lectures)中量化相关章节 | 一份三种粒度的误差直觉 + 手算 |
-| 2 | INT8 `tl.dot` 路径：int8 输入、int32 累加、epilogue 再乘 scale | [Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)（matmul） | 一个 INT8 matmul，与 FP16 参考数值对齐（容限内） |
-| 3 | Fused dequant+matmul：dequant 融进 matmul，不单独物化 FP16 权重 | 同上 | 一个 fused dequant kernel + 与两步基线（先 dequant 再 matmul）的访存对比 |
-| 4 | Autotune + 实测：BLOCK 配置扫一遍，`do_bench` 计时 | 第 2 周的 autotune 方法 | 一份配置-耗时对照表 |
-| 5 | 小结：量化省的是什么（搬运量），代价是什么（精度），Roofline 点标图 | M0 的 Roofline 图 | 更新后的 Roofline 图 |
+**怎么做**（30 分钟，无 GPU 可做）：
 
-**硬件**：本周需要 GPU；无卡时先做第 1 节的手算与第 2–3 节的代码编写，实测标注“待补测”。
+1. 先写标准 softmax：一行向量 `x`，`softmax(x)_i = exp(x_i − m) / Σ_j exp(x_j − m)`，其中 `m = max(x)`。减最大值是为了数值稳定，不减的话 `exp` 会溢出。
+2. 关键问题：softmax 需要整行的最大值与求和，分块之后这两个量都还没算全，怎么办？答案是**维护两个运行量**（running statistics），每来一块更新一次。设已处理部分的运行最大值是 `m`、运行和是 `l = Σ exp(x_j − m)`。新来一块，算出块内最大值 `m_b` 与块内和 `l_b = Σ exp(x_j − m_b)`，更新规则是：
+
+```text
+m' = max(m, m_b)
+l' = l · exp(m − m') + l_b · exp(m_b − m')
+```
+
+3. 把同样的思想搬到 attention 上。设已处理部分的未归一化累加器是 `Õ = Σ_j exp(S_j − m) · V_j`（`S` 是 QK^T 的一行），新来一块 K、V：
+
+```text
+α = exp(m_old − m_new)              # 旧状态的 rescale 系数
+P_block = exp(S_block − m_new)      # 块内概率（未归一化）
+l_new = l_old · α + rowsum(P_block)
+Õ_new = Õ_old · α + P_block · V_block
+```
+
+最后 `O = Õ / l_new`。每一步的 invariant 是：`Õ = Σ_{已处理 j} exp(S_j − m_current) · V_j`，`l = Σ exp(S_j − m_current)`。`m` 变大时乘 `α` 恰好把旧状态 rescale 到新的基准下，invariant 保持成立。
+4. 结论：**FlashAttention 是精确算法**。分块 + online softmax 改变的只是计算顺序与中间结果的存放位置（S、P 不再写回 HBM），最终输出与标准 attention 在数学上相等，差别只有浮点舍入。这一点后面第 5 周读 FA2/FA3 时还会用到：它们改的都是并行与流水线，不是数学。
+5. 对照第 2 周的 fused softmax：那一节的 `row - tl.max(row)` 就是单块版的 online softmax——整行一次性读进来时，`m` 一步到位；分块时 `m` 是逐步长大的，`α` 就是为“长大”付的代价。
+
+**产出**：一份推导笔记，写出 rescale 公式与 invariant，并用一句话回答“为什么分块不改变结果”。
+
+> **论文选读（不读也能学完本周）**：FlashAttention 原论文（Dao 等，[arXiv:2205.14135](https://arxiv.org/abs/2205.14135)，2022 年 5 月；链接保留，原文是可选的更深阅读，本周正文已包含它的核心内容）。
+>
+> - **核心思想**：attention 慢、吃显存，根源不是计算量，而是**访存**。标准 attention 把 N×N 的 S、P 矩阵写回 HBM 再读回，HBM 与片上 SRAM 之间的搬运才是瓶颈。论文提出的原则叫 **IO-aware**：算法设计要把“各级 GPU 显存之间的读写次数”算进去，而不是只算 FLOPs。
+> - **核心逻辑链条**：① 用 tiling 把 Q、K、V 分块，一次只把一块读进 SRAM，在 SRAM 里算完再写回；② 用 online softmax 让 softmax 也能分块（就是本节推导的 rescale）；③ 由此 S、P 两个 N×N 中间矩阵**永远不落 HBM**，HBM 访问量从 O(N²) 降到 O(N)；④ 论文给出 IO 复杂度分析，证明在一定 SRAM 容量范围内这个做法是最优的。
+> - **关键结论与数字**（论文摘要给出）：BERT-large 训练端到端提速 15%（序列长度 512，对比 MLPerf 1.1 训练速度纪录）；GPT-2 训练提速 3 倍（序列长度 1K）；Long-Range Arena 提速 2.4 倍（序列长度 1K–4K）。更长上下文还带来质量提升：GPT-2 困惑度好 0.7，长文档分类提升 6.4 个点；首次让 Transformer 在 Path-X（序列长度 16K，61.4% 准确率）与 Path-256（序列长度 64K，63.1% 准确率）上超过随机水平。
+> - **为什么重要**：它把“算得快”的优化对象从 FLOPs 转向了访存，并且证明了精确 attention 也可以分块算——这正是 M2 整个模块的底层逻辑：先定位瓶颈（第 1 周的 ncu + Roofline），再按瓶颈改算法，而不是盲目堆算力。
+> - **与本节的关系**：本节的推导就是论文第 2–3 节的核心机制；第 5 周会接着讲 FA2/FA3 在这条链上又改了什么（并行、流水线、FP8）。
+
+**延伸**：[Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)的 fused attention（`06-fused-attention`）。
+
+### 第 2 节 · SRAM 容量约束如何决定 block 大小
+
+**目标**：给定你的 GPU，能自己算出 BLOCK_M / BLOCK_N 的上限，而不是抄教程的默认值。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 列出一个 block 在 SRAM 里要放的东西（FP16，每元素 2 字节，head 维 `d`，Q 块 `Br×d`，K/V 块 `Bc×d`，S 块 `Br×Bc`）：
+
+```text
+SRAM ≈ Q + K + V + S
+     = 2·d·Br + 2·d·Bc + 2·d·Bc + 2·Br·Bc
+     = 2d(Br + 2Bc) + 2·Br·Bc   ≤ 每 block 可用的 shared memory
+```
+
+2. 手算两个例子（`d=64`，A100 每 SM shared memory 164KB，H100 228KB；每 block 的可用上限用 `cudaDeviceGetAttribute(cudaDevAttrMaxSharedMemoryPerBlockOptin)` 查，以你所用 CUDA 版本的设备属性为准）：
+   - `Br=128, Bc=64`：Q 16KB + K 8KB + V 8KB + S 16KB = **48KB**。
+   - `Br=128, Bc=128`：Q 16KB + K 16KB + V 16KB + S 32KB = **80KB**。
+   - 再算 `Br=256, Bc=64`：Q 32KB + K 8KB + V 8KB + S 32KB = 80KB——同样是 80KB，但 Q 块翻倍意味着一个程序算更多行，并行度结构变了。
+3. 理解取舍：block 越大，Q/K/V 的重复读越少（K、V 被更多 Q 行复用），但 SRAM 占用越大、一个 SM 上能同时驻留的 block 越少。**分块参数是 SRAM 容量与并行度的折中，不是越大越好**。这就是第 1 周 occupancy 那一节在 attention 上的回响。
+4. Triton 里的对应关系：你不直接管 SRAM，`BLOCK_M` / `BLOCK_N` 就是旋钮；配额超了编译或运行时会直接报错（shared memory 不足），这是最直接的反馈。把你算出的两组参数记下来，下一节各跑一遍。
+
+**产出**：一张“block 大小 vs SRAM 占用”计算表（至少三组参数，含你 GPU 的上限），并标出你下一节要先试哪一组。
+
+### 第 3 节 · 动手写 fused attention（单 head、单序列版）
+
+**目标**：写出一个能跑的 fused attention，与 PyTorch 参考数值对齐。
+
+**怎么做**（30 分钟，需 GPU）：
+
+1. 读 Triton 官方教程 `06-fused-attention` 的结构：外层循环按 `BLOCK_M` 分 Q 行，内层循环按 `BLOCK_N` 扫 K/V，每步做一次 online softmax 更新。下面是单 head、单序列、无 causal mask 的版本（多 head、变长、causal 是它的扩展，第 5 节留作练习）：
+
+```python
+import torch
+import triton
+import triton.language as tl
+
+@triton.jit
+def _attn_fwd(Q, K, V, Out,
+              stride_qm, stride_kn, stride_vn, stride_om,
+              N, sm_scale,
+              D: tl.constexpr,
+              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+    pid_m = tl.program_id(0)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_d = tl.arange(0, D)
+    mask_m = offs_m < N
+    q = tl.load(Q + offs_m[:, None] * stride_qm + offs_d[None, :],
+                mask=mask_m[:, None], other=0.0)
+    m_i = tl.full([BLOCK_M], -float('inf'), tl.float32)
+    l_i = tl.zeros([BLOCK_M], tl.float32)
+    acc = tl.zeros([BLOCK_M, D], tl.float32)
+    for start_n in range(0, N, BLOCK_N):
+        offs_n = start_n + tl.arange(0, BLOCK_N)
+        mask_n = offs_n < N
+        k = tl.load(K + offs_n[:, None] * stride_kn + offs_d[None, :],
+                    mask=mask_n[:, None], other=0.0)
+        qk = tl.dot(q, tl.trans(k))
+        qk = qk * sm_scale
+        qk = tl.where(mask_n[None, :], qk, -float('inf'))
+        m_block = tl.max(qk, axis=1)
+        m_new = tl.maximum(m_i, m_block)
+        alpha = tl.exp(m_i - m_new)
+        p = tl.exp(qk - m_new[:, None])
+        l_i = l_i * alpha + tl.sum(p, axis=1)
+        v = tl.load(V + offs_n[:, None] * stride_vn + offs_d[None, :],
+                    mask=mask_n[:, None], other=0.0)
+        acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
+        m_i = m_new
+    acc = acc / l_i[:, None]
+    tl.store(Out + offs_m[:, None] * stride_om + offs_d[None, :],
+             acc, mask=mask_m[:, None])
+
+def fused_attention(q, k, v):
+    # q, k, v: [N, D]，fp16，D=64；单 head、单序列、无 causal mask 版
+    N, D = q.shape
+    out = torch.empty_like(q)
+    BLOCK_M, BLOCK_N = 64, 64
+    grid = (triton.cdiv(N, BLOCK_M),)
+    _attn_fwd[grid](q, k, v, out,
+                    q.stride(0), k.stride(0), v.stride(0), out.stride(0),
+                    N, 1.0 / (D ** 0.5),
+                    D=D, BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N)
+    return out
+```
+
+2. 逐行对照第 1 节的推导：`m_i` / `l_i` / `acc` 就是运行量；`alpha` 就是 rescale 系数；第一轮 `m_i` 是 `-inf`，`alpha = exp(-inf) = 0`，旧状态（全零）被正确清掉。
+3. 正确性检查：与 PyTorch 参考对比（fp16 精度，最大绝对误差应在 1e-2 量级；大了先查 mask 与 rescale，不要先调容限）：
+
+```python
+def ref_attention(q, k, v):
+    scale = 1.0 / (q.shape[-1] ** 0.5)
+    p = torch.softmax(q.float() @ k.float().T * scale, dim=-1)
+    return (p @ v.float()).to(q.dtype)
+
+torch.manual_seed(0)
+q = torch.randn(128, 64, dtype=torch.float16, device='cuda')
+k = torch.randn(128, 64, dtype=torch.float16, device='cuda')
+v = torch.randn(128, 64, dtype=torch.float16, device='cuda')
+out = fused_attention(q, k, v)
+ref = ref_attention(q, k, v)
+print('max abs err:', (out.float() - ref.float()).abs().max().item())
+```
+
+**产出**：一个能跑的 fused attention（数值对齐）+ 一份“代码行 vs 推导公式”的对照笔记。
+
+### 第 4 节 · 验收：正确性 + 计时 + Roofline 定位
+
+**目标**：给 fused attention 一个完整的验收：对不对、快不快、卡在哪。
+
+**怎么做**（30 分钟，需 GPU）：
+
+1. 计时：用 `triton.testing.do_bench` 测 fused attention 与 PyTorch 参考（`torch.nn.functional.scaled_dot_product_attention`，SDPA）在 N=1024、d=64 下的耗时。SDPA 本身就是融合实现，比它慢是正常的——先记下差距，下一节再分析。
+2. **先算 Roofline**：标准 attention 计算量 = 4·N²·d（QK^T 占 2N²d，PV 占 2N²d）。Fused 版搬运量 = Q、K、V、O 各 N·d 个 fp16 元素 = 8·N·d 字节，算术强度 = 4N²d / 8Nd = N/2。N=1024 时 AI=512——理论上是计算受限。朴素版（物化 N×N 的 S 与 P）要多搬约 8N² 字节，N=1024 时是 fused 版的 16 倍。**这个 16 倍就是融合省掉的东西**，先算出来，再看实测。
+3. LeetGPU 验收：上 [LeetGPU](https://leetgpu.com)（50+ 题，浏览器里跑，CUDA 12.8；题库见 [leetgpu-challenges](https://github.com/AlphaGPU/leetgpu-challenges)），做至少 3 道 attention / matmul 相关题。LeetGPU 的评测会给你正确性与耗时排名——把它当成“别人写的同一道题”的对照。
+4. 把本周 kernel 的点标到 M0 的 Roofline 图上：横轴是你算的 AI，纵轴是实测算力。如果点远在 Roofline 下方，下一节（第 5 周读 FA2/FA3）会告诉你工业级实现是怎么把它顶上去的。
+
+**产出**：一份实测记录（fused vs SDPA 耗时、Roofline 点、LeetGPU 3 道题通过）。
+
+### 第 5 节 · 小结：Roofline 标图 + causal mask 练习
+
+**目标**：收拢本周的结论，并把 causal mask 留作练习。
+
+**怎么做**（30 分钟，推导与总结无卡可做）：
+
+1. 更新 Roofline 图：把 fused attention 的点标上去，并写一句话——它离 Roofline 有多远、差在哪（大概率是 `tl.dot` 的利用率与 softmax 部分的非 matmul 开销，第 5 周会展开工业级实现用什么手段把它顶上去）。
+2. 练习：给 kernel 加 causal mask。做法是在算 `qk` 之后加一行：`qk = tl.where(offs_m[:, None] >= offs_n[None, :], qk, -float('inf'))`。注意 mask 的形状是 `[BLOCK_M, BLOCK_N]`，与 `mask_n` 的那行 `tl.where` 可以合并。改完用同样的参考实现验证（参考里用 `torch.tril` 造 mask 或直接调带 `is_causal=True` 的 SDPA）。
+3. 把本周的检查清单并进总清单，加两条：“rescale 的 invariant 写出来了吗”“分块参数是算出来的还是抄的”。
+
+**产出**：更新后的 Roofline 图 + causal mask 版 kernel（数值对齐）。
+
+## 第 4 周 · 量化 Matmul 深讲：量化方案本身
+
+> 硬件：本周需要 GPU；无卡时先做第 1 节的手算与第 2–3 节的代码编写，实测标注“待补测”。
+
+### 第 1 节 · Scale 怎么来：三种粒度与误差从哪来
+
+**目标**：理解 per-tensor / per-channel / per-token 三种量化粒度的 scale 是怎么算出来的，以及误差从哪来。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 先定量化规则。对称 INT8 量化：给定一个 scale `s`，`w_q = round(w / s)`，钳制到 `[-127, 127]`，反量化 `w' = w_q · s`。scale 的取法是 `s = max|w| / 127`，量化误差的上界是 `|w − w'| ≤ s / 2`。**scale 越大，误差越大**——整个量化的精度问题就归结为“怎么让 scale 尽可能小”。
+2. 三种粒度，scale 的“管辖范围”不同：
+   - **per-tensor**：整个张量一个 scale，`s = max|整个张量| / 127`。最简单，但一个离群值会把整个张量的 scale 顶上去。
+   - **per-channel**（权重常用）：每个输出通道一个 scale，`s_j = max|第 j 列| / 127`。离群值只影响它所在的通道。
+   - **per-token**（激活常用）：每个 token（每行）一个 scale，`s_i = max|第 i 行| / 127`。激活的分布随输入变，所以 scale 要**运行时现算**（dynamic）；也可以事先用校准集定好（static），省了运行时开销，但分布一变就可能失配。
+3. 手算一个例子，体会离群值的破坏力。一行权重 `[0.1, -0.08, 0.12, 10.0, 0.09]`：per-tensor 的 scale 是 `10 / 127 ≈ 0.079`，`0.1` 量化成 `round(0.1 / 0.079) = 1`，反量化得 `0.079`——21% 的误差。如果 10.0 在别的通道，per-channel 下这一行的 scale 是 `0.12 / 127 ≈ 0.0009`，误差上界 `0.0005`。**这就是为什么权重用量化几乎都用 per-channel：它把离群值关进一个通道里。**
+4. 再算动态与静态的代价：per-token dynamic 每次前向都要对激活做一次规约（求每行最大值），多一次访存与同步；static 省了这一步，但要回答“校准集能不能代表真实输入”。推理引擎里常见的做法是**权重 per-channel static、激活 per-token dynamic**——权重分布固定，激活分布随输入变，各取所需。
+
+**产出**：一份三种粒度的误差直觉 + 上面的手算（离群值例子 + 误差上界）。
+
+### 第 2 节 · INT8 `tl.dot` 路径：int8 输入、int32 累加、epilogue 再乘 scale
+
+**目标**：写出一个 INT8 matmul：int8 输入、`tl.dot` 得 int32 累加、epilogue 里再乘回 scale。
+
+**怎么做**（30 分钟，需 GPU 做正确性验证；无卡先写代码）：
+
+1. 先想清楚数据流：A（激活，per-token scale）与 B（权重，per-channel scale）都以 int8 存，`tl.dot` 做 int8×int8 → int32 累加；acc 是整数域的，**scale 不能在累加前乘**——必须等累加完，在 epilogue 里一次乘回：`C = acc_fp32 · s_a[:, None] · s_b[None, :]`。这一步在寄存器里完成，不额外访存。
+2. 量化用 PyTorch 做（这部分是数据准备，不是 kernel 本身）：
+
+```python
+def quant_per_token(x):
+    # x: [M, K] fp16 -> int8 + scales [M]
+    amax = x.abs().amax(dim=1)
+    scale = (amax / 127.0).clamp_min(1e-8)
+    q = torch.round(x / scale[:, None]).clamp(-127, 127).to(torch.int8)
+    return q, scale
+
+def quant_per_channel(w):
+    # w: [K, N] fp16 -> int8 + scales [N]
+    amax = w.abs().amax(dim=0)
+    scale = (amax / 127.0).clamp_min(1e-8)
+    q = torch.round(w / scale[None, :]).clamp(-127, 127).to(torch.int8)
+    return q, scale
+```
+
+3. INT8 matmul kernel：
+
+```python
+import torch
+import triton
+import triton.language as tl
+
+@triton.jit
+def matmul_int8_kernel(a_ptr, b_ptr, c_ptr,
+                       M, N, K,
+                       stride_am, stride_ak, stride_bk, stride_bn,
+                       stride_cm, stride_cn,
+                       scale_a_ptr, scale_b_ptr,
+                       BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
+    b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.int32)
+    for k in range(0, tl.cdiv(K, BLOCK_K)):
+        k_rem = K - k * BLOCK_K
+        a = tl.load(a_ptrs, mask=offs_k[None, :] < k_rem, other=0)
+        b = tl.load(b_ptrs, mask=offs_k[:, None] < k_rem, other=0)
+        acc = tl.dot(a, b, acc)
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bn
+    sa = tl.load(scale_a_ptr + offs_m, mask=offs_m < M, other=0.0)
+    sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=0.0)
+    c = acc.to(tl.float32) * sa[:, None] * sb[None, :]
+    c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
+    mask_c = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+    tl.store(c_ptrs, c.to(tl.float16), mask=mask_c)
+
+def matmul_int8(a_q, b_q, scale_a, scale_b):
+    M, K = a_q.shape
+    K2, N = b_q.shape
+    assert K == K2
+    c = torch.empty((M, N), dtype=torch.float16, device=a_q.device)
+    BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
+    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
+    matmul_int8_kernel[grid](a_q, b_q, c, M, N, K,
+        a_q.stride(0), a_q.stride(1), b_q.stride(0), b_q.stride(1),
+        c.stride(0), c.stride(1),
+        scale_a.float(), scale_b.float(),
+        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K)
+    return c
+```
+
+4. 正确性检查：与 FP16 参考对比。量化有误差，`torch.allclose` 的绝对容限不再适用——改用**相对误差**，并把它记下来（这是本周的精度账本）：
+
+```python
+torch.manual_seed(0)
+a = torch.randn(128, 256, dtype=torch.float16, device='cuda')
+b = torch.randn(256, 128, dtype=torch.float16, device='cuda')
+a_q, sa = quant_per_token(a)
+b_q, sb = quant_per_channel(b)
+c = matmul_int8(a_q, b_q, sa, sb)
+ref = a @ b
+rel_err = ((c.float() - ref.float()).abs() / ref.float().abs().clamp_min(1)).mean()
+print('mean relative error:', rel_err.item())
+```
+
+预期相对误差在 1% 量级；如果大一个数量级，先查 scale 的粒度（是不是把 per-token 与 per-channel 弄反了）与 `tl.dot` 的累加类型（必须是 int32，int16 会溢出）。
+
+**产出**：一个 INT8 matmul + 一份相对误差记录（数值与容限判断）。
+
+### 第 3 节 · Fused dequant+matmul：dequant 融进 matmul，不单独物化 FP16 权重
+
+**目标**：写出 fused dequant+matmul，并与“先 dequant 再 matmul”的两步基线做访存对比。
+
+**怎么做**（30 分钟，需 GPU；无卡先写代码）：
+
+1. 先想清楚两步基线的问题：权重以 int8 存，要先跑一个 dequant kernel 把它展开成 FP16（写回 HBM），再跑 FP16 matmul 把它读回来。权重每用一次就多一次“展开→写回→读回”的往返。**dequant 融合就是把展开放在寄存器里做**：读 int8 tile，乘 scale 转成 fp16，立刻喂给 `tl.dot`，FP16 权重永远不落 HBM。
+2. Fused kernel（A 是 fp16 激活，B 是 int8 权重 + per-channel scale）：
+
+```python
+@triton.jit
+def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
+                                M, N, K,
+                                stride_am, stride_ak, stride_bk, stride_bn,
+                                stride_cm, stride_cn,
+                                scale_b_ptr,
+                                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
+    b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=0.0)
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    for k in range(0, tl.cdiv(K, BLOCK_K)):
+        k_rem = K - k * BLOCK_K
+        a = tl.load(a_ptrs, mask=offs_k[None, :] < k_rem, other=0.0)
+        b_int8 = tl.load(b_ptrs, mask=offs_k[:, None] < k_rem, other=0)
+        b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)
+        acc = tl.dot(a, b, acc)
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bn
+    c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
+    mask_c = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+    tl.store(c_ptrs, acc.to(tl.float16), mask=mask_c)
+```
+
+3. 关键点：`b_int8.to(tl.float32) * sb[None, :]` 是在寄存器里对每个元素做的——dequant 的代价是每个元素几次 ALU 操作，省的是 HBM 往返。**融合的收益取决于 matmul 本来卡在哪**：小 batch（decode 形状，M 很小）时 matmul 是访存受限，省搬运就是省时间；大 batch 时 matmul 是计算受限，dequant 的 ALU 开销占比上升，收益收窄。这个判断先写下来，下一节实测验证。
+4. 两步基线（对照用，PyTorch 一行）：`b_fp16 = (b_q.float() * sb).to(torch.float16)`，再 `torch.matmul(a, b_fp16)`。用 `triton.testing.do_bench` 测两边在 M=32（decode 形状）与 M=1024（prefill 形状）下的耗时，填表。
+
+**产出**：一个 fused dequant kernel + 一份两步基线 vs 融合版的访存对比表（M=32 与 M=1024 两档）。
+
+### 第 4 节 · Autotune + 实测：BLOCK 配置扫一遍，`do_bench` 计时
+
+**目标**：给第 2–3 节的两个 kernel 做 autotune，出一份配置-耗时对照表。
+
+**怎么做**（30 分钟，需 GPU；无卡先写配置表框架，实测标注“待补测”）：
+
+1. 给两个 kernel 套 `@triton.autotune`，`key` 取 `['M', 'N', 'K']`（形状一变就重调），配置覆盖 `BLOCK_M × BLOCK_N × BLOCK_K` 与 `num_warps` 的组合，至少扫 4 组，例如：`(64, 64, 32, warps=4)`、`(128, 64, 32, warps=4)`、`(64, 128, 32, warps=8)`、`(128, 128, 32, warps=8)`。
+2. 测两档形状：M=32（decode）与 M=1024（prefill），N=K=4096。每组记三列：耗时、换算成的算力（TFLOPS）、与 FP16 Triton matmul 基线的比值。INT8 的理论峰值算力通常是 FP16 的 2 倍，但实测能到多少取决于 `tl.dot` 的 int8 路径与 epilogue 开销——先测再下结论。
+3. 验证第 3 节的判断：fused dequant 在 M=32 时应该明显快于两步基线（省了权重展开的 HBM 往返），在 M=1024 时差距收窄。如果实测与判断不符，记下来——这是第 6 周“负面结果分析”的素材。
+
+**产出**：一份配置-耗时对照表（两档形状 × 至少 4 组配置）+ 一句“判断是否成立”的结论。
+
+### 第 5 节 · 小结：量化省的是什么（搬运量），代价是什么（精度），Roofline 点标图
+
+**目标**：收拢本周的结论，把两个 kernel 的 Roofline 点标到图上。
+
+**怎么做**（30 分钟，总结无卡可做）：
+
+1. 算术强度对比：同一个 4096³ matmul，FP16 版搬运量是权重与激活各 2 字节/元素，INT8 版权重只剩 1 字节/元素——**量化首先省的是搬运量**，算术强度向右移；同时 int8 的 `tl.dot` 峰值算力更高，Roofline 的顶也抬高了。两边一起动，这就是量化提速的完整解释。
+2. 代价：精度。第 2 节的相对误差就是代价的度量。把“相对误差”与“提速比”并排放进同一张表——**量化方案的取舍永远是这两个数的权衡**，不是单看速度。
+3. 更新 Roofline 图：把 INT8 matmul 与 fused dequant 的点标上去，并写一句话——它们离 Roofline 有多远、差在哪。
+4. 把本周的检查清单并进总清单，加两条：“scale 的粒度与误差上界能手算吗”“dequant 融合的收益在什么形状下成立、什么形状下收窄”。
+
+**产出**：更新后的 Roofline 图 + 一张“相对误差 vs 提速比”对照表。
 
 ## 第 5 周 · FlashAttention 2/3 与 CUTLASS：读工业级实现（大纲）
 
