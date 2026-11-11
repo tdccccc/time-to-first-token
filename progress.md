@@ -86,6 +86,13 @@ Started on:
 - [ ] Thu. First habit session
 - [ ] Fri. Optional edge sampler
 
+### Week 11: TensorRT-LLM (optional)
+- [ ] Mon. Architecture: PyExecutor loop, IFB, paged KV, scheduler budgets
+- [ ] Tue. Deploy the same model behind trtllm-serve
+- [ ] Wed. FP8 quantization, measure with the M0 harness
+- [ ] Thu. EAGLE-3 speculative decoding, KV reuse check, disagg config
+- [ ] Fri. Three-engine comparison report and engine decision guide
+
 ### Pre-publish checklist
 - [ ] Swept the request rate
 - [ ] Reported exact input and output token lengths

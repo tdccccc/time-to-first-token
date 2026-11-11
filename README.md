@@ -4,7 +4,7 @@
 
 # 边做边学 LLM 推理服务：交付一个真实的推理服务
 
-一份 10 周、每天 30 分钟的路线图，给想真正跑起 LLM 推理、而不只是读一读的工程师。另有 1 处可选加深（第 8 周（续）大规模集群 PD 优化），不计入 10 周主线。
+一份 10 周、每天 30 分钟的路线图，给想真正跑起 LLM 推理、而不只是读一读的工程师。另有 2 处可选加深（第 8 周（续）大规模集群 PD 优化、第 11 周 TensorRT-LLM），不计入 10 周主线。
 
 一共 50 节课。每一节都服务于同一个产物：一个 OpenAI 兼容的推理服务——你把它部署到租来的 GPU 上，做埋点、压测到 1000+ 并发，用量化和投机解码优化，在前面放一个成本感知的路由器，最后把它作为一份可复现的 benchmark 发表出来。
 
@@ -15,7 +15,8 @@
 > - **中文版**：主 README 翻译成中文，课程结构、做/读/略读标记、时间投入和 GPU 成本说明全部保留；英文原文保存在 [docs/original-README.md](docs/original-README.md)。
 > - **模块地图**：本计划扩展为 M0–M4 五个模块，见 [docs/MODULES.md](docs/MODULES.md)。M1 就是下面这份 10 周路线图；M0 是前置的基础与度量，M2 是算子优化，M3 是国产芯片适配，M4 是跨芯片综合项目。
 > - **算子与国产芯片**：新增 [M2 算子优化](docs/modules/M2-operators/README.md)与 [M3 国产芯片适配](docs/modules/M3-domestic-chips/README.md)的课程大纲，补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
-- **第 8 周加深**：新增第 8 周（续）：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
+> - **第 8 周加深**：新增第 8 周（续）：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
+> - **TensorRT-LLM 深入周**：第 11 周是可选的一周，讲编译式推理引擎 TensorRT-LLM 的架构、部署、量化、投机解码与解耦式服务，最后产出一份三引擎（vLLM / SGLang / TensorRT-LLM）对比报告。这一周引用的论文一律标为选读，正文直接给出深度总结。
 > - **原项目授权与出处不变**：本仓库沿用上游的 CC BY 4.0 协议，原作者与原仓库链接见文末。
 
 ---
@@ -35,6 +36,7 @@
 - 一个按成本、延迟、质量选后端、带每请求 token 预算的路由器
 - 一份发表出来的 benchmark 写作，版本固定、命令可复现
 - （可选第 8 周（续））一张大规模集群 PD 架构图、KV 传输账表与“信号→动作→验证方法”策略表
+- （可选第 11 周）一份三引擎对比报告：同一硬件、同一模型、同一负载下 vLLM、SGLang、TensorRT-LLM 的 TTFT 与吞吐对比，外加选型指南
 
 ## 时间投入
 
@@ -42,7 +44,7 @@
 |---|---|
 | 每节课时长 | 30 分钟 |
 | 每周节数 | 5 节，另有 2 天缓冲 |
-| 总计 | 10 周，50 节，25 小时（核心）；另有第 8 周（续）5 节可选加深 |
+| 总计 | 10 周，50 节，25 小时（核心）；另有第 8 周（续）5 节、第 11 周 5 节可选加深 |
 | GPU 成本 | 大约一块 24GB 显卡按半小时租用，另加两次 H100 |
 
 缓冲日是用来补课的，不是用来加新内容的。周二缺了一节，不至于让整个计划垮掉。
@@ -61,7 +63,7 @@
 
 **路由器放在单位经济学旁边。** 一个按成本、延迟、质量选后端的路由器，是唯一一个把“多少钱”和“延迟预算”写进代码的组件。同一周学经济学，读到的东西会变成路由策略，而不是一篇你点头同意的博客。
 
-**端侧部署是可选的，放在最后。** ONNX Runtime、TensorRT-LLM、WebLLM 是客户端和嵌入式运行时，和前面九周搭建的数据中心那套几乎没有共同的操作面。
+**端侧部署是可选的，放在最后。** ONNX Runtime、WebLLM 是客户端和嵌入式运行时，和前面九周搭建的数据中心那套几乎没有共同的操作面。TensorRT-LLM 不属于这一类：它是一台数据中心推理引擎，只是走编译式路线，所以单独放进可选的第 11 周，而不是和端侧工具并列。
 
 ---
 
@@ -89,6 +91,8 @@ pip install sglang
 ```
 
 另外还需要 Docker（跑 Prometheus 和 Grafana），以及第 8 周用的 `kind` 或一个小的托管集群。
+
+第 11 周另外需要 TensorRT-LLM：优先用 [NGC 预编译容器](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)（`nvcr.io/nvidia/tensorrt-llm/release:<版本>`，以安装指南里的版本标签为准），或按同一指南用 pip 安装。装之前先核对[支持的硬件](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)：文档列出的最老架构是 Ampere A100，FP8 权重需要 Hopper 或更新。
 
 ---
 
@@ -318,8 +322,43 @@ pip install sglang
 | 周二 | *做* · 把量化、投机解码、KV 淘汰作为有标签的变体加进去，附可复现的命令和固定版本。发表。 |
 | 周三 | *读* · 建立每周的阅读习惯。[arXiv cs.DC](https://arxiv.org/list/cs.DC/recent)、[MLSys](https://mlsys.org)、OSDI、NeurIPS 效率方向。先排三篇。 |
 | 周四 | *读* · 第一次习惯性阅读。30 分钟读一篇论文的摘要、方法图和实验，不读全文。 |
-| 周五 | *可选* · 端侧采样：[ONNX Runtime](https://onnxruntime.ai)、[TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)、[WebLLM](https://webllm.mlc.ai)。注意这些是客户端运行时，不是你所建东西的延伸。 |
+| 周五 | *可选* · 端侧采样：[ONNX Runtime](https://onnxruntime.ai)、[WebLLM](https://webllm.mlc.ai)。注意这些是客户端运行时，不是你所建东西的延伸。TensorRT-LLM 不在这里，它有自己的第 11 周。 |
 | 缓冲 | 把 benchmark 拿去征求反馈。能回答的批评，证明你的压测工具是真的。 |
+
+---
+
+### 第 11 周：TensorRT-LLM——编译式推理引擎（可选）
+
+**重点。** 第三台引擎，走编译式路线。学完要能讲清：同样的模型，为什么 TensorRT-LLM 要在加载时多做一步"编译"，这一步换来了什么，又锁死了什么。
+
+**形式。** 论文一律选读：三篇投机解码论文的深度总结写在下面正文里，不读原文也能掌握；动手以 `trtllm-serve` 与 LLM API 为主。
+
+**产出。** 一个跑着同一模型的 TensorRT-LLM 服务、一张 FP16/FP8 对比表、一份三引擎对比报告与选型指南。
+
+**硬件门槛。** 需 NVIDIA GPU：[官方支持列表](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)里最老的架构是 Ampere A100；FP8 权重需要 Hopper 或更新。没有卡的走纯读路径：第 1、4 天的读内容照常做，第 5 天只写选型分析框架，数字留空待补测。
+
+| 天 | 课程 |
+|---|---|
+| 周一 | *读* · TensorRT-LLM 架构：[架构总览](https://nvidia.github.io/TensorRT-LLM/developer-guide/overview.html)与[分页注意力、IFB 与调度](https://nvidia.github.io/TensorRT-LLM/features/paged-attention-ifb-scheduler.html)。弄清四件事：PyExecutor 后台循环里每步在干什么（取请求、调度、准备 KV、执行、采样）；Scheduler、KVCacheManager、ModelEngine、Sampler 各自管什么；max_batch_size、max_seq_len、max_num_tokens 这三个预算怎么卡住调度和吞吐；以及"编译"到底发生在什么时候——当前版本默认走 PyTorch 后端，算子融合、CUDA 图捕获、KV 缓存布局都在引擎加载时定下来并缓存复用（文档的命令行里只有 trtllm-bench、trtllm-eval、trtllm-serve，没有独立的 trtllm-build，老教程里的预编译流程别照着抄）。最后对照第 2 周的 vLLM 写三句话：两者分页 KV 的相同点和不同点。 |
+| 周二 | *做* · 部署同一模型。按[安装指南](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)拉 NGC 预编译容器（`docker pull nvcr.io/nvidia/tensorrt-llm/release:<版本>`，以指南里的版本标签为准；或按同一指南用 pip 安装），在容器里跑 `trtllm-serve "meta-llama/Llama-3.1-8B-Instruct"`（或 Qwen2.5-7B-Instruct；Llama 权重需先在 Hugging Face 上接受许可并登录账号），确认 8000 端口的 `/v1/chat/completions` 通了（curl 一条，和第 2 周一样的请求体），把启动命令存下来。同一模型、同一硬件，和第 2/4 周对齐。 |
+| 周三 | *做* · 量化与测量。先跑 ModelOpt 预量化权重 `trtllm-serve "nvidia/Llama-3.1-8B-Instruct-FP8"`（[量化文档](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)里的示例）；没有现成权重就用 ModelOpt 离线量化（`git clone https://github.com/NVIDIA/Model-Optimizer.git`，按量化文档跑 `examples/llm_ptq` 里的 `scripts/huggingface_example.sh --model <HF 模型> --quant fp8`，注意标定要花时间，留足租卡时长）。再用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py` 在同一 prompt、同一 `--max-tokens`、同一并发下测 FP16 与 FP8 两档，记 TTFT/ITL/吞吐。注意：如果服务端不在流里回 usage 字段，脚本会把 token 数按字符估算并标为估算值，对比前先确认两档的数字是实测还是估算。FP8 权重需要 Hopper 或更新；只有 A100 时改跑 W4A16 AWQ/GPTQ（硬件矩阵里 Ampere 有支持）。 |
+| 周四 | *读/做* · 投机解码、KV 复用与解耦式服务。先读下面三篇论文的深度总结（原文选读），弄清 draft-verify 机制和接受率为什么决定一切；再动手：按[投机解码文档](https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html)用 LLM API 的 `Eagle3DecodingConfig(max_draft_len=3, speculative_model="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")` 给 Llama-3.1-8B-Instruct 开 EAGLE-3（以你装的版本文档为准），在低并发下测接受率与延迟变化，验证"只在低 batch 下加速"；再用同一 system prompt 的两批请求对比 TTFT，验证跨请求 KV block 复用（默认开启，`kv_cache_config.enable_block_reuse`，见 [KV 缓存文档](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)）；最后读[解耦式服务文档](https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html)，写出 `cache_transceiver_config`（`backend: NIXL`）的配置，理解 context 实例与 generation 实例之间 KV 块怎么走（RDMA/NVLink，传输与计算重叠）。解耦实测需要多卡/多节点，这节只做到配置层面，注明"需多卡环境，待补测"。 |
+| 周五 | *做* · 三引擎对比报告。同一硬件、同一模型、同一 prompt 与输出长度、同一并发扫描（M0 脚本，`--concurrency 1 8 32`），把 vLLM（第 2/5 周数据）、SGLang（第 4 周数据）、TensorRT-LLM（本周数据）放进一张表：TTFT p50/p95、ITL p50/p95、吞吐；再写选型指南：什么时候选 vLLM（生态、灵活、调参空间）、什么时候选 SGLang（前缀复用重的负载）、什么时候选 TensorRT-LLM（NVIDIA 卡上压榨极限性能、愿意接受编译/加载成本与 NVIDIA 锁定）。最后写一句适用边界：TensorRT-LLM 只支持官方列表里的 NVIDIA 架构，换国产芯片不在它的射程内，那是 M3 的事。 |
+| 缓冲 | 补做第 4 天的解耦配置实测（有多卡时），或重跑第 3 天的量化对比。 |
+
+**论文深度总结（原文均为选读；下面的总结就是正文，不读原文也不影响做课）。**
+
+**1. Leviathan 等，Fast Inference from Transformers via Speculative Decoding（ICML 2023 Oral，[arXiv:2211.17192](https://arxiv.org/abs/2211.17192)，选读）**
+
+核心思想：用小模型"猜"、大模型"验"，把串行解码并行化，且不改动输出分布。核心逻辑分四步：解码 K 个 token 需要 K 次串行前向，这是慢的根源；难题里常有便宜模型能答对的简单子任务；一次并行前向验证多个候选的成本，约等于一次单 token 采样；于是用投机采样（speculative sampling）接受/拒绝候选，保证分布不变。关键机制：draft 模型先连猜 γ 个 token；target 模型一次前向算出这些位置的分布；从左到右逐个接受，接受概率是 min(1, p_target/q_draft)，被拒后从 norm(max(0, p−q)) 里重采样，再补一个 target 采样出的 token——每轮至少产出 1 个 token。关键结论与数字：T5-XXL 上 2–3 倍加速，输出与标准解码完全相同；还在 97M 参数的 GPT-like 模型和 137B 的 LaMDA 对话任务上验证过；无需重训、无需改架构。为什么重要：它是投机解码的源头，后面所有 draft-verify 方法（包括 EAGLE、TRT-LLM 里的实现）都是这条链的变体；"加速但不改分布"这个保证，是它能进生产的前提。
+
+**2. Chen 等，Accelerating Large Language Model Decoding with Speculative Sampling（[arXiv:2302.01318](https://arxiv.org/abs/2302.01318)，选读）**
+
+核心思想：与 Leviathan 各自独立提出的同一思想，形式化为 speculative sampling 算法。核心逻辑：同样是 draft-verify，重点在证明上——修改版拒绝采样在数值精度内无损恢复目标分布。关键机制：与上一篇相同（小模型起草、目标模型一次前向验证、从左到右接受子集），论文给出算法的完整描述（Algorithm 2）。关键结论与数字：Chinchilla 70B 分布式部署上 2–2.5 倍解码加速，采样质量无损，模型本身零修改。为什么重要：它把方法落到了 70B 大模型加分布式上，证明了这不是小模型的玩具；两篇论文互相印证，是只读一篇时的另一半。
+
+**3. Li 等，EAGLE-3: Scaling up Inference Acceleration of Large Language Models via Training-Time Test（NeurIPS 2025，[arXiv:2503.01840](https://arxiv.org/abs/2503.01840)，选读）**
+
+核心思想：EAGLE 在特征层做自回归起草，复用目标模型的顶层特征；但加训练数据几乎不提速——瓶颈在特征预测约束：draft 模型的输出必须拟合目标模型的顶层特征（带特征预测损失），误差逐层累积，数据量一上去就撞天花板。EAGLE-3 扔掉特征预测，改成直接预测 token，并用"training-time test"（训练时模拟多步生成）融合多层特征。核心逻辑：约束越紧，draft 学到的东西越被顶层特征的误差天花板卡住；放松约束、直接预测 token，训练数据量重新变成有效的 scaling 轴。关键机制：多层特征融合 + 训练时模拟多步生成；兼容 EAGLE-2 的 drafting tree。关键结论与数字：最高 6.5 倍加速，约比 EAGLE-2 快 1.4 倍；用约 8 倍于 EAGLE 的数据训练，batch 1 时比 EAGLE-2 快 1.4 倍延迟；SGLang 里 batch 64 时吞吐提升约 1.38 倍。为什么重要：它是 TRT-LLM 里 EAGLE-3 配置的直接来源——第 4 天用的 `yuhuili/EAGLE3-LLaMA3.1-Instruct-8B` 就是这篇的权重；还第一次给出"推理加速的 scaling law"：draft 模型数据越多，加速比越高。
 
 ---
 
@@ -404,6 +443,7 @@ GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention
 |---|---|
 | [vLLM](https://github.com/vllm-project/vllm) | 主要服务引擎 |
 | [SGLang](https://docs.sglang.io) | 前缀复用对比 |
+| [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | 编译式推理引擎，三引擎对比的第三极 |
 | [GuideLLM](https://github.com/vllm-project/guidellm) | SLO 感知的速率扫描 |
 | [genai-perf](https://github.com/triton-inference-server/perf_analyzer) | TTFT 与 ITL 测量 |
 | [LLMPerf](https://github.com/ray-project/llmperf) | 托管端点的 benchmark |

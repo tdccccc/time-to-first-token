@@ -5,7 +5,7 @@
 | 模块 | 内容 | 产出 | 前置 | 状态 |
 |---|---|---|---|---|
 | [M0 · 基础与度量](modules/M0-foundations/README.md) | Roofline、TTFT/ITL/吞吐、profiling、可复现的压测脚本 | 一份基线报告 + `scripts/bench_openai.py` | 无（不需要 GPU） | ✅ 内容已完成 |
-| [M1 · 推理框架](../README.md) | 10 周路线图：vLLM → SGLang → 量化 → 投机解码 → 解耦部署 → 路由器 → 发表 | 一个不断长大的 OpenAI 兼容推理服务 + 一份 benchmark 写作 | M0 | ✅ 内容已完成（中文翻译版） |
+| [M1 · 推理框架](../README.md) | 10 周路线图 + 2 处可选加深（第 8 周（续）、第 11 周 TensorRT-LLM）：vLLM → SGLang → 量化 → 投机解码 → 解耦部署 → 路由器 → 发表（→ TensorRT-LLM，可选） | 一个不断长大的 OpenAI 兼容推理服务 + 一份 benchmark 写作 | M0 | ✅ 内容已完成（中文翻译版 + 第 11 周） |
 | [M2 · 算子优化](modules/M2-operators/README.md) | CUDA 优化阶梯 → Triton → fused attention / 量化 matmul → FlashAttention/CUTLASS → 自写 kernel 接入引擎 | 一份“自写 kernel 端到端加速报告” | M0、M1 第 1–2 周 | ✅ 内容已完成（加深版，6 周） |
 | [M3 · 国产芯片适配](modules/M3-domestic-chips/README.md) | 软件栈地图 → CANN/AscendC → Ascend 跑通与插件架构 → 算子覆盖分析 → 移植案例 → 精度归因与调优报告 | 一份跨芯片对比报告（初稿） | M0、M1 | ✅ 内容已完成（加深版，6 周） |
 | M4 · 综合项目 | 同一模型 + 同一评测集，在 NVIDIA 与至少一种国产芯片上端到端部署、压测，写出可复现的对比报告 | 一份完整的、可复现的跨芯片推理优化报告（本仓库的毕业设计） | M0–M3 | 📝 仅有目标，内容待写 |
@@ -14,7 +14,7 @@
 
 ```
 M0（1 周，无 GPU 可做）
- → M1（10 周，主线）
+ → M1（10 周主线 + 第 8 周（续）与第 11 周可选加深）
  → M2（6 周，与 M1 第 6–8 周并行或之后做）
  → M3（6 周，Ascend 环境就绪后做）
  → M4（毕业设计）
