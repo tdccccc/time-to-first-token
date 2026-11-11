@@ -1,6 +1,6 @@
 # M2 · 算子优化
 
-> 状态：**内容进行中**——第 1–4 周为完整内容（加深版），第 5–6 周仍为大纲，见下文各周表格。
+> 状态：**已完成**——第 1–6 周全部为完整内容（加深版）。
 >
 > 前置：M0（Roofline、profiling、压测脚本）与 M1 第 1–2 周（vLLM 服务已跑起来）。M2 的终点不是“会写 kernel”，而是“自己写的 kernel 跑进了推理引擎，端到端变快了”。
 >
@@ -677,31 +677,236 @@ def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
 
 **产出**：更新后的 Roofline 图 + 一张“相对误差 vs 提速比”对照表。
 
-## 第 5 周 · FlashAttention 2/3 与 CUTLASS：读工业级实现（大纲）
+## 第 5 周 · FlashAttention 2/3 与 CUTLASS：读工业级实现
 
-| 节 | 内容 | 资源 | 产出 |
+> 硬件：以读代码为主，无卡可做；第 4 节改配置实测需要 GPU（有 nvcc 的机器）。
+
+### 第 1 节 · FlashAttention 1→2→3 的工程演进
+
+**目标**：讲清三篇论文是一条链：每一代都先点名上一代的瓶颈，再改它。学完能说出每一代“改了什么、为什么改、改出多少”。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 先把链条立起来（第 3 周已讲 FA1 的 IO-aware 与 tiling，这里只补它留下的尾巴）：**FA1 只解决了访存，没解决算力利用率**。FA2 的摘要直接点名：FA1 只达到理论峰值 FLOPs 的 25–40%，远低于优化过的 GEMM。原因不是数学，是**工作分配**：thread block 与 warp 之间的分工不合理，导致 occupancy 低、shared memory 白白多读写。
+2. FA2 的三处改动（按摘要的原意）：
+   - **减少非 matmul 的 FLOPs**：softmax、rescale 这些非矩阵乘的开销占比降下来，让 matmul 的比重上去；
+   - **跨 thread block 并行**：哪怕是单个 head 的 attention，也拆到多个 thread block 上并行，提高 occupancy；
+   - **warp 间分工**：同一个 block 内把工作分给不同的 warp，减少 warp 之间经由 shared memory 的通信。
+3. FA2 的结果（摘要数字）：相对 FA1 提速约 2 倍，A100 上达到理论峰值的 **50–73%**，接近 GEMM 的效率；端到端训练 GPT 风格模型时，单张 A100 达到 **225 TFLOPs/s**（72% 的模型 FLOPs 利用率）。
+
+> **论文选读（不读也能学完本周）**：FlashAttention-2（Dao，[arXiv:2307.08691](https://arxiv.org/abs/2307.08691)，2023 年 7 月；原文可选，正文已包含核心内容）。
+>
+> - **核心思想**：FA1 的问题不在算法数学，在**并行结构**。同样的 tiling 与 online softmax，换一种工作分配就能多榨一倍性能。
+> - **核心逻辑链条**：诊断（25–40% 利用率 → 分工问题）→ 三处改动（减非 matmul FLOPs、跨 block 并行、warp 间分工）→ 验证（50–73% 利用率、端到端 225 TFLOPs/s）。
+> - **关键结论与数字**：相对 FA1 约 2 倍提速；A100 上 50–73% 理论峰值；GPT 风格模型端到端训练 225 TFLOPs/s（72% 利用率）。摘要同时确认了 FA1 的基线：相对优化过的基线 2–4 倍提速、显存从平方降到线性、无近似。
+> - **为什么重要**：它证明了“瓶颈诊断”本身的价值——第 1 周的 ncu 定位、第 3 周的 Roofline，都是在练同一种能力：先找到利用率低的原因，再决定改哪里。
+
+4. FA3 的转向：FA2 在 H100 上只有 **35% 利用率**——Hopper 有了新硬件能力（Tensor Core 异步、TMA），FA2 没用上。FA3 的三项技术（摘要原意）：
+   - **warp specialization + 异步**：利用 Tensor Core 与 TMA 的异步性，让计算与数据搬运重叠——一部分 warp 专做搬运（生产者），一部分专做计算（消费者），流水线不断；
+   - **matmul 与 softmax 交错**：把分块 matmul 与 softmax 操作交错排布，不让 Tensor Core 等 softmax；
+   - **FP8 的块量化与 incoherent processing**：用硬件的 FP8 支持做低精度计算，同时控制误差。
+5. FA3 的结果（摘要数字）：H100 上相对 FA2 提速 **1.5–2.0 倍**；FP16 达到 **740 TFLOPs/s**（75% 利用率）；FP8 接近 **1.2 PFLOPs/s**；FP8 版的数值误差比基线 FP8 attention 低 **2.6 倍**。
+
+> **论文选读（不读也能学完本周）**：FlashAttention-3（Shah 等，[arXiv:2407.08608](https://arxiv.org/abs/2407.08608)，2024 年 7 月；原文可选，正文已包含核心内容）。
+>
+> - **核心思想**：新硬件要有新打法。Hopper 的异步能力（TMA、warp specialization）与 FP8 支持，是 FA1/FA2 的结构用不上的——FA3 围绕这两点重排了流水线。
+> - **核心逻辑链条**：诊断（FA2 在 H100 上仅 35% 利用率）→ 三项技术（warp specialization 重叠计算与搬运、matmul/softmax 交错、FP8 块量化）→ 验证（FP16 740 TFLOPs/s、FP8 近 1.2 PFLOPs/s、误差反而更低）。
+> - **关键结论与数字**：H100 上 1.5–2.0 倍于 FA2；FP16 740 TFLOPs/s（75% 利用率）；FP8 接近 1.2 PFLOPs/s；FP8 数值误差比基线低 2.6 倍。
+> - **为什么重要**：它把“硬件特性决定算法结构”这句话落到了实处——第 1 周学的“先看硬件再写 kernel”，在这里是论文级别的实践。M3 会回到这个主题：换一块芯片（Ascend），同样的重排要再做一遍。
+
+6. 把三代画成一张演进表：每代一行，写“瓶颈诊断 → 改动 → 结果数字”。这是本周的核心产出，第 5 节会再用它。
+
+**产出**：一份“论文做法 vs 工程做法”对照笔记，核心是一张 FA1→FA2→FA3 演进表（每代的瓶颈、改动、数字）。
+
+### 第 2 节 · 读 flash-attn 源码：主循环长什么样
+
+**目标**：在真实实现里定位第 3 周学过的 online softmax 循环，画出前向 kernel 的结构图。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 打开 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)，定位这三个文件：`csrc/flash_attn/src/flash_fwd_kernel.h`（前向主 kernel）、`csrc/flash_attn/src/flash_fwd_launch_template.h`（按 head 维与数据类型选 kernel 变体的分发模板）、以及按 head 维/数据类型实例化的文件（如 `flash_fwd_hdim64_fp16_sm80.cu`）。
+2. 在 `flash_fwd_kernel.h` 里找第 3 周的对应物：外层按 K/V 分块的循环、每步的 `m` / `l` / `acc` 更新（online softmax 的 rescale）、Q/K/V 的 tile 加载。**代码是 CUDA，数学是第 3 周的推导**——你读源码时要做的就是把每一行 CUDA 对回推导里的一行公式。
+3. 再找 FA2 的痕迹：工作是怎么在 thread block 与 warp 之间分配的（第 1 节的三处改动在代码里落在哪些地方）。不用全读懂，定位到位置并写下来就是本节的目标。
+4. 注意边界：flash-attn 是工业级实现，里面有大量为特定硬件与 head 维特化的分支——读源码的目标是“定位结构”，不是“背下实现”。遇到看不懂的分支，先记下它在管什么（比如某个 `#ifdef` 是为哪代 GPU 开的），不要卡住。
+
+**产出**：一张前向 kernel 的结构图（循环、分块、rescale 更新、warp 分工的位置）。
+
+### 第 3 节 · CUTLASS 三级结构：threadblock / warp / thread + MMA pipeline
+
+**目标**：能画出 CUTLASS GEMM 的三级分工与数据流向，知道每一级在管什么。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 打开 [NVIDIA/cutlass](https://github.com/NVIDIA/cutlass)，读 `examples/00_basic_gemm/basic_gemm.cu`：它用 `cutlass::gemm::device::Gemm<float, ColumnMajor, ...>` 搭一个 GEMM，默认 threadblock tile 是 **128×128×8**；调用方式是先构造 `CutlassGemm::Arguments` 再调 `gemm_operator(args)`；文件里还带了一个 naive 参考 GEMM 供对照。先把这个最小例子跑通结构：输入怎么进、tile 怎么分、结果怎么出。
+2. 三级分工（对照例子里的模板参数）：
+   - **threadblock 级**：一个 block 算输出矩阵的一块 tile（默认 128×128），负责从 global memory 把 A/B tile 搬进 shared memory；
+   - **warp 级**：一个 block 内的多个 warp 再分 tile（WarpShape），每个 warp 算自己的一块；
+   - **thread 级**：每个线程算一小块（InstructionShape），最终落到 Tensor Core 的 MMA 指令上。
+   - 数据流向：global → shared（block 级搬运）→ registers（warp/thread 级）→ Tensor Core MMA → 写回 global。**每一级都在回答“这块数据现在放在哪、谁来算”**。
+3. MMA pipeline：理解“流水线”的意思——下一个 tile 的搬运与当前 tile 的计算重叠，靠的是 shared memory 的双缓冲（甚至多级缓冲）与异步拷贝。先画出两级缓冲的时序图，不用深究每一级缓冲的同步原语。
+4. 定位改配置的入口：tile 配置由 ThreadblockShape / WarpShape / InstructionShape 三个模板参数决定，在 `cutlass/gemm/device/gemm.h` 与 `cutlass/gemm/device/default_gemm_configuration.h` 里找它们的定义与默认值。下一节要改的就是它们。
+
+**产出**：一张三级分工与数据流向图 + 改配置的入口位置（三个 Shape 参数的文件与默认值）。
+
+### 第 4 节 · 动手改一个 CUTLASS GEMM：改 tile 配置，重编，测出变化
+
+**目标**：改一个 CUTLASS GEMM 的 tile 配置，重编，测出变化。
+
+**怎么做**（30 分钟，需 GPU + nvcc；无卡时先完成第 3 节的结构图，实测标注“待补测”）：
+
+1. 按 CUTLASS 仓库 README 的构建说明（CMake）编出 `00_basic_gemm`，先跑默认配置，记下耗时（例子自带计时输出；也可以用第 1 周的 CUDA Events 自己包一层）。
+2. 改配置：把 ThreadblockShape 从默认的 128×128×8 改成另一组（例如 64×128×8 或 256×128×8），只改这一处，重编，重跑，记下耗时变化。**一次只改一个参数**，否则变化归因不清。
+3. 再试 WarpShape：改一档，重编，重跑，记下变化。把三次结果填进同一张表：配置、耗时、相对默认的变化。
+4. 用第 1 周的分析框架解释结果：tile 变大 → 每个 block 算得更多、shared memory 占用上升、同时驻留的 block 数下降；tile 变小则反之。实测数字与这个分析对不上时，先怀疑测量（是不是只跑了一次、是不是含了编译时间），再怀疑分析。
+5. 注意：CUTLASS 的编译不快，改一次配重编一次是正常的——把等待时间用来写第 5 节的对比表。
+
+**产出**：一份“改前改后”实测记录（至少两组配置变化 + 耗时 + 一句归因）。
+
+### 第 5 节 · 小结：Triton 版 vs CUTLASS 版 attention 的性能与可维护性
+
+**目标**：写出“什么时候自己写 kernel，什么时候直接用库”的判断。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 对照第 3–4 周的实测数据，填这张表：
+
+| 维度 | Triton 版（第 3 周） | CUTLASS / flash-attn 版 | 结论 |
 |---|---|---|---|
-| 1 | FlashAttention 1→2→3 的工程演进：FA2 的并行与 work partitioning，FA3 的 warp specialization、异步拷贝与 FP8 | FlashAttention 论文：[FA1 arXiv:2205.14135](https://arxiv.org/abs/2205.14135)、[FA2 arXiv:2307.08691](https://arxiv.org/abs/2307.08691)、[FA3 arXiv:2407.08608](https://arxiv.org/abs/2407.08608)；[GPU MODE 讲座](https://github.com/gpu-mode/lectures) | 一份“论文做法 vs 工程做法”对照笔记 |
-| 2 | 读 flash-attn 源码：`flash_fwd_kernel.h` 里的主循环长什么样 | [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)（`csrc/flash_attn/src/flash_fwd_kernel.h`、`flash_fwd_launch_template.h`） | 一张前向 kernel 的结构图 |
-| 3 | CUTLASS 三级结构：threadblock / warp / thread + MMA pipeline | [NVIDIA/cutlass](https://github.com/NVIDIA/cutlass)（`examples/00_basic_gemm/basic_gemm.cu`、`cutlass/gemm/device/gemm.h`） | 能画出三级分工与数据流向 |
-| 4 | 动手改一个 CUTLASS GEMM：改 tile 配置（ThreadblockShape / WarpShape / InstructionShape），重编，测出变化 | 同上；第 1 周的计时与 ncu 方法 | 一份“改前改后”实测记录 |
-| 5 | 小结：Triton 版 vs CUTLASS 版 attention 的性能与可维护性；什么时候自己写 kernel，什么时候直接用库 | 第 3–4 周的实测数据 | 一页对比表 + 取舍笔记 |
+| 代码量 | 短，几十行 | 长，模板层层嵌套 | 快速验证选 Triton |
+| 性能天花板 | 接近但到不了顶（缺 warp specialization 等精细控制） | 最高（FA3 的 75% 利用率是这么来的） | 榨干性能选 CUDA/CUTLASS |
+| 可维护性 | 好读好改 | 难读难改，改一处牵全身 | 长期维护选 Triton 或直接用库 |
+| 硬件适配 | 编译器兜底一部分 | 每代硬件要重写特化 | 换芯片时两边都要重做（M3 的主题） |
 
-**硬件**：以读代码为主，无卡可做；第 4 节改配置实测需要 GPU（有 nvcc 的机器）。
+2. 判断标准：**瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA/CUTLASS；瓶颈已经是“别人写好的库比你快”时，直接用库**。第 6 周的 CustomOp 收口就是第三种情况的实践：自己写的 kernel 要接进引擎，而不是停在 standalone。
+3. 把本周的检查清单并进总清单，加两条：“FA1→2→3 每一代的瓶颈与改动能说出来吗”“CUTLASS 的三个 Shape 参数改过并测出变化了吗”。
 
-## 第 6 周 · 收口：把自写 kernel 接入推理引擎（大纲）
+**产出**：一页对比表 + 取舍笔记。
 
-> 注意：大纲原计划是“把第 3 周的 fused attention 包成 CustomOp”。核实 vLLM 的 `CustomOp` 源码（`vllm/model_executor/custom_op.py`）后，这个写法需要修正：vLLM 的 attention 走 Attention 后端，不走 CustomOp；CustomOp 的可替换面是激活、归一化这类算子。完整内容会按修正后的方案写——接入引擎的载体改为 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程），fused attention 仍在第 3 周做 standalone 验证。
+## 第 6 周 · 收口：把自写 kernel 接入推理引擎
 
-| 节 | 内容 | 资源 | 产出 |
-|---|---|---|---|
-| 1 | vLLM 的 CustomOp 机制：注册、分发、启用三件事，及它的边界（attention 不走这条路） | [vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)；vLLM 源码 `vllm/model_executor/custom_op.py` | 能讲清插件算子的注册与调用路径 + 边界 |
-| 2 | 动手：写 Triton 版 SiluAndMul（参考 vLLM 自带的 Triton kernel 写法），standalone 正确性 + 微基准 | vLLM 源码 `vllm/model_executor/layers/activation.py`（内含 Triton 版实现可对照） | 可独立验证的 Triton kernel |
-| 3 | 包成 CustomOp 子类并注册：`register_oot` 按类名替换，进程内验证替换真的发生了 | 同上；[vLLM 插件机制](https://github.com/vllm-project/vllm/blob/main/vllm/plugins/__init__.py)（`vllm.general_plugins` entry point） | 可加载的插件包 |
-| 4 | 端到端验证：同一模型、同一评测集，接入前后的 TTFT / ITL / 吞吐（M0 的 `scripts/bench_openai.py`）+ profiler 确认 Triton kernel 真的跑了 | M0 的压测脚本与基线报告 | 一份接入前后对比表 |
-| 5 | 小结：M2 毕业——一份“自写 kernel 端到端加速报告”（含负面结果分析：没变快的原因） | M0 第 3 节的 profiling 方法 | **M2 的可交付物** |
+> 注意：大纲原计划是“把第 3 周的 fused attention 包成 CustomOp”。核实 vLLM 的 `CustomOp` 源码（`vllm/model_executor/custom_op.py`）后，这个写法需要修正：vLLM 的 attention 走 Attention 后端，不走 CustomOp；CustomOp 的可替换面是激活、归一化这类算子。完整内容按修正后的方案写——接入引擎的载体改为 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程），fused attention 仍在第 3 周做 standalone 验证。
 
-**硬件**：本周需要 GPU（租卡）。无卡时先完成第 1–3 节的机制学习与代码编写，端到端验证标注“待有卡后补测”。
+> 硬件：本周需要 GPU（租卡）。无卡时先完成第 1–3 节的机制学习与代码编写，端到端验证标注“待有卡后补测”。
+
+### 第 1 节 · vLLM 的 CustomOp 机制：注册、分发、启用三件事，及它的边界
+
+**目标**：能讲清插件算子的注册与调用路径，并讲清它的边界（attention 不走这条路）。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 读 [vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)，再对照源码 `vllm/model_executor/custom_op.py`，搞清三件事：
+   - **注册**：`CustomOp` 的子类通过 `register_oot` 做 out-of-tree 注册，按类名替换（无参数时注册名就是类名，如 `"SiluAndMul"`）；`CustomOp.register` 会断言不重名——同一个名字不能注册两次，这是第 3 节要避的坑；
+   - **分发**：模型代码里调用的是 `SiluAndMul()` 这个类，运行时分发到注册的实现上；`forward_cuda` 走 GPU 实现（你的 Triton kernel），`forward_native` 是 PyTorch 后备实现（CPU / 非 CUDA 路径走它）；
+   - **启用**：编译配置里用 `--compilation_config.custom_ops '["+SiluAndMul"]'` 打开（`+` 表示“在默认集合之外再加这一个”）；注意 inductor 后端默认会禁用 custom ops，启用时要确认这条配置真的生效了。
+2. 讲清边界：**attention 不走 CustomOp**。vLLM 的 attention 走 Attention 后端（backend 选择发生在 attention 层，不是 CustomOp 分发）。CustomOp 的可替换面是激活、归一化这类“逐元素 / 小规约”算子。选 SiluAndMul 做载体正是因为它在边界内：它是 MLP 里的激活算子，形状规整、易于验证。
+3. 再读插件加载机制：vLLM 启动时通过 `vllm.general_plugins` entry point 加载插件包（源码见 `vllm/plugins/__init__.py`，`load_general_plugins` 在进程内只加载一次，有防重复加载的 guard）。插件模块被 import 时，`register_oot` 装饰器执行，替换即完成——**注册发生在 import 时，不是调用时**。
+
+**产出**：能讲清插件算子的注册与调用路径 + 边界（attention 为什么不走这条路）。
+
+### 第 2 节 · 动手：写 Triton 版 SiluAndMul，standalone 正确性 + 微基准
+
+**目标**：写出可独立验证的 Triton 版 SiluAndMul。
+
+**怎么做**（30 分钟，需 GPU 做正确性验证；无卡先写代码）：
+
+1. 先看 vLLM 自带的对照：`vllm/model_executor/layers/activation.py` 里的 `SiluAndMul` 类——`forward_native` 是 `F.silu(x[..., :d]) * x[..., d:]`，文件里还含有一个 Triton 版实现可对照写法。你的 kernel 要与这个语义完全一致：输入 `[M, 2D]`，前一半过 SiLU，再乘以后一半，得 `[M, D]`。
+2. 写 kernel（二维 grid：行 × 列块；SiLU 在 fp32 里算，再 cast 回输入精度——**cast 回去再乘是 load-bearing 的**，直接拿 fp32 的 SiLU 结果乘 fp16 的另一半会丢精度；这个写法与 TritonAscendBench 的 `L2_04_silu_and_mul` 参考 kernel 一致，M3 第 5 周移植它时会再遇到）：
+
+```python
+import torch
+import triton
+import triton.language as tl
+
+@triton.jit
+def _silu_and_mul_kernel(x_ptr, y_ptr, D,
+                         BLOCK: tl.constexpr):
+    row = tl.program_id(0)
+    col = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
+    mask = col < D
+    x1 = tl.load(x_ptr + row * 2 * D + col, mask=mask, other=0.0)
+    x2 = tl.load(x_ptr + row * 2 * D + D + col, mask=mask, other=0.0)
+    x1_f32 = x1.to(tl.float32)
+    s = (x1_f32 * tl.sigmoid(x1_f32)).to(x1.dtype)
+    y = s * x2
+    tl.store(y_ptr + row * D + col, y, mask=mask)
+
+def silu_and_mul_triton(x, BLOCK=1024):
+    # x: [M, 2*D] fp16；y: [M, D] fp16
+    M, D2 = x.shape
+    D = D2 // 2
+    y = torch.empty((M, D), dtype=x.dtype, device=x.device)
+    grid = (M, triton.cdiv(D, BLOCK))
+    _silu_and_mul_kernel[grid](x, y, D, BLOCK=BLOCK)
+    return y
+```
+
+3. 正确性检查（与 `F.silu` 参考对比）与微基准（`triton.testing.do_bench`，对比 PyTorch 版；这个算子是访存受限的，别指望数量级提速——先测再判断）：
+
+```python
+def ref_silu_and_mul(x):
+    d = x.shape[-1] // 2
+    return torch.nn.functional.silu(x[..., :d]) * x[..., d:]
+
+torch.manual_seed(0)
+x = torch.randn(128, 256, dtype=torch.float16, device='cuda')
+y = silu_and_mul_triton(x)
+ref = ref_silu_and_mul(x)
+print('max abs err:', (y.float() - ref.float()).abs().max().item())
+```
+
+**产出**：可独立验证的 Triton kernel（数值对齐 + 一份微基准）。
+
+### 第 3 节 · 包成 CustomOp 子类并注册：`register_oot` 按类名替换，进程内验证替换真的发生了
+
+**目标**：做出可加载的插件包，并验证替换真的发生了。
+
+**怎么做**（30 分钟，需 GPU 做加载验证；无卡先写插件包骨架）：
+
+1. 写插件包。骨架如下（类名、注册方式与签名以你所装 vLLM 版本的 `vllm/model_executor/custom_op.py` 与 [CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)为准，版本变了先核对再抄）：
+
+```python
+# my_plugin/silu_and_mul_plugin.py
+import torch
+from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.layers.activation import SiluAndMul
+
+@SiluAndMul.register_oot
+class TritonSiluAndMul(SiluAndMul):
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        return silu_and_mul_triton(x)
+    # forward_native 从父类继承（PyTorch 实现），CPU / 非 CUDA 路径走它
+```
+
+2. 打包：插件通过 `vllm.general_plugins` entry point 被 vLLM 启动时加载（加载逻辑见 `vllm/plugins/__init__.py`）。entry point 的具体写法（模块路径的格式）以你所装版本的 `vllm/plugins/__init__.py` 为准，写完先在本地 `pip install -e .` 装上，再确认 `vllm` 启动日志里出现了你的插件。
+3. **验证替换真的发生了**（不要只看“没报错”）：在进程内检查 `SiluAndMul` 解析到的是你的 `TritonSiluAndMul`；或者在 `forward_cuda` 里临时加一行打印，跑一次前向看它是否出现。两种办法至少做一种——“替换没生效但模型照样跑”是这个环节最常见的静默失败（模型会悄悄用回默认实现，你的对比表就全是假的）。
+4. 避坑：`register_oot` 按类名注册，**同一个名字注册两次会断言失败**。不要在同一个进程里既 import 插件又手动再注册一次；也不要在 `vllm` 启动后重复加载插件（`load_general_plugins` 有防重复加载的 guard，但你自己的代码里也要避免）。
+
+**产出**：可加载的插件包 + 一份“替换已验证”的证据（解析检查或打印日志）。
+
+### 第 4 节 · 端到端验证：同一模型、同一评测集，接入前后的 TTFT / ITL / 吞吐 + profiler 确认 Triton kernel 真的跑了
+
+**目标**：出一份接入前后对比表。
+
+**怎么做**（30 分钟，需 GPU；无卡时标注“待有卡后补测”）：
+
+1. 用 M0 的 `scripts/bench_openai.py` 跑基线：不加载插件，同一模型、同一评测集，记 TTFT / ITL / 吞吐。
+2. 加载插件并用 `--compilation_config.custom_ops '["+SiluAndMul"]'` 启用，再跑同一评测集，记同一组数。**两次之间只改这一个变量**（模型、评测集、并发、采样参数全都不变），否则对比无效。
+3. 用 profiler 确认 Triton kernel 真的跑了（vLLM 的 profiler 或 torch profiler，看 kernel 名单里有没有你的 `_silu_and_mul_kernel`）。没有它，第 3 节的验证就不完整。
+4. 先管理预期：SiluAndMul 是个小算子，端到端提速很可能接近 0——**这本身就是结论**。把“没变快”写下来并分析原因（算子占比太小？Triton kernel 的启动开销盖过了收益？），不要为了好看去调评测集。
+
+**产出**：一份接入前后对比表（TTFT / ITL / 吞吐 + profiler 证据）。
+
+### 第 5 节 · 小结：M2 毕业——一份“自写 kernel 端到端加速报告”（含负面结果分析）
+
+**目标**：写出 M2 的可交付物。
+
+**怎么做**（30 分钟，无 GPU 可做）：
+
+1. 把第 1–6 周的东西收进一份报告：GEMM 优化阶梯总表（第 1 周）、fused attention 的推导与实测（第 3 周）、量化方案与误差账本（第 4 周）、FA 演进与 CUTLASS 改配置记录（第 5 周）、CustomOp 接入前后对比（第 4 节）。
+2. 报告里必须有一节“负面结果分析”：哪些尝试没变快、为什么（至少写一条真实的：比如 SiluAndMul 接入后端到端无变化的原因）。**一份只报喜的报告在推理优化里是不可信的**。
+3. 对照本模块检查清单，逐项打勾；没打勾的项写清原因与补做计划（比如“第 4 节 CUTLASS 实测待有 nvcc 的机器后补测”）。
+
+**产出**：**M2 的可交付物**——一份“自写 kernel 端到端加速报告”（含负面结果分析）。
 
 ## 本模块检查清单
 
