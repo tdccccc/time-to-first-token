@@ -65,6 +65,13 @@ Started on:
 - [ ] Thu. Deploy with the production stack
 - [ ] Fri. Autoscale on queue depth, not CPU
 
+### Week 8 (continued): Large-scale cluster PD optimization
+- [ ] Mon. Mooncake deep dive: Conductor, KV pool, early rejection
+- [ ] Tue. KV transfer math: size, bandwidth, share of TTFT
+- [ ] Wed. Cross-node KV pooling and reuse
+- [ ] Thu. Multi-node disaggregated deployment, disaggregated vs colocated
+- [ ] Fri. Pool sizing, autoscaling signals, fault tolerance
+
 ### Week 9: Unit economics and the router
 - [ ] Mon. Inference economics from first principles
 - [ ] Tue. Re-derive cost per million tokens on your own GPU

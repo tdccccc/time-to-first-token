@@ -4,7 +4,7 @@
 
 # 边做边学 LLM 推理服务：交付一个真实的推理服务
 
-一份 10 周、每天 30 分钟的路线图，给想真正跑起 LLM 推理、而不只是读一读的工程师。
+一份 10 周、每天 30 分钟的路线图，给想真正跑起 LLM 推理、而不只是读一读的工程师。另有 1 处可选加深（第 8 周（续）大规模集群 PD 优化），不计入 10 周主线。
 
 一共 50 节课。每一节都服务于同一个产物：一个 OpenAI 兼容的推理服务——你把它部署到租来的 GPU 上，做埋点、压测到 1000+ 并发，用量化和投机解码优化，在前面放一个成本感知的路由器，最后把它作为一份可复现的 benchmark 发表出来。
 
@@ -15,6 +15,7 @@
 > - **中文版**：主 README 翻译成中文，课程结构、做/读/略读标记、时间投入和 GPU 成本说明全部保留；英文原文保存在 [docs/original-README.md](docs/original-README.md)。
 > - **模块地图**：本计划扩展为 M0–M4 五个模块，见 [docs/MODULES.md](docs/MODULES.md)。M1 就是下面这份 10 周路线图；M0 是前置的基础与度量，M2 是算子优化，M3 是国产芯片适配，M4 是跨芯片综合项目。
 > - **算子与国产芯片**：新增 [M2 算子优化](docs/modules/M2-operators/README.md)与 [M3 国产芯片适配](docs/modules/M3-domestic-chips/README.md)的课程大纲，补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
+- **第 8 周加深**：新增第 8 周（续）：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
 > - **原项目授权与出处不变**：本仓库沿用上游的 CC BY 4.0 协议，原作者与原仓库链接见文末。
 
 ---
@@ -33,6 +34,7 @@
 - FP16、FP8、INT4、投机解码、KV 淘汰等多个变体的 benchmark 数据
 - 一个按成本、延迟、质量选后端、带每请求 token 预算的路由器
 - 一份发表出来的 benchmark 写作，版本固定、命令可复现
+- （可选第 8 周（续））一张大规模集群 PD 架构图、KV 传输账表与“信号→动作→验证方法”策略表
 
 ## 时间投入
 
@@ -40,7 +42,7 @@
 |---|---|
 | 每节课时长 | 30 分钟 |
 | 每周节数 | 5 节，另有 2 天缓冲 |
-| 总计 | 10 周，50 节，25 小时 |
+| 总计 | 10 周，50 节，25 小时（核心）；另有第 8 周（续）5 节可选加深 |
 | GPU 成本 | 大约一块 24GB 显卡按半小时租用，另加两次 H100 |
 
 缓冲日是用来补课的，不是用来加新内容的。周二缺了一节，不至于让整个计划垮掉。
@@ -76,7 +78,7 @@
 | [Lambda](https://lambda.ai) / [vast.ai](https://vast.ai) | 按需和市场价 GPU，便宜 |
 | [Colab](https://colab.research.google.com) | 纯 Python 的课，不用部署服务 |
 
-第 1 周全部、第 3 周大部分、第 6 周的讲座日、第 9 周全部阅读都不需要 GPU。把租卡集中在动手的那几天。只有两节课必须用 H100：第 5 周的 1000 并发测试，以及第 8 周如果你真的要跑解耦式部署。
+第 1 周全部、第 3 周大部分、第 6 周的讲座日、第 9 周全部阅读都不需要 GPU。把租卡集中在动手的那几天。只有两节课必须用 H100：第 5 周的 1000 并发测试，以及第 8 周如果你真的要跑解耦式部署。第 8 周（续）的多节点实测需要多卡集群，租不到就只做部署验证、性能对比待补测。
 
 ### 需要安装的工具
 
@@ -248,6 +250,43 @@ pip install sglang
 
 ---
 
+### 第 8 周（续）：大规模集群 PD 优化
+
+**重点。** 第 8 周把 prefill 和 decode 拆开了，这一续周回答拆开之后在真实集群上要解决的问题：KV 怎么跨节点走、池子怎么共享、两池配比怎么定、节点挂了怎么办。
+
+**形式。** 以文字为主。论文一律是选读：每篇论文的核心思想、核心逻辑、关键机制和关键数字都已经写进下面正文，不读原文也能掌握深度；原文是想再深挖时的材料。数字是论文宣称的，没有独立复现。
+
+**产出。** 一张 Mooncake 架构图、一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的表、一张“信号→动作→验证方法”的扩缩容与容错策略表，以及一份注明实际跑了多大集群的解耦 vs 同机部署对比。
+
+#### 本周论文精读（正文；论文原文选读）
+
+**Mooncake：以 KVCache 为中心的解耦架构。** 出处：[Mooncake 论文（选读）](https://arxiv.org/abs/2407.00079)，FAST 2025 最佳论文；Kimi 的服务平台。开源实现见 [Mooncake 仓库](https://github.com/kvcache-ai/Mooncake)，文档见 [Mooncake 文档](https://kvcache-ai.github.io/Mooncake/)。
+
+- **核心思想。** 把 KVCache 当成系统调度的中心对象，而不是把请求或模型当中心。prefill 和 decode 拆到不同的集群；GPU 服务器里闲置的 CPU、DRAM、SSD 拼成一个集群范围的分布式 KV 缓存池（Mooncake Store）；调度器围着 KV 的位置和取回成本做决策。
+- **核心逻辑链。** 长上下文下 KV 巨大，prefill 要算力、decode 要显存带宽，两者诉求相反，合在一个实例里互相拖累，所以拆开；拆开的代价是 KV 必须跨节点搬，搬的成本决定了解耦划不划算，所以要有高速传输引擎和可复用的共享池；池子让 KV 变成可复用的资产，前缀命中就不用重算，prefill 只算增量部分；调度器按 SLO 做准入和放置，接不下的请求提前拒绝，而不是放进来排队拖垮所有人。
+- **关键机制。** 全局调度器 Conductor：对每个到达的请求，估算它在每个候选 prefill 节点上的 TTFT = 排队时间 + prefill 计算时间 + KV 传输时间（prefill 时间用离线测量拟合的多项式回归预测，输入是请求长度、前缀命中长度、传输时间），放到总和最小的节点；没有节点能满足 SLO 就直接拒绝，同样估算 TBT，decode 满足不了也提前拒绝。Mooncake Store：分布式 KV 缓存，KV 块按前缀感知的哈希寻址（论文评估里每块 256 个 token），热块在多节点复制，冷块按 LRU 淘汰；热前缀会自动迁移——最匹配的缓存如果在过载节点上，被选中的节点会拉一份副本，所以系统提示词这类共享前缀最后几乎每个 prefill 实例都有一份。请求流：Conductor 选 prefill 和 decode 实例 → 可复用的缓存块流进 prefill 节点 → 增量 prefill 逐层算，新 KV 边算边流向 decode 节点 → 请求加入 decode 侧的连续批处理；长上下文时 prefill 用分块流水线并行跨节点，只在块边界传 activation。Transfer Engine：统一的批量数据搬运接口，多传输协议、拓扑感知路由、多网卡带宽聚合、自动 failover。
+- **开放问题（论文自己承认的）。** 预测过载导致过度节流，接着负载不足又导致过度准入，两阶段之间会来回振荡；一个缓解思路是系统级预测——假设全系统统一的 decode 时间，用下一时隙预测的 decode 负载指导当前 prefill 的节流。
+- **关键结论与数字（论文宣称）。** 模拟场景下满足 SLO 的同时吞吐最高提升 525%；真实负载下 Kimi 多处理 75% 的请求；长上下文场景收益最大。注意这些数字的适用边界：可复现的实验部分用的是替代模型加回放 trace（论文评估用 16 个 8 卡节点），收益随前缀命中率变化（公开 trace 里 40–66%），“有效容量”只统计系统选择接纳的请求——读原文可以核对实验设计。
+- **为什么重要。** 它是 KVCache 中心学派的开山之作：把 KV 缓存从“引擎内部的优化”变成“集群一级的共享基础设施”。后面的 vLLM MooncakeConnector、SGLang HiCache、llm-d 的 Mooncake PD 部署指南都是这个思路的落地。
+
+**Splitwise：按阶段拆硬件。** 出处：[Splitwise 论文（选读）](https://arxiv.org/abs/2311.18677)，Microsoft，ISCA 2024。
+
+- **核心思想。** 一次 LLM 推理有两个阶段，prompt 计算是计算密集型，token 生成是访存密集型，两者的延迟、吞吐、显存、功耗特征完全不同；token 生成阶段用不满最新 GPU 的算力，用便宜、低功耗的卡就能跑。所以把两个阶段拆到不同的机器上，各自用适合的硬件、各自独立配资源。
+- **核心逻辑链。** 表征先行——论文先做了大量实测，证明 decode 阶段不需要最新 GPU 的算力；拆开后 prefill 用高算力卡，decode 用降功耗的便宜卡；拆开的代价是状态（KV）要跨机器传，用 GPU 集群里现成的高速背板互联来传；最后按三个目标设计集群：吞吐、成本、功耗。
+- **关键结论与数字（论文宣称）。** 吞吐 1.4 倍、成本低 20%；或者相同成本和功耗下吞吐 2.35 倍。
+- **为什么重要。** 最早把“按阶段拆硬件”做成完整集群设计的工作，第 8 周解耦思路的源头之一；它证明了解耦的收益首先来自硬件错配的纠正，不只是调度。
+
+| 天 | 课程 |
+|---|---|
+| 周一 | *读* · 按上面的 Mooncake 总结精读：核心思想、Conductor 的 TTFT 估算式、早期拒绝。画一张架构图：prefill 池、decode 池、KV 池（Mooncake Store）、Conductor、传输引擎，标出请求和 KV 各走哪条路。[Mooncake 论文（选读）](https://arxiv.org/abs/2407.00079)。 |
+| 周二 | *做* · 手算传输账：7B 模型（32 层、8 个 KV 头、head dim 128、BF16）每个 token 的 KV 是 128KB；4096 token 的 prompt 是 512MB；100Gb/s 约 40ms、400Gb/s InfiniBand 约 10ms、10Gb/s TCP 约 400ms。做一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的表，解耦划不划算从这个数开始。Transfer Engine 的机制见 [Mooncake 仓库](https://github.com/kvcache-ai/Mooncake)的 mooncake-transfer-engine。 |
+| 周三 | *读* · 跨节点 KV 池与复用：Mooncake Store 的分布式缓存、内容寻址、跨实例前缀复用、热块复制与 LRU 淘汰；再对照 [vLLM 解耦式 prefill 文档](https://docs.vllm.ai/en/latest/features/disagg_prefill/)里 9 种 connector 的分工（NixlConnector 走 UCX/GDS，MooncakeConnector 走 Transfer Engine，LMCacheConnectorV1 走 NIXL）。画出 GPU→CPU→远端三级层级，写清每一级命中意味着什么。 |
+| 周四 | *做* · 多节点解耦部署：用 [vLLM production-stack](https://github.com/vllm-project/production-stack) 的 Helm chart 装两套独立部署——prefill 一套、decode 一套（两份 values，两个 release；chart 原生是否支持解耦部署以当前版本为准，两套独立 release 是不依赖 chart 新特性的做法），按 vLLM 解耦文档配 `--kv-transfer-config`（NixlConnector 或 MooncakeConnector，照文档示例写）。再用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py` 在同一负载下测解耦 vs 同机部署的 TTFT 和吞吐。注意：kind 多节点只能验证拓扑和配置，测不出性能；真实多节点 GPU 集群才能测传输开销，租不到就记“部署验证完成，性能对比待补测”。 |
+| 周五 | *读* · 池配比、扩缩容与容错：先用第 5 周的负载特征判断 prefill-heavy 还是 decode-heavy，再定两池的卡数；扩缩容信号用 `num_requests_waiting`、TTFT 和队列深度；容错对照 [SGLang PD 解耦文档](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)的心跳与超时（heartbeat 5 秒、连续 2 次失败摘掉 prefill 节点、KV 等待超时 300 秒），节点挂了 KV 丢了要重算，路由器负责摘掉故障节点；参考 [llm-d](https://llm-d.ai) 的智能路由与预测延迟调度。产出：一张“信号→动作→验证方法”的策略表。 |
+| 缓冲 | 对照 [Mooncake 文档](https://kvcache-ai.github.io/Mooncake/)和 vLLM 解耦文档把周四的配置再走一遍；或在 [llm-d 文档](https://llm-d.ai)里找 Mooncake PD 部署指南（llm-d 2026 年 8 月新增）。 |
+
+---
+
 ### 第 9 周：单位经济学与路由器
 
 **重点。** 把成本的阅读变成代码。路线图从这里开始不只是关于延迟，也关于利润。
@@ -329,6 +368,7 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 | **第 6 周。** INT4 换来的吞吐，让质量代理指标掉了超过 1–2%。 | 保留 FP16 或 FP8 作默认。把 INT4 当作缓解显存压力的杠杆，不当作默认的吞吐手段。 |
 | **第 7 周。** 在你真实的请求速率下，投机解码反而变慢了。 | 预期之内。收益出现在低查询率下，GPU 被计算打满时就消失了。把交叉点发表出来，它比加速比更有用。 |
 | **第 8 周。** Kubernetes 开始整节整节地吃掉你搭集群的时间。 | 用托管集群，或者退回单节点 Docker 加 KEDA 那篇阅读。自动扩缩容的信号比自己搭的集群重要。 |
+| **第 8 周（续）。** 解耦后 TTFT 反而变差。 | 先算传输账：KV 传输时间超过了 prefill 排队省下的时间，解耦在你的 prompt 长度和带宽下不划算。先缩短传输路径（同机、更高速的互联）或退回同机部署，再谈扩池子。 |
 
 ---
 
@@ -368,6 +408,8 @@ GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention
 | [genai-perf](https://github.com/triton-inference-server/perf_analyzer) | TTFT 与 ITL 测量 |
 | [LLMPerf](https://github.com/ray-project/llmperf) | 托管端点的 benchmark |
 | [production-stack](https://github.com/vllm-project/production-stack) | Kubernetes 部署 |
+| [Mooncake](https://github.com/kvcache-ai/Mooncake) | 分布式 KV 缓存与传输引擎 |
+| [llm-d](https://llm-d.ai) | Kubernetes 上的分布式推理编排与智能路由 |
 
 ### 阅读习惯
 
