@@ -92,3 +92,7 @@ Started on:
 ---
 
 If you finish, link your benchmark writeup here. Open a PR to add it to the README.
+
+---
+
+本 fork 新增模块：M0 基础与度量、M2 算子优化、M3 国产芯片适配、M4 综合项目，见 [docs/MODULES.md](docs/MODULES.md)；它们的进度用各自模块 README 里的清单跟踪。
