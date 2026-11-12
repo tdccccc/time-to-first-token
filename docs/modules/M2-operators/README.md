@@ -216,7 +216,7 @@ def add(x, y):
 
 **怎么做**（30 分钟，**无需 GPU**）：
 
-1. 打开 [Triton Puzzles](https://github.com/gpu-mode/Triton-Puzzles)（基于 [Triton-Viz](https://github.com/gpu-mode/triton-viz)，用 Triton 解释器跑，不需要 GPU）。按仓库 README 的说明启动：解释器模式由环境变量 `TRITON_INTERPRET=1` 开启，notebook 顶部有完整说明。轻量替代：[Triton-Puzzles-Lite](https://github.com/SiriusNEO/Triton-Puzzles-Lite)（最小环境配置即可玩）。
+1. 打开 [Triton Puzzles](https://github.com/gpu-mode/Triton-Puzzles)（基于 [TileLens（原 Triton-Viz）](https://github.com/Deep-Learning-Profiling-Tools/tilelens)，用 Triton 解释器跑，不需要 GPU）。按仓库 README 的说明启动：解释器模式由环境变量 `TRITON_INTERPRET=1` 开启，notebook 顶部有完整说明。轻量替代：[Triton-Puzzles-Lite](https://github.com/SiriusNEO/Triton-Puzzles-Lite)（最小环境配置即可玩）。
 2. 谜题 1（逐元素操作）：把第 1 节的向量加法换成谜题形式做一遍，重点看解释器给出的访存可视化——每个程序读了哪块、写了哪块。
 3. 谜题 2（归约）：一个 block 内把一整块数据加成一个数。关键是 `tl.sum(x, axis=0)`——归约是 block 内的操作，不需要跨程序通信；跨程序的归约要用原子操作或二次归约，留到第 3 周。
 4. 谜题 3（矩阵乘）：用 `tl.dot(a, b)` 做分块矩阵乘。注意 `tl.dot` 要求输入是 2D block，且最小尺寸有限制（一般不小于 16×16）；`tl.load` 时用 `tl.make_block_ptr` 或手动算指针 + mask 两种写法，先会一种。
@@ -287,7 +287,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 
 `key` 是“输入形状变化时重新调优”的依据；同一形状下 autotune 只在第一次调用时扫一遍，后面直接用最优配置。**调优是自动的，但“调什么”是你定的**：BLOCK 大小与 num_warps 就是你要理解的两个旋钮。
 
-**产出**：一个 fused softmax（与 PyTorch 版数值对齐）+ 一份 autotune 扫出来的最优配置记录。注意：这个 softmax kernel 也是 M3 第 5 周移植案例的候选之一（与第 6 周的 SiluAndMul 二选一），先把它存好。
+**产出**：一个 fused softmax（与 PyTorch 版数值对齐）+ 一份 autotune 扫出来的最优配置记录。注意：这个 softmax kernel 先把它存好——M3 第 5 周的移植案例最终选了第 6 周的 SiluAndMul，softmax 可留作备用对照。
 
 ### 第 4 节 · 中文讲解对照
 
@@ -317,7 +317,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 | 快速验证一个融合想法 | Triton | 写起来快，解释器还能无卡跑 |
 
 2. 记住判断标准：**瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA**。第 3–5 周会在这个判断上继续加码。
-3. 把本周的检查清单并进第 1 周的清单：加两条——“mask 写对了吗（尾巴处理）”与“BLOCK 是不是 2 的幂（tl.arange 要求）”。
+3. 从本周起建一张总清单，先记两条——“mask 写对了吗（尾巴处理）”与“BLOCK 是不是 2 的幂（tl.arange 要求）”。
 
 **产出**：一页取舍笔记 + 更新后的检查清单。
 
@@ -563,8 +563,8 @@ def matmul_int8_kernel(a_ptr, b_ptr, c_ptr,
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.int32)
     for k in range(0, tl.cdiv(K, BLOCK_K)):
         k_rem = K - k * BLOCK_K
-        a = tl.load(a_ptrs, mask=offs_k[None, :] < k_rem, other=0)
-        b = tl.load(b_ptrs, mask=offs_k[:, None] < k_rem, other=0)
+        a = tl.load(a_ptrs, mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem), other=0)
+        b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N), other=0)
         acc = tl.dot(a, b, acc)
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bn
@@ -589,6 +589,8 @@ def matmul_int8(a_q, b_q, scale_a, scale_b):
         BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K)
     return c
 ```
+
+注意：`tl.load` 的 mask 必须同时盖住 M/N 维与 K 维余量——只盖 K 维时，M 或 N 不是 BLOCK 倍数会在尾块越界读。第 4 节的 M=32（decode 形状）就会撞上这一点，换形状前先确认 mask 齐全。
 
 4. 正确性检查：与 FP16 参考对比。量化有误差，`torch.allclose` 的绝对容限不再适用——改用**相对误差**，并把它记下来（这是本周的精度账本）：
 
@@ -636,8 +638,8 @@ def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_K)):
         k_rem = K - k * BLOCK_K
-        a = tl.load(a_ptrs, mask=offs_k[None, :] < k_rem, other=0.0)
-        b_int8 = tl.load(b_ptrs, mask=offs_k[:, None] < k_rem, other=0)
+        a = tl.load(a_ptrs, mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem), other=0.0)
+        b_int8 = tl.load(b_ptrs, mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N), other=0)
         b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)
         acc = tl.dot(a, b, acc)
         a_ptrs += BLOCK_K * stride_ak
@@ -646,6 +648,8 @@ def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
     mask_c = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc.to(tl.float16), mask=mask_c)
 ```
+
+注意：这里的 `tl.load` 也要同时盖 M/N 维与 K 维余量（同第 2 节），第 4 步的 M=32 形状下尾块同样会越界。
 
 3. 关键点：`b_int8.to(tl.float32) * sb[None, :]` 是在寄存器里对每个元素做的——dequant 的代价是每个元素几次 ALU 操作，省的是 HBM 往返。**融合的收益取决于 matmul 本来卡在哪**：小 batch（decode 形状，M 很小）时 matmul 是访存受限，省搬运就是省时间；大 batch 时 matmul 是计算受限，dequant 的 ALU 开销占比上升，收益收窄。这个判断先写下来，下一节实测验证。
 4. 两步基线（对照用，PyTorch 一行）：`b_fp16 = (b_q.float() * sb).to(torch.float16)`，再 `torch.matmul(a, b_fp16)`。用 `triton.testing.do_bench` 测两边在 M=32（decode 形状）与 M=1024（prefill 形状）下的耗时，填表。

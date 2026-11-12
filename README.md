@@ -14,7 +14,7 @@
 >
 > - **中文版**：主 README 翻译成中文，课程结构、做/读/略读标记、时间投入和 GPU 成本说明全部保留；英文原文保存在 [docs/original-README.md](docs/original-README.md)。
 > - **模块地图**：本计划扩展为 M0–M4 五个模块，见 [docs/MODULES.md](docs/MODULES.md)。M1 就是下面这份 10 周路线图；M0 是前置的基础与度量，M2 是算子优化，M3 是国产芯片适配，M4 是跨芯片综合项目。
-> - **算子与国产芯片**：新增 [M2 算子优化](docs/modules/M2-operators/README.md)与 [M3 国产芯片适配](docs/modules/M3-domestic-chips/README.md)的课程大纲，补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
+> - **算子与国产芯片**：新增 [M2 算子优化](docs/modules/M2-operators/README.md)与 [M3 国产芯片适配](docs/modules/M3-domestic-chips/README.md)的完整课程（各 6 周），补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
 > - **第 8 周加深**：新增第 8 周（续）：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
 > - **TensorRT-LLM 深入周**：第 11 周是可选的一周，讲编译式推理引擎 TensorRT-LLM 的架构、部署、量化、投机解码与解耦式服务，最后产出一份三引擎（vLLM / SGLang / TensorRT-LLM）对比报告。这一周引用的论文一律标为选读，正文直接给出深度总结。
 > - **论文变选读**：每篇论文的核心思想、核心逻辑、关键机制和关键数字都已在正文对应章节写成详细总结，读完全文是可选的加深步骤；第 10 周养成阅读习惯的部分仍按原设计直接读论文。
@@ -156,9 +156,9 @@ pip install sglang
 | 天 | 课程 |
 |---|---|
 | 周一 | *读* · [vLLM 指标设计文档](https://docs.vllm.ai/en/latest/design/v1/metrics/)。弄清 `num_requests_running`、`num_requests_waiting` 和延迟直方图到底在量什么。 |
-| 周二 | *做* · 按 [Prometheus 和 Grafana 教程](https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/)把监控搭在你的服务上。 |
+| 周二 | *做* · 按 [Prometheus 和 Grafana 监控文档](https://docs.vllm.ai/en/latest/design/metrics/)把监控搭在你的服务上。 |
 | 周三 | *做* · 导入看板 JSON，确认在少量负载下面板真的在动。抓取配置现在就修好，别等第 5 周 1000 并发的时候再修。 |
-| 周四 | *读* · [Databricks 性能工程](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)和 [NVIDIA benchmarking 基础](https://developer.nvidia.com/blog/llm-inference-benchmarking-fundamental-concepts/)。把它们定义的每个指标对应到一个面板上。没有定义的面板删掉。 |
+| 周四 | *读* · [Databricks 性能工程](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)和 [NVIDIA benchmarking 基础](https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/)。把它们定义的每个指标对应到一个面板上。没有定义的面板删掉。 |
 | 周五 | *读* · [How to Benchmark LLM Engines](https://modal.com/llm-almanac/how-to-benchmark)（Modal）。为什么要扫请求速率而不是只测一个点，为什么饱和点要丢掉。 |
 | 缓冲 | 可选：[vLLM Office Hours 21：Production Stack Deep Dive](https://www.youtube.com/watch?v=0ZVu0A4wWQg)，看已部署场景下的可观测性。 |
 
@@ -393,15 +393,15 @@ Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周
 
 三种方式，按需要配置的多少排序。
 
-**1. 网页。** 打开 `index.html`，或 GitHub Pages 版本，完成一节就打勾。进度存在浏览器的 local storage 里，关掉标签页或重启机器都不会丢。按浏览器、按设备，没有账号、没有服务器。
+**1. 网页。** 打开 `index.html`（本地直接打开就能用；部署到 GitHub Pages 后也可以在线打开），完成一节就打勾。进度存在浏览器的 local storage 里，关掉标签页或重启机器都不会丢。按浏览器、按设备，没有账号、没有服务器。
 
-要把进度带到另一台设备，用**复制同步链接**，它把你的状态打包成 URL 里一个 12 字符的码；或者用**导出**，下载一个 JSON 文件，之后再导入。这两个也是你清掉浏览器数据后的备份。
+要把进度带到另一台设备，用**复制同步链接**，它把你的状态打包成 URL 里一个 14 字符的码（旧的 12 字符链接仍可解码）；或者用**导出**，下载一个 JSON 文件，之后再导入。这两个也是你清掉浏览器数据后的备份。
 
 如果你在隐私浏览里打开页面，或在沙箱 frame 里打开，local storage 可能被禁用。页面会检测并提示你，打勾在当次访问里仍然能用。
 
-**2. GitHub issue。** Fork 本仓库，从 progress 模板新建一个 issue，在里面打勾。GitHub 把任务列表的状态存在它自己的服务器上，和你的账号绑定，所以在任何你登录的设备上都有效，还能留下一份你何时完成每一周的、带日期的评论记录。如果你想让进度比浏览器配置活得久，这是最好的选择。
+**2. GitHub issue。** Fork 本仓库，新建一个 issue，把 `progress.md` 里的检查清单复制进去，在里面打勾。GitHub 把任务列表的状态存在它自己的服务器上，和你的账号绑定，所以在任何你登录的设备上都有效，还能留下一份你何时完成每一周的、带日期的评论记录。如果你想让进度比浏览器配置活得久，这是最好的选择。
 
-**3. 直接改 README。** Fork 本仓库，在你自己的副本里勾选清单。你的提交记录就是进度记录。
+**3. 直接改 progress.md。** Fork 本仓库，在你自己的副本里勾选清单。你的提交记录就是进度记录。
 
 ### 关于用数据库
 
@@ -451,8 +451,8 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 | [SGLang](https://arxiv.org/abs/2312.07104) | NeurIPS 2024 | RadixAttention、前缀复用 | 第 4 周 |
 | [SARATHI](https://arxiv.org/abs/2308.16369) / [Sarathi-Serve](https://arxiv.org/abs/2403.02310) | OSDI 2024 | 分块 prefill | 第 4 周 |
 | [DistServe](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin) | OSDI 2024 | prefill/decode 解耦 | 第 8 周 |
-| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU | 第 8 周 |
-| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 | 第 8 周 |
+| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU | 第 8 周（续） |
+| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 | 第 8 周（续） |
 | [StreamingLLM](https://arxiv.org/abs/2309.17453) | ICLR 2024 | 注意力汇、长上下文 | 第 7 周 |
 | [EAGLE](https://arxiv.org/abs/2401.15077) | arXiv | 投机采样 | 第 7 周 |
 
@@ -493,7 +493,7 @@ GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention
 还有几点要注意：
 
 - 时间戳是目标值。讲座会被重新上传、重新剪辑，用视频里的章节标记来定位分割点。
-- MIT 6.5940 在 2025 秋没有开课。2023 秋和 2024 秋的录像都存在，任选其一。
+- MIT 6.5940 在 2025 秋没有开课（Han 教授休假）。2023 秋和 2024 秋的录像都存在，任选其一；2026 秋已恢复开课（[2026 秋课程页](https://hanlab.mit.edu/courses/2026-fall-65940)）。
 - vLLM 的博客有两种 URL 形式，文档随版本变化。如果链接 404，搜精确标题，不要改路径。
 - 这里引用的性能数字是论文和博客各自宣称的，没有独立复现。把它当作那个来源愿意为之辩护的数字，而不是你硬件上的事实。
 - 每百万 token 的成本和 GPU 每小时价格变化很快。经济学那部分阅读的价值在于方法。每个数字都要按你自己的硬件重新算。

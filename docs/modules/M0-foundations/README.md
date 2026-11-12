@@ -41,7 +41,7 @@ M1 的 10 周路线图默认你已经会“看”系统：知道什么受显存�
 
 **产出**：填好上面这张表，并写下你自己的基线要报哪几个数（建议：TTFT p50/p95/p99、ITL p50、吞吐、成功请求数）。
 
-**延伸**：[NVIDIA：LLM 推理 benchmark 基础概念](https://developer.nvidia.com/blog/llm-inference-benchmarking-fundamental-concepts/)、[Modal：How to Benchmark LLM Engines](https://modal.com/llm-almanac/how-to-benchmark)。
+**延伸**：[NVIDIA：LLM 推理 benchmark 基础概念](https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/)、[Modal：How to Benchmark LLM Engines](https://modal.com/llm-almanac/how-to-benchmark)。
 
 ## 第 3 节 · Profiling：看时间花在哪
 
