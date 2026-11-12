@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>基线报告（模板） · AI Infra 学习计划</title>
+<style>pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.codehilite .hll { background-color: #ffffcc }
+.codehilite { background: #f8f8f8; }
+.codehilite .c { color: #3D7B7B; font-style: italic } /* Comment */
+.codehilite .err { border: 1px solid #F00 } /* Error */
+.codehilite .k { color: #008000; font-weight: bold } /* Keyword */
+.codehilite .o { color: #666 } /* Operator */
+.codehilite .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.codehilite .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.codehilite .cp { color: #9C6500 } /* Comment.Preproc */
+.codehilite .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.codehilite .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.codehilite .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.codehilite .gd { color: #A00000 } /* Generic.Deleted */
+.codehilite .ge { font-style: italic } /* Generic.Emph */
+.codehilite .ges { font-weight: bold; font-style: italic } /* Generic.EmphStrong */
+.codehilite .gr { color: #E40000 } /* Generic.Error */
+.codehilite .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.codehilite .gi { color: #008400 } /* Generic.Inserted */
+.codehilite .go { color: #717171 } /* Generic.Output */
+.codehilite .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.codehilite .gs { font-weight: bold } /* Generic.Strong */
+.codehilite .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.codehilite .gt { color: #04D } /* Generic.Traceback */
+.codehilite .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.codehilite .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.codehilite .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.codehilite .kp { color: #008000 } /* Keyword.Pseudo */
+.codehilite .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.codehilite .kt { color: #B00040 } /* Keyword.Type */
+.codehilite .m { color: #666 } /* Literal.Number */
+.codehilite .s { color: #BA2121 } /* Literal.String */
+.codehilite .na { color: #687822 } /* Name.Attribute */
+.codehilite .nb { color: #008000 } /* Name.Builtin */
+.codehilite .nc { color: #00F; font-weight: bold } /* Name.Class */
+.codehilite .no { color: #800 } /* Name.Constant */
+.codehilite .nd { color: #A2F } /* Name.Decorator */
+.codehilite .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.codehilite .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.codehilite .nf { color: #00F } /* Name.Function */
+.codehilite .nl { color: #767600 } /* Name.Label */
+.codehilite .nn { color: #00F; font-weight: bold } /* Name.Namespace */
+.codehilite .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.codehilite .nv { color: #19177C } /* Name.Variable */
+.codehilite .ow { color: #A2F; font-weight: bold } /* Operator.Word */
+.codehilite .w { color: #BBB } /* Text.Whitespace */
+.codehilite .mb { color: #666 } /* Literal.Number.Bin */
+.codehilite .mf { color: #666 } /* Literal.Number.Float */
+.codehilite .mh { color: #666 } /* Literal.Number.Hex */
+.codehilite .mi { color: #666 } /* Literal.Number.Integer */
+.codehilite .mo { color: #666 } /* Literal.Number.Oct */
+.codehilite .sa { color: #BA2121 } /* Literal.String.Affix */
+.codehilite .sb { color: #BA2121 } /* Literal.String.Backtick */
+.codehilite .sc { color: #BA2121 } /* Literal.String.Char */
+.codehilite .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.codehilite .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.codehilite .s2 { color: #BA2121 } /* Literal.String.Double */
+.codehilite .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.codehilite .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.codehilite .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.codehilite .sx { color: #008000 } /* Literal.String.Other */
+.codehilite .sr { color: #A45A77 } /* Literal.String.Regex */
+.codehilite .s1 { color: #BA2121 } /* Literal.String.Single */
+.codehilite .ss { color: #19177C } /* Literal.String.Symbol */
+.codehilite .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.codehilite .fm { color: #00F } /* Name.Function.Magic */
+.codehilite .vc { color: #19177C } /* Name.Variable.Class */
+.codehilite .vg { color: #19177C } /* Name.Variable.Global */
+.codehilite .vi { color: #19177C } /* Name.Variable.Instance */
+.codehilite .vm { color: #19177C } /* Name.Variable.Magic */
+.codehilite .il { color: #666 } /* Literal.Number.Integer.Long */
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:#1c1c1c;line-height:1.75;background:#fff}
+a{color:#1a66cc;text-decoration:none}
+a:hover{text-decoration:underline}
+header.site{background:#f7f7f4;border-bottom:1px solid #e3e3de;padding:14px 0 0}
+header.site .inner{max-width:880px;margin:0 auto;padding:0 20px}
+header.site h1{font-size:20px;margin:0 0 10px}
+header.site h1 a{color:#1c1c1c}
+nav{display:flex;flex-wrap:wrap;gap:4px 16px;padding-bottom:12px;font-size:14px}
+nav a{color:#555}
+nav a.current{color:#1a66cc;font-weight:600}
+main{max-width:880px;margin:0 auto;padding:8px 20px 60px}
+h1{font-size:28px;line-height:1.3;border-bottom:1px solid #e8e8e3;padding-bottom:10px}
+h2{font-size:22px;border-bottom:1px solid #eee;margin-top:36px}
+h3{font-size:18px;margin-top:28px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:#f4f4f1;padding:1px 5px;border-radius:4px}
+pre{overflow-x:auto;background:#f7f7f4;padding:14px 16px;border-radius:6px;line-height:1.55}
+pre code{background:none;padding:0}
+.codehilite pre{background:#f7f7f4}
+table{border-collapse:collapse;margin:16px 0;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;font-size:15px}
+th{background:#f7f7f4}
+blockquote{border-left:4px solid #ddd;color:#555;margin:16px 0;padding:4px 16px}
+img{max-width:100%}
+hr{border:none;border-top:1px solid #e8e8e3;margin:32px 0}
+footer{max-width:880px;margin:0 auto;padding:0 20px 40px;color:#888;font-size:13px}
+ul,ol{padding-left:24px}
+li{margin:4px 0}
+</style>
+</head>
+<body>
+<header class="site"><div class="inner">
+<h1><a href="index.html">AI Infra 学习计划 · HTML 版</a></h1>
+<nav><a href="index.html">目录</a><a href="README.html">主路线图</a><a href="MODULES.html">模块地图</a><a href="progress.html">学习进度</a><a href="M0-foundations.html">M0 · 基础与度量</a><a href="M0-baseline-report-template.html" class="current">M0 · 基线报告模板</a><a href="M2-operators.html">M2 · 算子优化</a><a href="M3-domestic-chips.html">M3 · 国产芯片适配</a><a href="M3-cross-chip-report-template.html">M3 · 跨芯片报告模板</a><a href="original-README.html">上游英文原文</a><a href="../index.html">进度打卡 ↗</a></nav>
+</div></header>
+<main>
+<h1 id="_1">基线报告（模板）</h1>
+<blockquote>
+<p>填表规则：每一项都写实测值和实测条件；没测的写“待补测”，不要编数字。
+版本号、硬件、输入输出长度缺一个，这份报告就不可复现。</p>
+</blockquote>
+<h2 id="_2">环境</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>日期</td>
+<td>YYYY-MM-DD</td>
+</tr>
+<tr>
+<td>硬件</td>
+<td>例：RunPod RTX 4090 24GB / 本地 RTX 3090 / 云厂商 + 型号</td>
+</tr>
+<tr>
+<td>驱动 / CUDA</td>
+<td>例：nvidia-smi 输出的驱动版本与 CUDA 版本</td>
+</tr>
+<tr>
+<td>引擎与版本</td>
+<td>例：vLLM 0.11.0（<code>pip show vllm</code>）</td>
+</tr>
+<tr>
+<td>模型</td>
+<td>例：Qwen2.5-7B-Instruct（注明量化：无 / FP8 / AWQ）</td>
+</tr>
+<tr>
+<td>服务启动命令</td>
+<td>完整命令，含 <code>--max-num-seqs</code>、<code>--gpu-memory-utilization</code> 等关键参数</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">测量条件</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>压测脚本</td>
+<td><code>scripts/bench_openai.py</code>（本仓库）</td>
+</tr>
+<tr>
+<td>输入</td>
+<td>固定 prompt（见脚本内 <code>PROMPT</code>），输出 <code>--max-tokens</code> =</td>
+</tr>
+<tr>
+<td>并发级别</td>
+<td>例：1 / 8 / 32，每级请求数 =</td>
+</tr>
+<tr>
+<td>token 数来源</td>
+<td><code>usage.completion_tokens</code> / 估计值（脚本会在结果里标明）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_4">结果</h2>
+<table>
+<thead>
+<tr>
+<th>并发</th>
+<th>成功</th>
+<th>TTFT p50 / p95 / p99 (s)</th>
+<th>ITL p50 (s)</th>
+<th>吞吐 (tok/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>/</td>
+<td>/ /</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>8</td>
+<td>/</td>
+<td>/ /</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>32</td>
+<td>/</td>
+<td>/ /</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_5">拐点</h2>
+<ul>
+<li>吞吐不再增长、延迟开始恶化的并发数：约 ______（超过该点的测量值已丢弃，未列入上表）</li>
+<li>观察到的瓶颈现象（例：<code>num_requests_waiting</code> 爬升 / KV 缓存利用率到顶 / 出现抢占）：</li>
+</ul>
+<h2 id="_6">结论（一句话）</h2>
+<ul>
+<li>本次基线：______________________________（例：在并发 8 时 TTFT p95 为 X s，吞吐 Y tok/s；后续优化都以此为参照）</li>
+</ul>
+</main>
+<footer>本页由 Markdown 生成，源文件：<a href="../docs/modules/M0-foundations/baseline-report-template.md">docs/modules/M0-foundations/baseline-report-template.md</a>。请勿直接改 HTML，改 md 后运行 <code>python3 html/build.py</code> 重新生成。</footer>
+</body>
+</html>

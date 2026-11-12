@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M3 · 国产芯片适配 · AI Infra 学习计划</title>
+<style>pre { line-height: 125%; }
+td.linenos .normal { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: inherit; background-color: transparent; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 5px; padding-right: 5px; }
+.codehilite .hll { background-color: #ffffcc }
+.codehilite { background: #f8f8f8; }
+.codehilite .c { color: #3D7B7B; font-style: italic } /* Comment */
+.codehilite .err { border: 1px solid #F00 } /* Error */
+.codehilite .k { color: #008000; font-weight: bold } /* Keyword */
+.codehilite .o { color: #666 } /* Operator */
+.codehilite .ch { color: #3D7B7B; font-style: italic } /* Comment.Hashbang */
+.codehilite .cm { color: #3D7B7B; font-style: italic } /* Comment.Multiline */
+.codehilite .cp { color: #9C6500 } /* Comment.Preproc */
+.codehilite .cpf { color: #3D7B7B; font-style: italic } /* Comment.PreprocFile */
+.codehilite .c1 { color: #3D7B7B; font-style: italic } /* Comment.Single */
+.codehilite .cs { color: #3D7B7B; font-style: italic } /* Comment.Special */
+.codehilite .gd { color: #A00000 } /* Generic.Deleted */
+.codehilite .ge { font-style: italic } /* Generic.Emph */
+.codehilite .ges { font-weight: bold; font-style: italic } /* Generic.EmphStrong */
+.codehilite .gr { color: #E40000 } /* Generic.Error */
+.codehilite .gh { color: #000080; font-weight: bold } /* Generic.Heading */
+.codehilite .gi { color: #008400 } /* Generic.Inserted */
+.codehilite .go { color: #717171 } /* Generic.Output */
+.codehilite .gp { color: #000080; font-weight: bold } /* Generic.Prompt */
+.codehilite .gs { font-weight: bold } /* Generic.Strong */
+.codehilite .gu { color: #800080; font-weight: bold } /* Generic.Subheading */
+.codehilite .gt { color: #04D } /* Generic.Traceback */
+.codehilite .kc { color: #008000; font-weight: bold } /* Keyword.Constant */
+.codehilite .kd { color: #008000; font-weight: bold } /* Keyword.Declaration */
+.codehilite .kn { color: #008000; font-weight: bold } /* Keyword.Namespace */
+.codehilite .kp { color: #008000 } /* Keyword.Pseudo */
+.codehilite .kr { color: #008000; font-weight: bold } /* Keyword.Reserved */
+.codehilite .kt { color: #B00040 } /* Keyword.Type */
+.codehilite .m { color: #666 } /* Literal.Number */
+.codehilite .s { color: #BA2121 } /* Literal.String */
+.codehilite .na { color: #687822 } /* Name.Attribute */
+.codehilite .nb { color: #008000 } /* Name.Builtin */
+.codehilite .nc { color: #00F; font-weight: bold } /* Name.Class */
+.codehilite .no { color: #800 } /* Name.Constant */
+.codehilite .nd { color: #A2F } /* Name.Decorator */
+.codehilite .ni { color: #717171; font-weight: bold } /* Name.Entity */
+.codehilite .ne { color: #CB3F38; font-weight: bold } /* Name.Exception */
+.codehilite .nf { color: #00F } /* Name.Function */
+.codehilite .nl { color: #767600 } /* Name.Label */
+.codehilite .nn { color: #00F; font-weight: bold } /* Name.Namespace */
+.codehilite .nt { color: #008000; font-weight: bold } /* Name.Tag */
+.codehilite .nv { color: #19177C } /* Name.Variable */
+.codehilite .ow { color: #A2F; font-weight: bold } /* Operator.Word */
+.codehilite .w { color: #BBB } /* Text.Whitespace */
+.codehilite .mb { color: #666 } /* Literal.Number.Bin */
+.codehilite .mf { color: #666 } /* Literal.Number.Float */
+.codehilite .mh { color: #666 } /* Literal.Number.Hex */
+.codehilite .mi { color: #666 } /* Literal.Number.Integer */
+.codehilite .mo { color: #666 } /* Literal.Number.Oct */
+.codehilite .sa { color: #BA2121 } /* Literal.String.Affix */
+.codehilite .sb { color: #BA2121 } /* Literal.String.Backtick */
+.codehilite .sc { color: #BA2121 } /* Literal.String.Char */
+.codehilite .dl { color: #BA2121 } /* Literal.String.Delimiter */
+.codehilite .sd { color: #BA2121; font-style: italic } /* Literal.String.Doc */
+.codehilite .s2 { color: #BA2121 } /* Literal.String.Double */
+.codehilite .se { color: #AA5D1F; font-weight: bold } /* Literal.String.Escape */
+.codehilite .sh { color: #BA2121 } /* Literal.String.Heredoc */
+.codehilite .si { color: #A45A77; font-weight: bold } /* Literal.String.Interpol */
+.codehilite .sx { color: #008000 } /* Literal.String.Other */
+.codehilite .sr { color: #A45A77 } /* Literal.String.Regex */
+.codehilite .s1 { color: #BA2121 } /* Literal.String.Single */
+.codehilite .ss { color: #19177C } /* Literal.String.Symbol */
+.codehilite .bp { color: #008000 } /* Name.Builtin.Pseudo */
+.codehilite .fm { color: #00F } /* Name.Function.Magic */
+.codehilite .vc { color: #19177C } /* Name.Variable.Class */
+.codehilite .vg { color: #19177C } /* Name.Variable.Global */
+.codehilite .vi { color: #19177C } /* Name.Variable.Instance */
+.codehilite .vm { color: #19177C } /* Name.Variable.Magic */
+.codehilite .il { color: #666 } /* Literal.Number.Integer.Long */
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:#1c1c1c;line-height:1.75;background:#fff}
+a{color:#1a66cc;text-decoration:none}
+a:hover{text-decoration:underline}
+header.site{background:#f7f7f4;border-bottom:1px solid #e3e3de;padding:14px 0 0}
+header.site .inner{max-width:880px;margin:0 auto;padding:0 20px}
+header.site h1{font-size:20px;margin:0 0 10px}
+header.site h1 a{color:#1c1c1c}
+nav{display:flex;flex-wrap:wrap;gap:4px 16px;padding-bottom:12px;font-size:14px}
+nav a{color:#555}
+nav a.current{color:#1a66cc;font-weight:600}
+main{max-width:880px;margin:0 auto;padding:8px 20px 60px}
+h1{font-size:28px;line-height:1.3;border-bottom:1px solid #e8e8e3;padding-bottom:10px}
+h2{font-size:22px;border-bottom:1px solid #eee;margin-top:36px}
+h3{font-size:18px;margin-top:28px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:#f4f4f1;padding:1px 5px;border-radius:4px}
+pre{overflow-x:auto;background:#f7f7f4;padding:14px 16px;border-radius:6px;line-height:1.55}
+pre code{background:none;padding:0}
+.codehilite pre{background:#f7f7f4}
+table{border-collapse:collapse;margin:16px 0;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd;padding:8px 12px;text-align:left;font-size:15px}
+th{background:#f7f7f4}
+blockquote{border-left:4px solid #ddd;color:#555;margin:16px 0;padding:4px 16px}
+img{max-width:100%}
+hr{border:none;border-top:1px solid #e8e8e3;margin:32px 0}
+footer{max-width:880px;margin:0 auto;padding:0 20px 40px;color:#888;font-size:13px}
+ul,ol{padding-left:24px}
+li{margin:4px 0}
+</style>
+</head>
+<body>
+<header class="site"><div class="inner">
+<h1><a href="index.html">AI Infra 学习计划 · HTML 版</a></h1>
+<nav><a href="index.html">目录</a><a href="README.html">主路线图</a><a href="MODULES.html">模块地图</a><a href="progress.html">学习进度</a><a href="M0-foundations.html">M0 · 基础与度量</a><a href="M0-baseline-report-template.html">M0 · 基线报告模板</a><a href="M2-operators.html">M2 · 算子优化</a><a href="M3-domestic-chips.html" class="current">M3 · 国产芯片适配</a><a href="M3-cross-chip-report-template.html">M3 · 跨芯片报告模板</a><a href="original-README.html">上游英文原文</a><a href="../index.html">进度打卡 ↗</a></nav>
+</div></header>
+<main>
+<h1 id="m3">M3 · 国产芯片适配</h1>
+<blockquote>
+<p>状态：<strong>已完成</strong>——第 1–6 周全部为完整内容（加深版）。</p>
+<p>前置：M0（度量、profiling、压测脚本）与 M1（vLLM/SGLang 已跑通）。M3 的终点是：<strong>同一模型、同一评测集，在 NVIDIA 与至少一种国产芯片上都跑通、压测，并写出一份可复现的对比报告</strong>。</p>
+<p><strong>模块为 6 周</strong>：M2 的深讲标准同样要求 M3 的内容不压缩——第 2 周专讲 CANN/AscendC 到动手移植的程度，第 3 周专讲 Ascend 跑通与 vllm-ascend 插件架构，第 5 周专讲真实移植案例。</p>
+<p><strong>诚实声明</strong>：国产芯片适配进展极快，任何写死的支持矩阵都会很快过时。本模块不写静态结论，只给方法论和可复现的验证脚本；凡是涉及具体芯片、具体版本的实测结果，都按「某年某月某版本实测」的格式记录，由学习者自己验证后填写。<strong>本仓库目前没有任何一条在国产芯片上的实测记录</strong>，不要把大纲里的“预期”当成已验证的事实。</p>
+</blockquote>
+<h2 id="_1">为什么单开一个模块</h2>
+<p>调研结论：国产芯片适配<strong>没有任何动手的学习材料</strong>，只有框架插件、一张支持状态追踪表和零散厂商文档。M3 要补的就是这一块：从“知道有这些芯片”到“真的在上面跑起模型、量出数字”。</p>
+<h2 id="6-5-30-m1">课程安排（6 周，每周 5 节、每节 30 分钟，沿用 M1 的节奏）</h2>
+<h3 id="1">第 1 周 · 芯片与软件栈地图：先画地图，再谈适配</h3>
+<blockquote>
+<p>硬件：本周不需要任何硬件，纯阅读与整理。</p>
+</blockquote>
+<h3 id="1_1">第 1 节 · 国产芯片全景：先列清单，再问“能不能跑推理”</h3>
+<p><strong>目标</strong>：列出一张芯片清单，标出各自的软件栈，并用同一把尺子衡量它们。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>打开 <a href="https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md">awesome-china-gpu</a>（国产芯片推理适配进度追踪表），先看它给的分析框架——<strong>Four Walls（四面墙）</strong>：生态（ecosystem）、显存（memory）、通信（communication）、精度（precision）。<strong>这四面墙就是衡量一块芯片“能不能跑推理”的尺子</strong>：生态决定有没有框架插件、显存决定能放多大的模型、通信决定多卡能不能扩展、精度决定量化后准不准。先记下这个框架，后面每一周都会用它来归因。</li>
+<li>按追踪表列出主线芯片：昇腾（Ascend）、寒武纪、摩尔线程、海光、昆仑芯、天数智芯、壁仞、燧原、沐曦。每个只记两项：软件栈叫什么、推理引擎的接入方式是什么（vLLM 插件 / 容器镜像 / 原生框架）。不要展开写参数——参数会过期，接入方式才是地图上稳定的部分。</li>
+<li>注意追踪表的时效：表里引用的引擎对比与支持状态有明确的核实日期（例如 2026 年 6 月的对比表）。<strong>抄表的时候把日期一起抄下来</strong>，过期即作废——第 5 节会把这条变成制度。</li>
+</ol>
+<p><strong>产出</strong>：一张芯片清单（芯片 × 软件栈 × 接入方式），并写下 Four Walls 四面墙的定义。</p>
+<h3 id="2-sdk">第 2 节 · 软件栈分层：驱动 → SDK → 算子库 → 框架插件 → 推理引擎</h3>
+<p><strong>目标</strong>：画出分层图，并说清每一层坏了会在哪一层暴露出来。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>画五层：<strong>驱动</strong>（认不认卡、能不能分配显存）→ <strong>SDK</strong>（CANN、DTK、MUSA 这类厂商软件栈：编译器、运行时、算子库）→ <strong>算子库</strong>（TBE/AscendC 写的算子、厂商提供的融合算子）→ <strong>框架插件</strong>（vllm-ascend、vllm-musa 这类把芯片接进 vLLM 的包）→ <strong>推理引擎</strong>（vLLM、SGLang 本身）。</li>
+<li>对每一层问一个问题：“如果这一层缺东西，用户会在哪一层看到症状？”——驱动缺失：卡认不出来；算子库缺失：某个算子回退到 CPU 或低效实现（第 4 周的覆盖分析就是查这个）；插件缺失：引擎根本启动不了。<strong>分层图的用处就是定位问题在哪一层</strong>，而不是笼统地说“国产芯片不行”。</li>
+<li>用 Four Walls 对照分层：生态墙对应框架插件层、显存墙对应驱动与 SDK 的显存管理、通信墙对应多卡互联（SDK 层）、精度墙对应算子库的量化实现。两张图叠在一起，就是一张“问题定位地图”。</li>
+</ol>
+<p><strong>产出</strong>：一张分层图 + 每层的“缺失症状”一句话。</p>
+<h3 id="3-vllm">第 3 节 · 插件机制：vLLM 是怎么做到一块代码跑多家芯片的</h3>
+<p><strong>目标</strong>：能讲清插件算子的替换点（M2 第 6 周讲的是算子级 CustomOp，这里是平台级插件）。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>区分两个层次的“插件”：M2 第 6 周的 CustomOp 是<strong>算子级</strong>替换（一个 SiluAndMul 换成你的 Triton 版）；这里的 vllm-ascend 是<strong>平台级</strong>插件——它给 vLLM 提供一整套芯片适配：平台类（<code>NPUPlatform</code>）、算子实现、注意力后端、通信、编译配置。模型代码不用改，换的是底下的整套实现。</li>
+<li>打开 <a href="https://github.com/vllm-project/vllm-ascend">vllm-ascend</a>，看它的顶层结构：<code>vllm_ascend/</code> 下有 <code>platform.py</code>（<code>NPUPlatform</code>）、<code>ops/</code>（算子）、<code>attention/</code>（注意力后端）、<code>model_executor/</code>、<code>quantization/</code>、<code>patch/</code>、<code>worker/</code>、<code>compilation/</code>、<code>device/</code>、<code>distributed/</code>、<code>profiler/</code>、<code>_cann_ops_custom/</code>、<code>ascend_config.py</code>、<code>meta_registration.py</code>。<strong>第 3 周的任务之一就是在这些目录里定位到具体算子的实现位置</strong>——先把地图记下来。</li>
+<li>理解注册链：插件被 vLLM 加载后，注册它的平台类；vLLM 启动时按设备选平台，后面的算子分发、注意力后端选择、编译配置都跟着平台走。<strong>算子分发发生在平台选定之后</strong>——这是第 3 周要展开的细节，本节先记住顺序：先选平台，再分发算子。</li>
+</ol>
+<p><strong>产出</strong>：一页笔记：平台级插件与算子级 CustomOp 的区别 + vllm-ascend 的目录地图。</p>
+<h3 id="4-flaggems-flagcx">第 4 节 · 统一算子层：FlagGems / FlagCX 的思路</h3>
+<p><strong>目标</strong>：讲清统一层解决了什么、没解决什么。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>读 <a href="https://docs.flagos.io/projects/vllm-plugin-FL/en/latest/overview/features.html">vllm-plugin-FL 文档</a>：它提供两个统一库——<strong>FlagGems</strong>（统一算子库）与 <strong>FlagCX</strong>（统一通信库），加一个插件把它们接进 vLLM。</li>
+<li>理解它的分发逻辑：<strong>优先级分发</strong>——先找 FlagGems 的统一实现，没有再找厂商实现，再没有回退到 PyTorch 参考实现，自动 fallback。平台自动检测：启动时识别当前芯片，选对应的后端。支持的平台包括 NVIDIA、Ascend、T-Head、Iluvatar、MetaX、摩尔线程、Tsingmicro、海光、燧原、昆仑芯、阿里巴巴 PPU、CPU ARM64。</li>
+<li>讲清边界：统一层解决的是“<strong>一份 kernel 代码跑多家芯片</strong>”的问题（写一次，到处跑）；它没解决的是“每家芯片的峰值性能”——统一实现为了可移植会牺牲一部分特化优化，<strong>要榨干某块芯片的性能，最终还是要写它的原生算子</strong>（第 2 周的 AscendC、第 5 周的移植案例就是这条路）。这与 M2 第 5 周“Triton vs CUTLASS”的取舍是同一个逻辑，换了一块芯片。</li>
+<li>再看 <a href="https://github.com/flagos-ai/FlagTree">FlagTree</a>：它是 FlagGems 背后的算子开发框架——算子用一套抽象写出来，再针对不同芯片生成实现。第 5 周移植时会再遇到它。</li>
+</ol>
+<p><strong>产出</strong>：一页笔记：统一层解决了什么、没解决什么 + 分发优先级链。</p>
+<h3 id="5">第 5 节 · 小结：画一张带日期的软件栈地图</h3>
+<p><strong>目标</strong>：画一张带日期的地图，所有支持状态都标注核实日期。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>把第 1–4 节的东西合成一张图：横轴是芯片，纵轴是软件栈分层，每个格子写“支持状态 + 核实日期”（例如“vllm-ascend v0.30.0，2026 年 10 月，待本人核实”）。<strong>没有日期的格子一律视为未知</strong>。</li>
+<li>定一条制度：<strong>本模块所有关于芯片与软件栈的事实陈述都必须带核实日期</strong>，过期（超过 3 个月未核实）即视为作废，需要重新核实。这条制度从第 2 周起适用于每一份记录与报告。</li>
+<li>把本周的检查清单并进总清单，加两条：“Four Walls 四面墙能复述吗”“地图上的每个状态都有核实日期吗”。</li>
+</ol>
+<p><strong>产出</strong>：带日期的软件栈地图（过期即作废）。</p>
+<h3 id="2-cann-ascendc">第 2 周 · CANN 与 AscendC 深讲：算子从定义到编译到调用</h3>
+<blockquote>
+<p>硬件：本周以读文档与读代码为主，无卡可做；第 3 节的 AscendC 骨架是示意代码（标明“示意”二字），可编译的完整版以官方文档为准，实机编译标注“待有卡后补测”。</p>
+</blockquote>
+<h3 id="1-cann">第 1 节 · CANN 软件栈：先分清每一层是干什么的</h3>
+<p><strong>目标</strong>：画出 CANN 的分层，并说清算子开发用的是哪一层。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>先定版本锚点：vllm-ascend 最新稳定版 v0.30.0（2026 年 10 月）要求 Python 3.12、CANN 9.2.1、PyTorch 2.10.0、TorchNPU 2.10.0.post7。<strong>注意</strong>：本模块大纲旧版写的是“CANN 8.5”，已经过期——这就是第 1 周“带日期的地图”制度要防的事。以后每次提到版本号，都写“某年某月某版本”，并注明是在哪份文档上核实的。</li>
+<li>CANN 的分层（按“从硬件往上”的顺序）：
+   - <strong>驱动与运行时</strong>：认卡、分配显存、launch kernel——对应第 1 周分层图的驱动层；
+   - <strong>算子库</strong>：两类来源——厂商预置的算子（比如各种融合算子）与你自己写的算子（TBE / AscendC）；
+   - <strong>框架适配</strong>：TorchNPU（让 PyTorch 认 Ascend）、<code>torch_npu</code> 的算子注册——这是 vllm-ascend 的 <code>ops/</code> 与 <code>_cann_ops_custom/</code> 所在的层次。</li>
+<li>硬件锚点：vllm-ascend v0.30.0 支持的硬件包括 Atlas 800I A2/A3、300I Duo、950PR/950DT。没有实机时，华为的 HiDevLab 在线开发平台是官方提供的试用入口——先记下这个入口，第 3 周跑通时会用到。</li>
+<li>把 CANN 的版本、CANN 与 vllm-ascend 的版本对应关系、硬件型号三者写进第 1 周的地图里，标上核实日期（2026 年 11 月，来源：vllm-ascend README）。</li>
+</ol>
+<p><strong>产出</strong>：一张 CANN 分层图 + 一份版本锚点记录（CANN / PyTorch / TorchNPU / vllm-ascend / 硬件型号，带核实日期）。</p>
+<h3 id="2-tbe-ascendc">第 2 节 · TBE 与 AscendC：两代算子抽象长什么样</h3>
+<p><strong>目标</strong>：讲清一个算子的抽象长什么样——定义、编译、调用三段分别是什么。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>先讲两代的区别：<strong>TBE 是上一代</strong>——用 DSL 描述算子（定义输入输出、写计算表达式），再由编译器生成 kernel；<strong>AscendC 是当前的主力</strong>——用 C++ 直接写算子，算子是一个类，计算过程拆成流水线任务。两代的抽象不同，但链路相同：<strong>定义 → 编译 → 调用</strong>。</li>
+<li>这条链路的三个环节，每个环节的产物是什么：
+   - <strong>定义</strong>：算子的接口（输入输出的 shape 与 dtype）与计算逻辑（AscendC 里是一个带 <code>Init</code> 与 <code>Process</code> 方法的类）；
+   - <strong>编译</strong>：AscendC 编译器把算子源码编成可在 NPU 上跑的 kernel（产物是 kernel 二进制 + 注册信息）；
+   - <strong>调用</strong>：框架（PyTorch / vLLM）通过算子名找到它，把输入张量传进去，launch kernel。vllm-ascend 的 <code>_cann_ops_custom/</code> 目录就是自定义算子的落点——第 3 周会在那里定位具体算子。</li>
+<li>对照 M2 的经验：Triton 里你写的是“一个 kernel 函数 + grid”，AscendC 里你写的是“一个算子类 + 流水线任务”。<strong>抽象变了，但“写 kernel → 验证 → 接入”这套流程没变</strong>——第 5 周的移植案例就是把 M2 的 Triton kernel 沿这条链路搬过去。</li>
+<li>官方文档锚点：AscendC 开发文档（CANN 8.5.0 版）与向量编程指南（80RC2 版）——版本不同，API 细节可能有出入，读的时候以你所装 CANN 版本对应的文档为准：
+   - <a href="https://www.hiascend.com/document/detail/zh/canncommercial/850/opdevg/Ascendcopdevg/atlas_ascendc_map_10_0002.html">CANN 8.5.0 AscendC 开发文档</a>
+   - <a href="https://www.hiascend.com/document/detail/zh/canncommercial/80RC2/developmentguide/opdevg/Ascendcopdevg/atlas_ascendc_10_0021.html">CANN 80RC2 向量编程指南</a></li>
+</ol>
+<p><strong>产出</strong>：一页笔记：TBE vs AscendC 的抽象对比 + “定义 → 编译 → 调用”链路图。</p>
+<h3 id="3-ascendc">第 3 节 · AscendC 流水线模型：读懂一个向量加法算子</h3>
+<p><strong>目标</strong>：读懂 AscendC 的流水线编程模型，能说出每个部件是干什么的。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做；代码为示意骨架，可编译版以官方文档为准）：</p>
+<ol>
+<li>打开 CANN 8.5.0 AscendC 开发文档里的向量加法例子（<code>add_custom</code>），先看 kernel 入口——它长这样：</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="c1">// 示意骨架：结构与名字以 CANN 8.5.0 AscendC 开发文档的 add_custom 为准</span>
+<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="n">__global__</span><span class="w"> </span><span class="n">__aicore__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">add_custom</span><span class="p">(</span><span class="n">GM_ADDR</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">GM_ADDR</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">GM_ADDR</span><span class="w"> </span><span class="n">z</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// op.Init(...); op.Process();</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<ol start="2">
+<li>理解流水线模型的五个部件（对照文档里的定义）：
+   - <strong>TPipe</strong>：统一的资源管理——算子里的内存、事件都由它管；
+   - <strong>TQue</strong>：任务间通信与同步的队列——CopyIn、Compute、CopyOut 三个任务通过它接力；
+   - <strong>InitBuffer / AllocTensor</strong>：在 <code>Init</code> 里做——给 GlobalTensor 设地址、给队列分配 buffer；
+   - <strong>TBuf</strong>：临时内存——中间结果放这里；
+   - <strong>CopyIn / Compute / CopyOut</strong>：<code>Process</code> 里调的三步——把输入从 Global Memory 搬进片上、算、把结果搬回去。<strong>这三步与 Triton 的“load → 算 → store”是一一对应的</strong>，只是 AscendC 把它显式拆成了三个任务。</li>
+<li>理解核类型：<code>KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY)</code> 表示这个 kernel 只用向量核（AIV）。Ascend 的核分两种——向量核（AIV）与矩阵核（AIC，跑矩阵乘）；一个算子用哪种核，在定义时就定下来了。<strong>这就是第 4 周覆盖分析时要查的东西</strong>：一个算子在芯片侧有没有实现、用的是哪种核。</li>
+<li>对照 M2 的 Triton：Triton 里 block 大小、访存模式由编译器管；AscendC 里流水线的每一步都要你显式写出来。<strong>控制粒度更细，代码量更大</strong>——这就是移植时要付的代价，第 5 周会逐条记录。</li>
+</ol>
+<p><strong>产出</strong>：一份 AscendC 流水线模型笔记（五个部件 + 三步流程 + 核类型），能向别人讲清 <code>add_custom</code> 的执行过程。</p>
+<h3 id="4-vllm">第 4 节 · 一个算子的完整链路：从定义到被 vLLM 调用</h3>
+<p><strong>目标</strong>：能画出一个算子从定义到被调用的完整链路，并说清每个环节的产物。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>选一个具体的算子做追踪对象（建议：vllm-ascend 里一个你第 3 周会用到的算子，比如 RMSNorm——M2 第 6 周提到过它是 CustomOp 的可替换面，这里的链路是它的芯片侧版本）。在 <code>vllm_ascend/ops/</code> 与 <code>_cann_ops_custom/</code> 里找到它的实现位置。</li>
+<li>沿链路填这张表：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>环节</th>
+<th>产物</th>
+<th>在哪找</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>定义</td>
+<td>AscendC 算子类（Init / Process）</td>
+<td>厂商文档或 <code>vllm_ascend</code> 的自定义算子目录</td>
+</tr>
+<tr>
+<td>编译</td>
+<td>kernel 二进制 + 注册信息</td>
+<td>CANN 编译流程（文档）</td>
+</tr>
+<tr>
+<td>注册</td>
+<td>算子名 → 实现的映射</td>
+<td><code>torch_npu</code> 的算子注册 / vllm-ascend 的 <code>meta_registration.py</code></td>
+</tr>
+<tr>
+<td>调用</td>
+<td>框架前向里的一次算子调用</td>
+<td>vLLM 模型代码里调用该算子的位置</td>
+</tr>
+</tbody>
+</table>
+<ol start="3">
+<li>回答三个问题：① 算子名是在哪一层被解析的（框架层还是插件层）？② 如果这个算子在芯片侧没有实现，会发生什么（回退 CPU？报错？静默走低效实现？）——<strong>这个问题的答案就是第 4 周覆盖矩阵里要填的内容</strong>；③ 换一个 CANN 版本，链路的哪一环最可能变（编译产物？注册方式？）？</li>
+<li>把答案写下来，标上核实日期与来源（文档链接或源码文件路径）。</li>
+</ol>
+<p><strong>产出</strong>：一张“定义 → 编译 → 调用”链路表 + 三个问题的答案（带核实日期）。</p>
+<h3 id="5-cann">第 5 节 · 小结：CANN 学到什么程度算够</h3>
+<p><strong>目标</strong>：写出第 2 周的验收标准，并标出还缺什么（实机）。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>验收：① 能画出 CANN 分层并说清每一层的作用；② 能讲清 TBE 与 AscendC 的抽象区别；③ 能读懂 <code>add_custom</code> 的流水线（五个部件 + 三步）；④ 能画出一个算子从定义到被调用的链路，并说清每个环节的产物。</li>
+<li>诚实标注：本周没有实机验证——AscendC 代码没有编译过、算子没有跑通过。在检查清单里写：“AscendC 算子编译与运行：待有卡后补测（HiDevLab 或 Atlas 实机）”。</li>
+<li>把本周的检查清单并进总清单，加两条：“算子链路的四个环节能说清吗”“版本号与核实日期写了吗”。</li>
+</ol>
+<p><strong>产出</strong>：一份验收记录 + “待有卡后补测”清单。</p>
+<h3 id="3-ascend-vllm-ascend">第 3 周 · 同一模型在 Ascend 上跑通 + vllm-ascend 插件架构</h3>
+<blockquote>
+<p>硬件：<strong>本周需要 Ascend NPU 卡或云上试用环境</strong>（HiDevLab 在线开发平台是官方提供的试用入口），这是本模块最硬的约束。无卡时的替代路径：先读文档与安装脚本、跑通 Docker 镜像的拉取与配置检查（不启动推理），第 3 节的插件架构阅读无卡可做；实测部分一律标注“待有卡后补测”，不要编造运行结果。</p>
+</blockquote>
+<h3 id="1-cann-torch_npu-vllm-ascend">第 1 节 · 环境：CANN + torch_npu + vllm-ascend 的安装链</h3>
+<p><strong>目标</strong>：装好一条能跑 vLLM 的 Ascend 环境，并留下一份带版本号的安装记录。</p>
+<p><strong>怎么做</strong>（30 分钟，需 Ascend 环境；无卡时先读文档、拉镜像、做配置检查）：</p>
+<ol>
+<li>按第 2 周的版本锚点准备：vllm-ascend v0.30.0（2026 年 10 月）要求 Python 3.12、CANN 9.2.1、PyTorch 2.10.0、TorchNPU 2.10.0.post7。<strong>安装步骤以 <a href="https://github.com/vllm-project/vllm-ascend">vllm-ascend</a> 仓库 README 的安装章节为准</strong>——不要照抄本计划里的命令（版本一变命令就可能变），照着 README 一步一步走。</li>
+<li>每装一步记一步：命令、输出的关键行、版本号（<code>pip list</code> 里 <code>torch</code>、<code>torch_npu</code>、<code>vllm</code>、<code>vllm-ascend</code> 的版本，<code>npu-smi info</code> 的驱动与固件版本）。<strong>安装记录本身就是产出</strong>，后面第 6 周的报告要引用它。</li>
+<li>验证链路：先确认 NPU 可见（<code>npu-smi info</code> 能看到卡），再确认 PyTorch 能认 Ascend（<code>torch_npu</code> 可 import、能建一张 NPU 上的张量），最后确认 <code>vllm</code> 能启动并识别到 NPU 平台。<strong>三层验证缺一不可</strong>——第 1 周的分层图在这里就是检查清单：卡认不出来是驱动层的问题，<code>torch_npu</code> 认不出来是框架适配层的问题，vLLM 认不出来是插件层的问题。</li>
+<li>无卡时的替代：读 README 的安装章节与 Dockerfile（如果仓库提供），拉取镜像并做配置检查（环境变量、挂载路径、端口），把检查结果写下来；推理启动标注“待有卡后补测”。</li>
+</ol>
+<p><strong>产出</strong>：一份安装记录（含版本号：Python / CANN / PyTorch / TorchNPU / vllm-ascend / 驱动与固件）。</p>
+<h3 id="2-ascend">第 2 节 · 部署与冒烟：同一模型在 Ascend 上跑起来</h3>
+<p><strong>目标</strong>：同一模型在 Ascend 上跑起服务，同一个 prompt、同一输出长度，确认能出结果。</p>
+<p><strong>怎么做</strong>（30 分钟，需 Ascend 环境；无卡时标注“待有卡后补测”）：</p>
+<ol>
+<li>选模型：用 M1 里已经在 NVIDIA 上跑通过的同一个模型（优先小模型，如 Qwen2.5-0.5B 或 Qwen3-0.6B——nano-vllm-ascend 的支持列表里有这些，选它们能减少模型本身带来的变量）。<strong>模型不变，变的只有芯片</strong>——这是跨芯片对比成立的前提。</li>
+<li>启动服务：按 vllm-ascend README 的启动方式把服务跑起来，记下启动命令与启动日志的关键行（平台识别、加载的算子、显存分配）。</li>
+<li>冒烟：用 M0 的 <code>scripts/bench_openai.py</code> 发一次请求——同一个 prompt、同一输出长度，先确认能出结果，再看结果对不对（与 NVIDIA 上同一模型的输出肉眼对照一次，明显乱码先停下来查，不要继续压测）。</li>
+<li>记下第一次成功的端到端调用：命令、prompt、输出长度、耗时（只记一次，不做结论）。</li>
+</ol>
+<p><strong>产出</strong>：一次成功的端到端调用记录（命令 + prompt + 输出 + 耗时）。</p>
+<h3 id="3-vllm-ascend-hook-vllm">第 3 节 · vllm-ascend 插件架构：插件怎么 hook 进 vLLM、算子分发发生在哪</h3>
+<p><strong>目标</strong>：能在插件里定位到具体算子的实现位置，并讲清算子分发的链路。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做——读代码）：</p>
+<ol>
+<li>回顾第 1 周第 3 节的目录地图：<code>vllm_ascend/</code> 下有 <code>platform.py</code>（<code>NPUPlatform</code>）、<code>ops/</code>、<code>attention/</code>、<code>model_executor/</code>、<code>quantization/</code>、<code>patch/</code>、<code>worker/</code>、<code>compilation/</code>、<code>device/</code>、<code>distributed/</code>、<code>profiler/</code>、<code>_cann_ops_custom/</code>、<code>ascend_config.py</code>、<code>meta_registration.py</code>。</li>
+<li>回答三个问题（读代码找答案）：
+   - <strong>插件怎么 hook 进 vLLM</strong>：启动时 vLLM 怎么发现并加载 vllm-ascend（平台注册发生在哪——<code>platform.py</code> 里的 <code>NPUPlatform</code> 是怎么被 vLLM 识别的）；
+   - <strong>算子分发发生在什么地方</strong>：一次前向里，某个算子（比如 RMSNorm 或 SiluAndMul）是怎么被分发到 Ascend 实现的——分发点在平台层、插件层还是算子注册层；
+   - <strong>注意力后端在哪</strong>：<code>attention/</code> 目录里是什么——vLLM 的 attention 后端选择是怎么走到 Ascend 的实现的。</li>
+<li>动手定位：选一个具体算子（建议 RMSNorm——M2 第 6 周讲过它是 CustomOp 的可替换面，这里的定位是它的芯片侧版本），从模型代码里的调用点出发，沿着分发链一路找到它在插件里的实现文件，记下文件路径与函数名。<strong>定位记录本身就是产出</strong>：文件路径 + 调用链（模型代码 → 分发点 → 插件实现）。</li>
+<li>对照第 2 周第 4 节的“定义 → 编译 → 调用”链路：这个算子的 Ascend 实现在链路的哪一环（定义？注册？调用？），它的编译产物在哪。</li>
+</ol>
+<p><strong>产出</strong>：一张插件架构图 + 一个算子的定位记录（文件路径 + 调用链）。</p>
+<h3 id="4">第 4 节 · 踩坑记录：把每个问题和解法写下来</h3>
+<p><strong>目标</strong>：留下一份踩坑清单，后面的人不用再踩一遍。</p>
+<p><strong>怎么做</strong>（30 分钟，需 Ascend 环境；无卡时先写“预期坑位”清单，实测后补）：</p>
+<ol>
+<li>把第 1–2 节遇到的每个问题按这四列记下来：现象（报错原文或症状）、定位（第 1 周分层图里的哪一层）、解法（命令或改动）、验证（怎么确认修好了）。</li>
+<li>至少覆盖三类坑：版本不匹配（CANN / TorchNPU / vllm-ascend 三者的版本对应关系）、环境变量与路径（CANN 的环境脚本有没有 source）、显存与设备可见性（<code>npu-smi</code> 能看到卡但框架看不到）。</li>
+<li>无卡时先写“预期坑位”：按 README 的安装章节与 issue 列表，列出最可能遇到的三个问题与排查思路，标上“待实测确认”。</li>
+</ol>
+<p><strong>产出</strong>：踩坑清单（现象 + 定位层 + 解法 + 验证）。</p>
+<h3 id="5-ascend-nvidia">第 5 节 · 小结：Ascend 与 NVIDIA 的部署差异对照表</h3>
+<p><strong>目标</strong>：写出一页部署差异表。</p>
+<p><strong>怎么做</strong>（30 分钟，总结无卡可做；差异表里没有实测过的项标“待补测”）：</p>
+<ol>
+<li>对照 M1 里在 NVIDIA 上的部署流程，填这张表：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>环节</th>
+<th>NVIDIA（M1 的流程）</th>
+<th>Ascend（本周的流程）</th>
+<th>差异点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>驱动与设备可见性</td>
+<td><code>nvidia-smi</code></td>
+<td><code>npu-smi info</code></td>
+<td>命令与输出格式不同，检查项相同</td>
+</tr>
+<tr>
+<td>框架适配</td>
+<td>PyTorch + CUDA</td>
+<td>PyTorch + TorchNPU（CANN）</td>
+<td>多一层 CANN，版本对应关系更严</td>
+</tr>
+<tr>
+<td>引擎插件</td>
+<td>vLLM 原生</td>
+<td>vllm-ascend 插件</td>
+<td>插件的版本要与 vLLM 版本对应</td>
+</tr>
+<tr>
+<td>启动命令</td>
+<td><code>vllm serve ...</code></td>
+<td>同命令 + Ascend 平台识别</td>
+<td>命令相近，底层走的平台不同</td>
+</tr>
+<tr>
+<td>算子实现</td>
+<td>CUDA / Triton</td>
+<td>CANN / AscendC / 自定义算子</td>
+<td>第 4 周要展开的覆盖分析</td>
+</tr>
+</tbody>
+</table>
+<ol start="2">
+<li>写一句话结论：部署差异主要在“多出来的层次”（CANN 与插件），而不是模型本身——<strong>模型代码不用改，改的是底下的栈</strong>。这句话是第 1 周“平台级插件”结论的实测版。</li>
+<li>把本周的检查清单并进总清单，加两条：“安装记录的版本号全吗”“能在插件里定位到一个算子的实现吗”。</li>
+</ol>
+<p><strong>产出</strong>：一页部署差异对照表。</p>
+<h3 id="4_1">第 4 周 · 算子覆盖分析</h3>
+<blockquote>
+<p>硬件：第 1 节需要能跑 profiling 的环境（NVIDIA 卡即可）；第 2–5 节的对照工作无卡可做；芯片侧的核实需要 Ascend 环境或官方文档，核实不了的项标“待核实”。</p>
+</blockquote>
+<h3 id="1-pytorch-profiler">第 1 节 · 导出算子清单：用 PyTorch Profiler 导出一次推理的全部算子</h3>
+<p><strong>目标</strong>：拿到一份真实的算子清单——一次推理到底调了哪些算子、各占多少时间。</p>
+<p><strong>怎么做</strong>（30 分钟，需 NVIDIA 卡；无卡时先写 profiler 脚本，实测标注“待补测”）：</p>
+<ol>
+<li>用 M0 第 3 节的 profiling 方法（PyTorch Profiler），对 M1 里跑通过的模型做一次前向，导出全部算子：算子名、调用次数、累计耗时、占比。<strong>只导出，不分析</strong>——先拿到清单。</li>
+<li>按耗时排个序，标出 Top 10。预期会看到：矩阵乘（GEMM 类）、attention、归一化（RMSNorm）、激活（SiluAndMul）、各类逐元素算子。<strong>这份清单就是第 2 节要逐条对照的对象</strong>。</li>
+<li>注意：profiler 导出的是 PyTorch 算子名（如 <code>aten::mm</code>、<code>aten::bmm</code>），而芯片侧的对照要落到“这个 PyTorch 算子在 Ascend 上由哪个实现承接”——第 2 节会讲这个映射怎么做。</li>
+</ol>
+<p><strong>产出</strong>：一份算子清单（算子名 × 调用次数 × 耗时 × 占比，Top 10 标出）。</p>
+<h3 id="2">第 2 节 · 逐条对照：哪些算子在芯片侧有对应实现，哪些会回退</h3>
+<p><strong>目标</strong>：出一份算子覆盖矩阵——每个算子在芯片侧的状态是什么。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做；对照依据是官方文档与插件源码，核实不了的标“待核实”）：</p>
+<ol>
+<li>对第 1 节清单里的每个算子（至少覆盖 Top 10），查它在芯片侧的状态，分四档：
+   - <strong>原生实现</strong>：CANN / AscendC 有对应实现，性能有保障；
+   - <strong>插件实现</strong>：vllm-ascend 的 <code>ops/</code> 或 <code>_cann_ops_custom/</code> 里有实现（第 3 周第 3 节定位过这类位置）；
+   - <strong>回退</strong>：没有芯片侧实现，走 CPU 或 PyTorch 参考实现（慢，但能跑）；
+   - <strong>待核实</strong>：文档与源码里都没找到明确说法。</li>
+<li>填覆盖矩阵：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>算子（PyTorch 名）</th>
+<th>耗时占比</th>
+<th>芯片侧状态</th>
+<th>实现位置（文件/文档链接）</th>
+<th>核实日期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aten::mm</code></td>
+<td>…</td>
+<td>原生实现</td>
+<td>…</td>
+<td>某年某月</td>
+</tr>
+<tr>
+<td><code>aten::silu</code> / <code>aten::mul</code></td>
+<td>…</td>
+<td>插件实现</td>
+<td>…</td>
+<td>某年某月</td>
+</tr>
+<tr>
+<td>…</td>
+<td>…</td>
+<td>待核实</td>
+<td>—</td>
+<td>待核实</td>
+</tr>
+</tbody>
+</table>
+<ol start="3">
+<li>关键问题：<strong>回退的算子在不在关键路径上</strong>。一个只占 1% 时间的算子回退 CPU 无所谓；一个占 20% 的算子回退就是瓶颈。把“状态 × 耗时占比”一起看，不要只看状态。</li>
+</ol>
+<p><strong>产出</strong>：一份算子覆盖矩阵（Top 10 全覆盖，带核实日期）。</p>
+<h3 id="3-benchmark-tritonascendbench">第 3 节 · 迁移 benchmark 怎么做：读懂 TritonAscendBench 的设计</h3>
+<p><strong>目标</strong>：理解迁移评测的设计——它测什么、怎么判分、没卡时能做什么。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>打开 <a href="https://github.com/Gxj230958/TritonAscendBench">TritonAscendBench</a>（评测生产级 Triton kernel 从 GPU 迁移到 Ascend 的可用性），先看规模：101 个任务，分 L1（36 个）、L2（35 个）、L3（30 个）三档难度。</li>
+<li>理解它的工作流：<code>tab init-solution</code>（生成解法骨架）→ <code>tab run</code>（跑评测）→ <code>tab run-suite</code>（批量跑）→ <code>tab package</code> / <code>tab validate-submission</code>（打包与校验提交）。解法的入口是 <code>npu_triton_impl(inputs) -&gt; dict</code>——<strong>必须是一个真正的 Triton kernel</strong>，不能是 PyTorch 的取巧实现。</li>
+<li>理解它的判分：正确性在 CPU 上对照 PyTorch oracle 判分（有容限分级）；性能需要在 910B 上实测。<code>tab run</code> 默认 <code>--backend npu</code>，<code>--backend gpu</code> 是 CUDA 自查（先确认 kernel 在 GPU 上是对的，再谈迁移）。<strong>没有 NPU 时结果会标 <code>npu_antihack_unverified</code></strong>——不是静默的 GPU 回退，这个标记本身就是诚实设计。</li>
+<li>看它的 worked example：<code>USAGE.md</code> 里的 <code>L2_04_silu_and_mul</code>——一个完整的 silu_and_mul Triton kernel（M2 第 6 周写过同一个算子，第 5 周会移植它）。先读懂这个例子的 kernel 与评测方式，第 5 周直接用它练手。</li>
+<li>注意版本：它的 NPU 环境参考配置在 <code>docker/Dockerfile.npu</code> 里（CANN 8.5.0、torch_npu 2.8.0.post1、triton_ascend 3.2.0）——与第 2 周的 vllm-ascend 锚点（CANN 9.2.1）<strong>不是同一套版本</strong>。不同工具钉不同版本是常态，记录时写清“这一步用的是哪套版本”，不要混在一起。</li>
+</ol>
+<p><strong>产出</strong>：一页笔记：TritonAscendBench 测什么、怎么判分、没卡时能做到哪一步。</p>
+<h3 id="4-3">第 4 节 · 动手：对清单里最耗时的 3 个算子，查它们的芯片侧实现状态</h3>
+<p><strong>目标</strong>：出一份“Top 3 算子覆盖分析”。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做；查不到的写“待核实”，不猜）：</p>
+<ol>
+<li>从第 1 节的清单里取耗时 Top 3 的算子，对每个做三件事：① 在 vllm-ascend 的 <code>ops/</code>、<code>attention/</code>、<code>_cann_ops_custom/</code> 里找它的实现（第 3 周第 3 节的方法）；② 在 CANN 文档里找它有没有原生实现；③ 在覆盖矩阵里更新它的状态与实现位置。</li>
+<li>对每个算子写一句话结论：“这个算子在 Ascend 上由某某实现承接（文件路径），预计不是瓶颈 / 可能是瓶颈 / 待核实”。</li>
+<li>如果 Top 3 里有 attention 相关算子，注意：attention 在 vLLM 里走后端（<code>attention/</code> 目录），不是 CustomOp——第 3 周第 3 节已经讲过这个边界，这里再确认一次。</li>
+</ol>
+<p><strong>产出</strong>：一份“Top 3 算子覆盖分析”（每个算子：实现位置 + 一句话结论）。</p>
+<h3 id="5_1">第 5 节 · 小结：覆盖矩阵的结论——瓶颈在算子覆盖，还是在调度/显存</h3>
+<p><strong>目标</strong>：写出一页结论，用 Four Walls 归因。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>回到第 1 周的 Four Walls：生态、显存、通信、精度。把覆盖矩阵的结论往四面墙上贴——瓶颈在<strong>生态墙</strong>（算子没实现、要回退）？还是<strong>显存墙</strong>（算子有实现，但显存带宽跟不上）？还是<strong>精度墙</strong>（量化实现有差异）？通信墙（多卡）本周不涉及，先空着。</li>
+<li>写一页结论，格式是：“本次分析的瓶颈主要在 X 墙，依据是覆盖矩阵里的某几行（算子名 + 耗时占比 + 状态）；Y 墙没有证据，先不下结论”。</li>
+<li>把本周的检查清单并进总清单，加两条：“覆盖矩阵的 Top 10 全了吗”“每个状态都有核实日期或‘待核实’标记吗”。</li>
+</ol>
+<p><strong>产出</strong>：一页结论（瓶颈归因 + 依据）。</p>
+<h3 id="5-m2-triton-kernel-ascend">第 5 周 · 移植案例：把 M2 的 Triton kernel 一步一步搬到 Ascend</h3>
+<blockquote>
+<p>硬件：第 1–3 节无卡可做；第 4 节动手需要目标芯片环境（或 TritonAscendBench 的 NPU 后端），无卡时先完成 GPU 自查与移植计划，NPU 步骤标注“待有卡后补测”。</p>
+</blockquote>
+<h3 id="1-demo-ascend">第 1 节 · 教学 demo：把一个小推理引擎移植到 Ascend 是怎么做的</h3>
+<p><strong>目标</strong>：读懂移植的关键改动点。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>打开 <a href="https://github.com/linzm1007/nano-vllm-ascend">nano-vllm-ascend</a>（教学用 nano-vllm 移植到 Ascend 的 demo，中文 README）。它支持 Qwen3-0.6B/32B、Qwen2/2.5-0.5B、Llama-3.2-1B、Qwen3-30B-A3B MoE、Qwen3-VL、MiniCPM4-0.5B，带张量并行、torchair 图编译、融合算子、前缀缓存、PageAttention、自定义 rms_norm 算子示例与在线推理；attention 有三种实现：FlashAttention 库版、NPU 原生版、PyTorch 原生版。</li>
+<li>读它的移植改动点，列一张表：原版 nano-vllm 里哪些地方要改才能跑在 Ascend 上——框架适配（<code>torch_npu</code> 替换 CUDA 调用）、图编译（torchair）、attention 后端（三种实现怎么选）、自定义算子（rms_norm 示例是怎么注册与调用的）。</li>
+<li>注意它的定位：<strong>教学 demo，不是生产引擎</strong>。读它的目标是“看清移植要改哪些地方”，不是“学会这个引擎”。改动点清单就是本节的产出。</li>
+</ol>
+<p><strong>产出</strong>：一份移植关键改动点清单（框架适配 / 图编译 / 注意力后端 / 自定义算子）。</p>
+<h3 id="2-triton-kernel-gpu-ascend">第 2 节 · Triton kernel 迁移：从 GPU 到 Ascend 要改什么</h3>
+<p><strong>目标</strong>：讲清迁移的方法论——不是背一份“不兼容列表”，而是会跑“自查 → 迁移 → 记录”的循环。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>先定工具链：Ascend 上的 Triton 是 triton-ascend（TritonAscendBench 的 NPU 环境参考配置：CANN 8.5.0、torch_npu 2.8.0.post1、triton_ascend 3.2.0——与第 2 周的 vllm-ascend 锚点不是同一套版本，记录时写清用的是哪一套）。</li>
+<li>再定流程（第 4 节要完整走一遍）：
+   - <strong>GPU 自查</strong>：<code>tab run --backend gpu</code>——先确认 kernel 在 CUDA 上是对的，再谈迁移；
+   - <strong>NPU 实测</strong>：<code>tab run</code>（默认 <code>--backend npu</code>）——跑起来，记录每一个报错与失败；
+   - <strong>逐条记录</strong>：每个不兼容点记一行：现象（报错原文）、定位（kernel 里的哪一行、哪个 API）、改法、重测结果；
+   - <strong>不猜</strong>：没有实测到的不兼容点不要写进记录——<strong>移植案例的价值在于“真实跑出来的清单”，不是“背下来的清单”</strong>。</li>
+<li>预习对照物：第 4 周第 3 节的 worked example——<code>L2_04_silu_and_mul</code> 的参考 kernel（二维 grid、mask、fp32 里算 SiLU 再 cast 回输入精度）。M2 第 6 周写过同一个算子，第 4 节要移植的就是它——先把两个版本并排看一遍，确认语义一致。</li>
+</ol>
+<p><strong>产出</strong>：一份迁移流程说明（GPU 自查 → NPU 实测 → 逐条记录）+ 不兼容点记录表的表头。</p>
+<h3 id="3-flaggems-kernel">第 3 节 · 统一算子库：FlagGems 如何让一份 kernel 跑多家芯片</h3>
+<p><strong>目标</strong>：讲清统一算子层的机制——写一次，到处跑，是怎么做到的。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>回顾第 1 周第 4 节：FlagGems（统一算子库）+ FlagCX（统一通信库）+ vllm-plugin-FL（接进 vLLM 的插件），分发优先级是 FlagGems → 厂商实现 → PyTorch 参考，自动 fallback。</li>
+<li>再看 <a href="https://github.com/flagos-ai/FlagTree">FlagTree</a>：它是 FlagGems 背后的算子开发框架——算子用一套抽象写出来，再针对不同芯片生成实现。读它的 README，回答：① 一个算子的“统一描述”长什么样；② 针对不同芯片的生成发生在什么时候（编译时？运行时？）；③ 如果某块芯片上统一实现跑不起来，回退链是怎样的。</li>
+<li>对照第 2 节的移植：FlagGems 的路线是“<strong>写一次，生成多份</strong>”，第 4 节的路线是“<strong>手写一份，再逐条改</strong>”。两种路线的取舍与 M2 第 5 周“Triton vs CUTLASS”是同一个逻辑：统一实现省人力、牺牲特化性能；手写移植费人力、能榨干单芯片性能。<strong>移植案例要记录的不仅是“改了什么”，还有“为什么这条路线的取舍是这样”</strong>。</li>
+</ol>
+<p><strong>产出</strong>：一页机制笔记（统一描述 → 按芯片生成 → 回退链）+ 两种移植路线的取舍。</p>
+<h3 id="4-m2-siluandmul-tritonascendbench-l2_04">第 4 节 · 动手：移植 M2 的 SiluAndMul 到 TritonAscendBench 的 L2_04</h3>
+<p><strong>目标</strong>：出一份真实的移植记录（含失败的尝试）。</p>
+<p><strong>怎么做</strong>（30 分钟，需 NPU 环境或至少 GPU 自查；无卡时做 GPU 自查 + 移植计划，NPU 步骤标注“待有卡后补测”）：</p>
+<ol>
+<li>取 M2 第 6 周写的 Triton 版 SiluAndMul（二维 grid、mask、fp32 SiLU、cast 回输入精度再乘），用 <code>tab init-solution</code> 生成 <code>L2_04_silu_and_mul</code> 的解法骨架，把 kernel 填进 <code>npu_triton_impl(inputs) -&gt; dict</code>。</li>
+<li>先跑 GPU 自查：<code>tab run --backend gpu</code>——确认 kernel 在 CUDA 上正确。这是迁移的基线：<strong>GPU 上不对的东西，搬到 NPU 上也不会对</strong>。</li>
+<li>再跑 NPU：<code>tab run</code>（默认 <code>--backend npu</code>）。每遇到一个不兼容点，按第 2 节的表头记一行：现象（报错原文）、定位（kernel 里的哪一行、哪个 API）、改法、重测结果。<strong>改完一个测一个，不要攒一堆改动再测</strong>——否则失败归因不清。</li>
+<li>判分说明：正确性在 CPU 上对照 PyTorch oracle 判分（有容限分级）；性能需要在 910B 上实测；没有 NPU 时结果标 <code>npu_antihack_unverified</code>——<strong>这个标记要原样写进记录</strong>，不要把它当成“通过”。</li>
+<li>无卡时：完成第 1–2 步（GPU 自查通过）+ 一份移植计划（按 kernel 的每一行，写出“这一行在 triton-ascend 上可能有什么问题、准备怎么验证”——写“可能”与“准备怎么验证”，不写定论），NPU 步骤标注“待有卡后补测”。</li>
+</ol>
+<p><strong>产出</strong>：一份移植记录（不兼容点逐条：现象 + 定位 + 改法 + 重测结果；无卡时为 GPU 自查结果 + 移植计划）。</p>
+<h3 id="5_2">第 5 节 · 小结：移植的通用检查清单</h3>
+<p><strong>目标</strong>：写出移植的通用检查清单。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>把第 4 节的记录提炼成清单（按流程顺序）：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>检查项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>基线</td>
+<td>GPU 自查通过了吗（<code>--backend gpu</code>）</td>
+</tr>
+<tr>
+<td>环境</td>
+<td>版本锚点写清了吗（CANN / torch_npu / triton_ascend 各是哪一版）</td>
+</tr>
+<tr>
+<td>迁移</td>
+<td>每个不兼容点都记了现象 + 定位 + 改法 + 重测结果吗</td>
+</tr>
+<tr>
+<td>判分</td>
+<td>正确性判分与性能判分分开看了吗（CPU oracle vs 910B 实测）</td>
+</tr>
+<tr>
+<td>诚实</td>
+<td>没有 NPU 的结果标了 <code>npu_antihack_unverified</code> 吗</td>
+</tr>
+<tr>
+<td>取舍</td>
+<td>统一实现 vs 手写移植的取舍写了吗</td>
+</tr>
+</tbody>
+</table>
+<ol start="2">
+<li>把本周的检查清单并进总清单，加两条：“移植记录里有失败的尝试吗”“每个不兼容点都有重测结果吗”。</li>
+</ol>
+<p><strong>产出</strong>：一份移植通用检查清单。</p>
+<h3 id="6">第 6 周 · 精度回归与调优报告</h3>
+<blockquote>
+<p>硬件：本周需要两边（NVIDIA + 至少一种国产芯片）的可运行环境；缺一边就先写好报告框架与方法论，实测部分标注“待补测”。</p>
+</blockquote>
+<h3 id="1-nvidia-ascend">第 1 节 · 精度回归：同一评测集，在 NVIDIA 与 Ascend 上各跑一遍</h3>
+<p><strong>目标</strong>：出一份精度对比表——同一评测集、同一模型，两边的输出质量差多少。</p>
+<p><strong>怎么做</strong>（30 分钟，需两边环境；缺一边时先写好方法与表格框架，实测标注“待补测”）：</p>
+<ol>
+<li>定评测集：用 M0 基线报告里的评测集（与 M1、M2 里用的是同一套）。<strong>评测集不变，变的只有芯片</strong>——这是对比成立的前提。</li>
+<li>两边各跑一遍，记下：评测指标（按评测集的定义，如准确率 / 困惑度 / 人工抽查通过率）、输出样本（至少抽 5 条并排对照，看有没有系统性差异——比如某类问题一边总答错）。</li>
+<li>填精度对比表：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>评测项</th>
+<th>NVIDIA（版本 + 日期）</th>
+<th>Ascend（版本 + 日期）</th>
+<th>差异</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>指标 A</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+<tr>
+<td>输出抽查（5 条）</td>
+<td>…</td>
+<td>…</td>
+<td>有/无系统性差异</td>
+</tr>
+</tbody>
+</table>
+<ol start="4">
+<li>先管理预期：<strong>精度回归的结论不是“谁高谁低”，而是“差异从哪来”</strong>——下一节（第 3 节）专门讲归因。本节只负责把差异量出来、记下来。</li>
+</ol>
+<p><strong>产出</strong>：一份精度对比表（带版本号与日期）。</p>
+<h3 id="2-ttft-itl-m0">第 2 节 · 性能对比：TTFT / ITL / 吞吐，用 M0 的压测脚本在两边各跑三级并发</h3>
+<p><strong>目标</strong>：出一份性能对比表。</p>
+<p><strong>怎么做</strong>（30 分钟，需两边环境；缺一边时先写好方法与表格框架，实测标注“待补测”）：</p>
+<ol>
+<li>用 M0 的 <code>scripts/bench_openai.py</code>，在两边各跑三级并发（例如 1 / 8 / 32），记 TTFT / ITL / 吞吐。<strong>命令、模型、评测集、并发三档全都相同</strong>，只换芯片与对应的服务。</li>
+<li>填性能对比表：</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>并发</th>
+<th>指标</th>
+<th>NVIDIA（版本 + 日期）</th>
+<th>Ascend（版本 + 日期）</th>
+<th>比值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>TTFT / ITL / 吞吐</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+<tr>
+<td>8</td>
+<td>TTFT / ITL / 吞吐</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+<tr>
+<td>32</td>
+<td>TTFT / ITL / 吞吐</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+</tbody>
+</table>
+<ol start="3">
+<li>注意：<strong>不要只比单点</strong>。三级并发的曲线形状本身就是信息——一边在高并发下掉得更快，说明它的调度或显存管理先到了瓶颈。第 3 节会用这个形状做归因。</li>
+</ol>
+<p><strong>产出</strong>：一份性能对比表（三级并发 × TTFT / ITL / 吞吐，带版本号与日期）。</p>
+<h3 id="3">第 3 节 · 差异分析：数字不同的原因——归因到具体算子</h3>
+<p><strong>目标</strong>：把差异归因到具体算子，而不是笼统地说“芯片不行”。</p>
+<p><strong>怎么做</strong>（30 分钟，分析无卡可做；归因需要第 1–2 节的数据与第 4 周的覆盖矩阵）：</p>
+<ol>
+<li>先分两类差异：<strong>精度差异</strong>与<strong>性能差异</strong>，归因方法不同。</li>
+<li>精度差异的归因（量化误差的来源）：
+   - <strong>量化方案的差异</strong>：两边的量化实现是不是同一套（per-channel / per-token 的 scale 取法、舍入方式）——第 4 周的覆盖矩阵里记了每个算子的实现位置，对照着查；
+   - <strong>低精度算子的差异</strong>：FP16 / INT8 的实现是不是同一精度（比如一边用了 FP8、另一边没有）；
+   - <strong>归因方法</strong>：二分法——一次只换一个变量（比如先把可疑算子换成 PyTorch 参考实现跑一遍，看差异是否消失），差异消失的那个算子就是回归的来源。<strong>归因的终点是一个算子名，不是“精度墙”三个字</strong>。</li>
+<li>性能差异的归因（对照第 4 周的结论与 Four Walls）：
+   - 算子覆盖（第 4 周的矩阵：有没有算子回退到 CPU 或低效实现）；
+   - 显存带宽（第 1 周的 Roofline 思路：搬运量有没有变——比如权重精度不同导致搬运量不同）；
+   - 调度（高并发下掉得快的一边，先看它的批处理与 KV 管理）。</li>
+<li>写一份归因记录：每个差异一行——差异（数字）、候选原因（2–3 个）、验证方法（怎么确认是哪一个）、结论（归因到哪个算子或哪面墙，证据是什么）。<strong>验证不了的写“待验证”，不要写成定论</strong>。</li>
+</ol>
+<p><strong>产出</strong>：一份差异归因记录（差异 + 候选原因 + 验证方法 + 结论）。</p>
+<h3 id="4_2">第 4 节 · 写报告：按「某年某月某版本实测」的格式，把环境、版本、命令、结果写全</h3>
+<p><strong>目标</strong>：写出 <strong>M3 的可交付物：跨芯片对比报告（初稿）</strong>。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做；没有实测数据的章节写框架 + “待补测”）：</p>
+<ol>
+<li>用 <code>docs/modules/M3-domestic-chips/cross-chip-report-template.md</code> 的模板写报告。模板的每一节都要填：环境（硬件型号、驱动、版本号、核实日期）、模型、评测集、命令（启动命令与压测命令全文）、结果（第 1–2 节的两张表）、归因（第 3 节的记录）。</li>
+<li><strong>报告的可复现性标准</strong>：别人拿着这份报告，能在同一版本的软硬件上复现出同一量级的数字——命令要全、版本要全、评测集要定。做不到的章节写“待补测”，不要编数字凑完整。</li>
+<li>报告的结论部分只写有证据的结论：有数据的写数据 + 归因；没数据的写“待补测”与下一步计划。</li>
+</ol>
+<p><strong>产出</strong>：<strong>M3 的可交付物：跨芯片对比报告（初稿）</strong>。</p>
+<h3 id="5_3">第 5 节 · 小结：这份报告里哪些结论会随版本过期、哪些方法论不会</h3>
+<p><strong>目标</strong>：写一页“保质期”说明。</p>
+<p><strong>怎么做</strong>（30 分钟，无硬件可做）：</p>
+<ol>
+<li>分两类写：
+   - <strong>会过期的结论</strong>：所有带版本号的数字（性能、精度、覆盖状态）——过期时间就是下一次版本发布；报告首页写清“本报告基于某年某月某版本，过期需重测”；
+   - <strong>不会过期的方法论</strong>：Four Walls 归因、分层定位、覆盖矩阵方法、二分法归因、移植记录格式——这些是本模块真正要留下的东西。</li>
+<li>对照本模块检查清单，逐项打勾；没打勾的项写清原因与补做计划（比如“跨芯片实测待两边环境齐备后补测”）。</li>
+</ol>
+<p><strong>产出</strong>：一页“保质期”说明 + 更新后的检查清单。</p>
+<h2 id="_2">其他芯片的切入点</h2>
+<p>本模块以 Ascend 为主线，因为它的生态最成熟、资料最多。其他芯片的切入点供学完主线后扩展（状态以 <a href="https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md">awesome-china-gpu</a> 的最新追踪为准，不要照抄这里的版本信息）：</p>
+<ul>
+<li><strong>摩尔线程 MUSA</strong>：vllm-musa 插件，另有 llama.cpp 官方支持</li>
+<li><strong>海光 DCU</strong>：DTK（基于 ROCm），vLLM 容器镜像，迁移成本相对低</li>
+<li><strong>昆仑芯 XPU</strong>：vllm-kunlun 插件</li>
+<li><strong>天数智芯 Iluvatar</strong>：DeepSparkInference / vllm-iluvatar</li>
+<li><strong>壁仞 MetaX</strong>：vllm-metax 插件</li>
+<li><strong>多芯片统一接入</strong>：<a href="https://docs.flagos.io/projects/vllm-plugin-FL/en/latest/overview/features.html">vllm-plugin-FL</a>（FlagGems 统一算子库 + FlagCX 统一通信库）</li>
+</ul>
+<h2 id="_3">本模块检查清单</h2>
+<ul>
+<li>[ ] 能画出国产芯片软件栈的分层图，并说清插件机制</li>
+<li>[ ] 同一模型在 Ascend 上跑通过（或明确标注了待补测的原因）</li>
+<li>[ ] 有一份算子覆盖矩阵，指出 Top 3 耗时算子的芯片侧状态</li>
+<li>[ ] 走过一次小规模移植流程并留下了记录</li>
+<li>[ ] 有一份按「某年某月某版本实测」格式写的跨芯片对比报告（初稿）</li>
+</ul>
+</main>
+<footer>本页由 Markdown 生成，源文件：<a href="../docs/modules/M3-domestic-chips/README.md">docs/modules/M3-domestic-chips/README.md</a>。请勿直接改 HTML，改 md 后运行 <code>python3 html/build.py</code> 重新生成。</footer>
+</body>
+</html>
