@@ -92,6 +92,11 @@ def stream_request(base_url, model, max_tokens, timeout):
                     usage_tokens = usage["completion_tokens"]
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
+    if ttft is None:
+        # 200 OK but no streamed chunk at all (e.g. only "[DONE]"): this is
+        # not a measurable request. Report it as failed instead of letting
+        # a None TTFT crash the statistics below.
+        return {"ok": False, "error": "no streamed content received (empty response)"}
     total = time.perf_counter() - start
     text = "".join(text_parts)
     estimated = usage_tokens is None
@@ -125,7 +130,9 @@ def sweep_level(base_url, model, max_tokens, concurrency, requests, timeout):
             "concurrency": concurrency,
             "ok": 0,
             "requests": requests,
-            "error": results[0].get("error", "all requests failed"),
+            "error": results[0].get("error", "all requests failed")
+            if results
+            else "no requests were run",
         }
     ttfts = [r["ttft_s"] for r in ok]
     totals = [r["total_s"] for r in ok]
@@ -162,6 +169,14 @@ def main():
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--output", default="bench-results.json")
     args = parser.parse_args()
+    if args.requests <= 0:
+        parser.error("--requests must be greater than 0")
+    if args.max_tokens <= 0:
+        parser.error("--max-tokens must be greater than 0")
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than 0")
+    if any(level <= 0 for level in args.concurrency):
+        parser.error("--concurrency values must be greater than 0")
 
     levels = []
     for level in args.concurrency:
