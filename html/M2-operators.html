@@ -119,7 +119,7 @@ li{margin:4px 0}
 <p>状态：<strong>已完成</strong>——第 1–6 周全部为完整内容（加深版）。</p>
 <p>前置：M0（Roofline、profiling、压测脚本）与 M1 第 1–2 周（vLLM 服务已跑起来）。M2 的终点：自己写的 kernel 跑进了推理引擎，端到端变快了——“会写 kernel”只是起点。</p>
 <p>每节 60 分钟，每周 5 节，全模块已按 60 分钟/节加厚。<strong>每节开头标硬件门槛</strong>：无卡可做 / 需 GPU / 需租卡，并给出无卡替代路径。代码示例分两种：能直接跑的（已按官方教程与源码核对过写法）和示意性的（标明“示意”二字，只讲结构不保证编译通过）——不要把示意代码当可运行代码。</p>
-<p><strong>本模块的深度标准</strong>：优化做成阶梯，每一步都有实测数字，并且用 M0 的 Roofline 定位每一步卡在哪里；优化由 profiling（<code>ncu</code>）驱动，先定位瓶颈再改 kernel，而不是只看时间。原来的 5 周塞不下这些内容，M2 已扩为 6 周：第 3 周专讲 fused attention 的数学推导，第 4 周专讲量化 matmul 的量化方案，第 5 周专讲 FlashAttention 与 CUTLASS 的工业级实现，第 6 周收口到引擎接入。</p>
+<p><strong>本模块的深度标准</strong>：优化做成阶梯，每一步都有实测数字，并且用 M0 的 Roofline 定位每一步卡在哪里；优化由 profiling（<code>ncu</code>）驱动，先定位瓶颈再改 kernel，而不是只看时间。6 周分工：第 3 周专讲 fused attention 的数学推导，第 4 周专讲量化 matmul 的量化方案，第 5 周专讲 FlashAttention 与 CUTLASS 的工业级实现，第 6 周收口到引擎接入。</p>
 </blockquote>
 <h2 id="_1">为什么单开一个模块</h2>
 <p>M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。M2 的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用 M0 的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，<strong>“接入引擎”这一步目前没有现成课程</strong>，是本模块要补的关键一节。</p>
@@ -1460,7 +1460,7 @@ l_new = l_old · α + rowsum(P_block)
 <p><strong>产出</strong>：一页对比表 + 取舍笔记。</p>
 <h2 id="6-kernel">第 6 周 · 收口：把自写 kernel 接入推理引擎</h2>
 <blockquote>
-<p>注意：大纲原计划是“把第 3 周的 fused attention 包成 CustomOp”。核实 vLLM 的 <code>CustomOp</code> 源码（<code>vllm/model_executor/custom_op.py</code>）后，这个写法需要修正：vLLM 的 attention 走 Attention 后端，不走 CustomOp；CustomOp 的可替换面是激活、归一化这类算子。完整内容按修正后的方案写——接入引擎的载体改为 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程），fused attention 仍在第 3 周做 standalone 验证。</p>
+<p>注意：vLLM 的 attention 走 Attention 后端，不走 CustomOp（CustomOp 的可替换面是激活、归一化这类算子），所以接入引擎的载体是 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程）；fused attention 仍在第 3 周做 standalone 验证。</p>
 <p>硬件：本周需要 GPU（租卡）。无卡时先完成第 1–3 节的机制学习与代码编写，端到端验证标注“待有卡后补测”。</p>
 <p>本周是收口：前面五周的东西（写 kernel、验证、测速）要在这周接进一个真实引擎，跑出端到端的数据。</p>
 </blockquote>
