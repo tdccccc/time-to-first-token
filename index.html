@@ -460,9 +460,9 @@ const WEEKS = [
  del:"一个实时 Grafana 看板，在你自己的服务上展示 TTFT、token 间延迟、吞吐和排队深度。",
  days:[
   {k:"read",t:["CORE"],x:"读 vLLM 指标设计文档。弄清 num_requests_running、num_requests_waiting 和延迟直方图到底在量什么。",r:[["docs","vLLM 指标设计文档","https://docs.vllm.ai/en/latest/design/v1/metrics/","vLLM 文档"]]},
-  {k:"build",t:["CORE","BUILD"],x:"按 Prometheus 和 Grafana 教程把监控搭在你的服务上。",r:[["docs","Prometheus 和 Grafana 示例","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM 文档"]]},
-  {k:"build",t:["CORE","BUILD"],x:"导入看板 JSON，确认在少量负载下面板真的在动。抓取配置现在就修好，别等第 5 周 1000 并发的时候再修。",r:[["docs","同一教程，看板 JSON","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM 文档"]]},
-  {k:"read",t:["CORE"],x:"读 Databricks 性能工程和 NVIDIA benchmarking 基础，把它们定义的每个指标对应到一个面板上。没有定义的面板删掉。",r:[["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"],["text","LLM Inference Benchmarking: Fundamental Concepts","https://developer.nvidia.com/blog/llm-inference-benchmarking-fundamental-concepts/","NVIDIA Developer"]]},
+  {k:"build",t:["CORE","BUILD"],x:"按 Prometheus 和 Grafana 教程把监控搭在你的服务上。",r:[["docs","Prometheus 和 Grafana 示例","https://docs.vllm.ai/en/latest/design/metrics/","vLLM 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"导入看板 JSON，确认在少量负载下面板真的在动。抓取配置现在就修好，别等第 5 周 1000 并发的时候再修。",r:[["docs","同一文档，看板示例","https://docs.vllm.ai/en/latest/design/metrics/","vLLM 文档"]]},
+  {k:"read",t:["CORE"],x:"读 Databricks 性能工程和 NVIDIA benchmarking 基础，把它们定义的每个指标对应到一个面板上。没有定义的面板删掉。",r:[["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"],["text","LLM Inference Benchmarking: Fundamental Concepts","https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/","NVIDIA Developer"]]},
   {k:"read",t:["CORE"],x:"读 Modal 的 benchmark 方法论：为什么要扫请求速率而不是只测一个点，为什么饱和点要丢掉。",r:[["text","How to Benchmark LLM Engines","https://modal.com/llm-almanac/how-to-benchmark","Modal"]]}],
  buf:{x:"可选视频。Production Stack Deep Dive 讲已部署场景下的可观测性。",r:[["video","vLLM Office Hours 21: Production Stack Deep Dive","https://www.youtube.com/watch?v=0ZVu0A4wWQg","vLLM 官方"]]}},
 
@@ -486,7 +486,7 @@ const WEEKS = [
   {k:"read",t:["CORE"],x:"读 GuideLLM 介绍并安装。它从同步基线扫到饱和，而不是只测一个任意的负载点。",r:[["text","GuideLLM: Evaluate LLM deployments","https://developers.redhat.com/articles/2025/06/20/guidellm-evaluate-llm-deployments-real-world-inference","Red Hat Developer"],["tool","vllm-project/guidellm","https://github.com/vllm-project/guidellm","GitHub"]]},
   {k:"build",t:["CORE","BUILD"],x:"用 GuideLLM 跑一次扫描，输入和输出 token 长度固定。固定长度决定了 KV 缓存大小，也就决定了整个结果。",r:[["tool","GuideLLM","https://github.com/vllm-project/guidellm","GitHub"]]},
   {k:"build",t:["CORE","BUILD"],x:"在同一个负载上跑 vllm bench serve 做交叉验证。两个工具结果不一致是信息，不是问题。",r:[["docs","vLLM benchmark CLI","https://docs.vllm.ai/en/latest/benchmarking/cli/","vLLM 文档"]]},
-  {k:"build",t:["CORE","BUILD"],x:"用 genai-perf 做并发扫描，从 1、2、4 一直到 128。找到吞吐饱和、延迟恶化的点，那个拐点是整条曲线上唯一有意思的点。",r:[["tool","genai-perf","https://github.com/triton-inference-server/perf_analyzer","NVIDIA Triton"],["text","LLM Inference Benchmarking Guide","https://developer.nvidia.com/blog/llm-inference-benchmarking-guide-nvidia-genai-perf-and-nim/","NVIDIA · Elias Bermudez"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 genai-perf 做并发扫描，从 1、2、4 一直到 128。找到吞吐饱和、延迟恶化的点，那个拐点是整条曲线上唯一有意思的点。",r:[["tool","genai-perf","https://github.com/triton-inference-server/perf_analyzer","NVIDIA Triton"],["text","LLM Inference Benchmarking Guide","https://developer.nvidia.com/blog/llm-performance-benchmarking-measuring-nvidia-nim-performance-with-genai-perf/","NVIDIA · Elias Bermudez"]]},
   {k:"build",t:["CORE","BUILD"],x:"只在这节课租一台 H100。冲到 1000 并发以上，同时盯着 KV 缓存利用率和 num_requests_waiting 看有没有抢占。跑的时候读 vLLM 调优策略。",r:[["text","Practical strategies for vLLM performance tuning","https://developers.redhat.com/articles/2026/03/03/practical-strategies-vllm-performance-tuning","Red Hat Developer"]]}],
  buf:{x:"把发表前的检查清单写进你的 benchmark 仓库。",r:[]}},
 
@@ -590,8 +590,8 @@ const GATE = [
 
 /* ---------------------------------------------------------------
    进度持久化。
-   主存储是 localStorage：没有服务器、没有账号，在 GitHub Pages
-   和本地文件打开都能用。如果 localStorage 被禁（隐私模式、沙箱
+   主存储是 localStorage：没有服务器、没有账号，本地文件打开能用；
+   部署到 GitHub Pages 后在线打开也能用。如果 localStorage 被禁（隐私模式、沙箱
    frame），退回当次访问的内存，并提示用户在关闭前导出。
    跨设备靠同步链接和 JSON 导出，而不是后端。
 ------------------------------------------------------------------ */
@@ -711,7 +711,7 @@ function weekHTML(w){
   const wkId = w.opt ? "wk"+w.key : "wk"+w.n;
   const num = w.opt ? w.n : pad(w.n);
   const sub = w.opt ? "可选" : "周";
-  const label = w.opt ? w.n : String(w.n);
+  const label = w.opt ? (w.n === "8续" ? "8（续）" : w.n) : String(w.n);
   return `
     <article class="wk" id="${wkId}">
       <div class="wk-head">
