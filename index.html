@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Learn LLM Inference Serving by Shipping One Service</title>
-<meta name="description" content="A 10-week, 30-minutes-a-day roadmap for engineers who want to run LLM inference in production. Fifty sessions, one service, one published benchmark.">
-<meta property="og:title" content="Learn LLM Inference Serving by Shipping One Service">
-<meta property="og:description" content="A 10-week, 30-minutes-a-day roadmap. Fifty sessions, one service, one published benchmark.">
+<title>边做边学 LLM 推理服务：交付一个真实的推理服务</title>
+<meta name="description" content="一份 10 周、每天 30 分钟的中文路线图：边做边学 LLM 推理服务。50 节核心课，外加第 8 周（续）大规模集群 PD 优化与第 11 周 TensorRT-LLM 两处可选加深，另有 M0–M4 五个模块。">
+<meta property="og:title" content="边做边学 LLM 推理服务：交付一个真实的推理服务">
+<meta property="og:description" content="10 周路线图，50 节核心课，外加两处可选加深；另有 M0–M4 五个模块。">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -177,367 +177,423 @@
 <div class="wrap">
 
   <header class="mast">
-    <p class="eyebrow"><b>10 weeks</b> <span>·</span> <b>50 sessions</b> <span>·</span> <b>30 min a day</b> <span>·</span> open source</p>
-    <h1 class="title">Learn LLM inference serving by <em>shipping one service</em>.</h1>
+    <p class="eyebrow"><b>10 周</b> <span>·</span> <b>50 节</b> <span>·</span> <b>每天 30 分钟</b> <span>·</span> <b>另有 2 处可选加深</b> <span>·</span> 开源</p>
+    <h1 class="title">边做边学 LLM 推理服务，<em>交付一个真实的推理服务</em>。</h1>
     <p class="thesis">
-      A roadmap for engineers who want to actually run inference in production, not just read about it. Every session feeds a single artifact: an OpenAI-compatible service you deploy on a rented GPU, instrument, load test past 1000 concurrent requests, optimize, and <strong>publish as a reproducible benchmark</strong>.
+      一份给想真正跑起 LLM 推理、而不只是读一读的工程师的路线图。每一节都服务于同一个产物：一个 OpenAI 兼容的推理服务——你把它部署到租来的 GPU 上，做埋点、压测到 1000+ 并发，用量化和投机解码优化，在前面放一个成本感知的路由器，最后把它作为一份可复现的 benchmark 发表出来。
     </p>
     <p class="thesis">
-      The alternative, running seventeen disconnected experiments, spends most of its time on setup. One service that keeps growing gets the same coverage and leaves you with something to show.
+      另一种做法是做十七个互不相干的小实验，大部分时间都花在搭环境上。一个不断长大的服务能覆盖同样的知识点，最后你手里还留下一个能拿得出手的东西。
+    </p>
+    <p class="thesis">
+      本 fork 在上游基础上做了这些改进：<strong>中文版</strong>；扩展为 <strong>M0–M4 五个模块</strong>；新增 <strong>M2 算子优化</strong>与 <strong>M3 国产芯片适配</strong>；新增<strong>第 8 周（续）大规模集群 PD 优化</strong>与<strong>第 11 周 TensorRT-LLM</strong>两处可选加深；论文一律作<strong>选读</strong>，核心内容写进正文。英文原文见 <a class="lk" href="docs/original-README.md">docs/original-README.md</a>。
     </p>
     <div class="cta">
-      <a href="#weeks">Start week 1</a>
-      <a class="ghost" href="#setup">Setup</a>
-      <a class="ghost" href="#reference">Reference</a>
+      <a href="#weeks">开始第 1 周</a>
+      <a class="ghost" href="#modules">模块地图</a>
+      <a class="ghost" href="#setup">环境准备</a>
+      <a class="ghost" href="#reference">参考资料</a>
     </div>
 
     <div class="outcomes">
-      <p class="outcomes-h">What you have at the end</p>
+      <p class="outcomes-h">学完之后你将得到什么</p>
       <ul>
-        <li>A serving stack you configured, instrumented, and tuned yourself</li>
-        <li>Dashboards for TTFT, inter-token latency, throughput, queue depth, and cost per request</li>
-        <li>A load test harness that reproducibly drives 1000+ concurrent requests</li>
-        <li>Benchmarked variants across FP16, FP8, INT4, speculative decoding, and KV eviction</li>
-        <li>A cost, latency and quality router with per-request token budgeting</li>
-        <li>A published benchmark writeup with pinned versions and reproducible commands</li>
+        <li>一套你自己配置、埋点、调优过的推理服务</li>
+        <li>Grafana 看板，展示 TTFT（首 token 延迟）、token 间延迟、吞吐、排队深度和每次请求的成本</li>
+        <li>一个压测工具，能稳定地打出 1000+ 并发</li>
+        <li>FP16、FP8、INT4、投机解码、KV 淘汰等多个变体的 benchmark 数据</li>
+        <li>一个按成本、延迟、质量选后端、带每请求 token 预算的路由器</li>
+        <li>一份发表出来的 benchmark 写作，版本固定、命令可复现</li>
+        <li>（可选第 8 周（续））一张大规模集群 PD 架构图、KV 传输账表与“信号→动作→验证方法”策略表</li>
+        <li>（可选第 11 周）一份三引擎对比报告：同一硬件、同一模型、同一负载下 vLLM、SGLang、TensorRT-LLM 的 TTFT 与吞吐对比，外加选型指南</li>
       </ul>
     </div>
     <div class="facts">
-      <div class="fact"><b>30 min</b><span>per session</span></div>
-      <div class="fact"><b>5 + 2</b><span>study days, buffer days</span></div>
-      <div class="fact"><b>25 h</b><span>total</span></div>
-      <div class="fact"><b>1</b><span>service, start to finish</span></div>
+      <div class="fact"><b>30 分钟</b><span>每节课</span></div>
+      <div class="fact"><b>5 + 2</b><span>学习日、缓冲日</span></div>
+      <div class="fact"><b>25 小时</b><span>总计</span></div>
+      <div class="fact"><b>1</b><span>个服务，从头到尾</span></div>
+      <div class="fact"><b>10 节</b><span>可选加深</span></div>
     </div>
   </header>
 
-  <nav class="nav" aria-label="Sections"><div class="nav-in" id="nav"></div></nav>
+  <nav class="nav" aria-label="章节"><div class="nav-in" id="nav"></div></nav>
+
+  <section class="sec" id="modules">
+    <p class="sec-kicker">模块地图</p>
+    <h2>M0–M4：从“会看系统”到“跨芯片对比”</h2>
+    <p class="lede">本计划以 M1 的 10 周路线图为主线，前后各加模块，构成一条完整路径。所有模块共用 M0 的压测脚本和基线报告格式，数字之间可以互相比较。完整地图见 <a class="lk" href="docs/MODULES.md">docs/MODULES.md</a>。</p>
+    <p class="lede">建议顺序：M0（1 周，无 GPU 可做）→ M1（10 周主线 + 可选加深）→ M2（6 周，可与 M1 第 6–8 周并行）→ M3（6 周，Ascend 环境就绪后做）→ M4（毕业设计）。</p>
+    <table>
+      <thead><tr><th style="width:20%">模块</th><th style="width:36%">内容</th><th>产出</th><th style="width:15%">状态</th></tr></thead>
+      <tbody>
+        <tr><td><b><a class="lk" href="docs/modules/M0-foundations/README.md">M0 · 基础与度量</a></b></td><td>Roofline、TTFT/ITL/吞吐、profiling、可复现的压测脚本</td><td>一份基线报告 + 压测脚本 bench_openai.py</td><td>✅ 内容已完成</td></tr>
+        <tr><td><b><a class="lk" href="README.md">M1 · 推理框架</a></b></td><td>10 周路线图 + 2 处可选加深：vLLM → SGLang → 量化 → 投机解码 → 解耦部署 → 路由器 → 发表（→ TensorRT-LLM，可选）</td><td>一个不断长大的 OpenAI 兼容推理服务 + 一份 benchmark 写作</td><td>✅ 内容已完成</td></tr>
+        <tr><td><b><a class="lk" href="docs/modules/M2-operators/README.md">M2 · 算子优化</a></b></td><td>CUDA 优化阶梯 → Triton → fused attention / 量化 matmul → FlashAttention/CUTLASS → 自写 kernel 接入引擎</td><td>一份“自写 kernel 端到端加速报告”</td><td>✅ 内容已完成（加深版，6 周）</td></tr>
+        <tr><td><b><a class="lk" href="docs/modules/M3-domestic-chips/README.md">M3 · 国产芯片适配</a></b></td><td>软件栈地图 → CANN/AscendC → Ascend 跑通与插件架构 → 算子覆盖分析 → 移植案例 → 精度归因</td><td>一份跨芯片对比报告（初稿）</td><td>✅ 内容已完成（加深版，6 周）</td></tr>
+        <tr><td><b>M4 · 综合项目</b></td><td>同一模型 + 同一评测集，在 NVIDIA 与至少一种国产芯片上端到端部署、压测，写出可复现的对比报告</td><td>一份完整的、可复现的跨芯片推理优化报告（本仓库的毕业设计）</td><td>📝 仅有目标，内容待写（见 <a class="lk" href="docs/MODULES.md">模块地图</a>）</td></tr>
+      </tbody>
+    </table>
+  </section>
 
   <section class="sec" id="who">
-    <p class="sec-kicker">Prerequisites</p>
-    <h2>Who this is for</h2>
-    <p class="lede">You should be comfortable with Python, transformers at the architecture level, and the command line. You do not need prior serving, Kubernetes, or CUDA experience.</p>
-    <p class="lede">If you already know a topic, the sessions marked <span class="tag skim">skim</span> are the ones to compress. Do not compress the build sessions, they are the point.</p>
+    <p class="sec-kicker">前置要求</p>
+    <h2>适合谁</h2>
+    <p class="lede">你应该熟悉 Python、了解 Transformer 的架构、会用命令行。不需要有 serving、Kubernetes 或 CUDA 的经验。</p>
+    <p class="lede">如果你已经了解某个主题，标记为<span class="tag skim">略读</span>的课可以压缩。<strong>做</strong>的课不要压缩，它们才是重点。</p>
   </section>
 
   <section class="sec" id="order">
-    <p class="sec-kicker">Design</p>
-    <h2>Why the order is what it is</h2>
-    <p class="lede">This ordering differs from how most people write the list down. Five decisions drive it.</p>
+    <p class="sec-kicker">设计</p>
+    <h2>路线图为什么是这个顺序</h2>
+    <p class="lede">这个顺序是刻意排的，和大多数人写清单的方式不一样。背后有五个决定。</p>
     <div class="std">
       <div class="std-item"><div class="std-n">01</div><div>
-        <h4>The roofline model comes first</h4>
-        <p>Every optimization later is a move on the same plot. Quantization attacks memory-bandwidth-bound decode. Continuous batching raises arithmetic intensity toward the compute roof. Speculative decoding spends FLOPs, cheap in the memory-bound regime, to cut sequential memory loads. Disaggregation exists because prefill is compute-bound and decode is bandwidth-bound and they fight over one GPU. Without this model, the rest is a bag of tricks.</p>
+        <h4>Roofline 模型放在最前面</h4>
+        <p>后面每一次优化，都是同一张图上的一个移动。量化打的是解码阶段受显存带宽限制的问题；连续批处理把算术强度往计算上限推；投机解码用便宜的 FLOPs（在显存带宽受限的情况下 FLOPs 是便宜的）换更少的顺序访存；解耦式部署存在，是因为 prefill 受计算限制、解码受带宽限制，两者在一块 GPU 上打架。没有这个模型，后面就是一袋子技巧。</p>
       </div></div>
       <div class="std-item"><div class="std-n">02</div><div>
-        <h4>Measurement comes before optimization</h4>
-        <p>Instrumentation lands in week 3 and load testing in week 5, well before the tuning knobs. Nothing after them is verifiable without them, and a public benchmark is mostly a credible measurement harness with a model attached.</p>
+        <h4>度量先于优化</h4>
+        <p>埋点在第 3 周，压测在第 5 周，远在调优旋钮之前。没有它们，后面的一切都无法验证；一份公开的 benchmark，大部分就是一个可信的度量工具加一个模型。</p>
       </div></div>
       <div class="std-item"><div class="std-n">03</div><div>
-        <h4>Paged attention and continuous batching are not build exercises</h4>
-        <p>vLLM implements both, and chunked prefill is the default scheduling strategy in vLLM and SGLang. Reimplementing them teaches less than reading the block manager until you can explain from the code why memory waste drops under 4 percent and why the GPU stops idling between requests.</p>
+        <h4>PagedAttention 和连续批处理不值得自己重写</h4>
+        <p>vLLM 已经实现了这两者，分块 prefill（chunked prefill）是 vLLM 和 SGLang 默认的调度策略。重写它们，不如读懂 block manager 和调度器，直到你能从代码讲清楚：为什么显存浪费能降到 4% 以下，为什么 GPU 在请求之间不再空转。</p>
       </div></div>
       <div class="std-item"><div class="std-n">04</div><div>
-        <h4>The router sits next to unit economics</h4>
-        <p>A router that picks a backend by cost, latency, and quality is the one component that forces a dollar figure and a latency budget into code. Studying economics the same week turns the reading into a routing policy instead of a blog post you agreed with.</p>
+        <h4>路由器放在单位经济学旁边</h4>
+        <p>一个按成本、延迟、质量选后端的路由器，是唯一一个把“多少钱”和“延迟预算”写进代码的组件。同一周学经济学，读到的东西会变成路由策略，而不是一篇你点头同意的博客。</p>
       </div></div>
       <div class="std-item"><div class="std-n">05</div><div>
-        <h4>Edge deployment is optional and last</h4>
-        <p>ONNX Runtime, TensorRT-LLM, and WebLLM are client-side and embedded runtimes. They share almost no operational surface with the datacenter stack the other nine weeks build.</p>
+        <h4>端侧部署是可选的，放在最后</h4>
+        <p>ONNX Runtime、WebLLM 是客户端和嵌入式运行时，和前面九周搭建的数据中心那套几乎没有共同的操作面。TensorRT-LLM 不属于这一类：它是一台数据中心推理引擎，只是走编译式路线，所以单独放进可选的第 11 周，而不是和端侧工具并列。</p>
       </div></div>
     </div>
   </section>
 
   <section class="sec" id="setup">
-    <p class="sec-kicker">Before week 1</p>
-    <h2>Setup</h2>
-    <p class="lede">A 7-8B model needs roughly one 24GB GPU. Rent by the half hour and shut the instance down between sessions. All of week 1, most of week 3, the week 6 lecture days, and all of week 9 reading need no GPU at all, so batch your rentals around the build days.</p>
+    <p class="sec-kicker">第 1 周之前</p>
+    <h2>环境准备</h2>
+    <p class="lede">7–8B 的模型大约需要一块 24GB 显卡。按半小时租，用完关机。第 1 周全部、第 3 周大部分、第 6 周的讲座日、第 9 周全部阅读都不需要 GPU。把租卡集中在动手的那几天。</p>
     <div class="cards">
       <div class="card">
-        <h4>GPU access</h4>
-        <p class="sub">One H100 needed for two sessions only</p>
+        <h4>GPU 渠道</h4>
+        <p class="sub">只有两节课必须用 H100</p>
         <ul>
-          <li><a class="lk" href="https://www.runpod.io" target="_blank" rel="noopener">RunPod</a>, per-second billing</li>
-          <li><a class="lk" href="https://modal.com" target="_blank" rel="noopener">Modal</a>, serverless, best for sweep scripts</li>
-          <li><a class="lk" href="https://lambda.ai" target="_blank" rel="noopener">Lambda</a> and <a class="lk" href="https://vast.ai" target="_blank" rel="noopener">vast.ai</a>, cheap on-demand</li>
-          <li><a class="lk" href="https://colab.research.google.com" target="_blank" rel="noopener">Colab</a> for pure-Python sessions</li>
+          <li><a class="lk" href="https://www.runpod.io" target="_blank" rel="noopener">RunPod</a>，按秒计费</li>
+          <li><a class="lk" href="https://modal.com" target="_blank" rel="noopener">Modal</a>，Serverless，最适合跑 benchmark 扫描脚本</li>
+          <li><a class="lk" href="https://lambda.ai" target="_blank" rel="noopener">Lambda</a> 和 <a class="lk" href="https://vast.ai" target="_blank" rel="noopener">vast.ai</a>，按需和市场价 GPU，便宜</li>
+          <li><a class="lk" href="https://colab.research.google.com" target="_blank" rel="noopener">Colab</a>，纯 Python 的课，不用部署服务</li>
         </ul>
+        <p>只有两节课必须用 H100：第 5 周的 1000 并发测试，以及第 8 周如果你真的要跑解耦式部署。第 8 周（续）的多节点实测需要多卡集群，租不到就只做部署验证、性能对比待补测。</p>
       </div>
       <div class="card">
-        <h4>Install</h4>
-        <p class="sub">Plus Docker and kind</p>
+        <h4>安装</h4>
+        <p class="sub">另加 Docker 和 kind</p>
         <p><code>pip install vllm</code><br><code>pip install guidellm</code><br><code>pip install sglang</code></p>
-        <p>Docker for the Prometheus and Grafana stack in week 3, and <code>kind</code> or a small managed cluster for week 8.</p>
+        <p>另外还需要 Docker（跑 Prometheus 和 Grafana），以及第 8 周用的 <code>kind</code> 或一个小的托管集群。</p>
+        <p>第 11 周另外需要 TensorRT-LLM：优先用 <a class="lk" href="https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html" target="_blank" rel="noopener">NGC 预编译容器</a>，或按同一指南用 pip 安装。装之前先核对<a class="lk" href="https://nvidia.github.io/TensorRT-LLM/supported-hardware.html" target="_blank" rel="noopener">支持的硬件</a>：文档列出的最老架构是 Ampere A100，FP8 权重需要 Hopper 或更新。</p>
       </div>
       <div class="card">
-        <h4>Pacing</h4>
-        <p class="sub">Five study days, two buffer days</p>
-        <p>Buffer days exist so that missing a Tuesday does not collapse the plan. They are for catching up, not for new material.</p>
+        <h4>节奏</h4>
+        <p class="sub">每周 5 个学习日，2 天缓冲</p>
+        <p>缓冲日是用来补课的，不是用来加新内容的。周二缺了一节，不至于让整个计划垮掉。</p>
       </div>
     </div>
   </section>
 
   <section class="sec" id="weeks">
-    <p class="sec-kicker">The roadmap</p>
-    <h2>Ten weeks, five sessions each</h2>
-    <p class="lede">Every session fits 30 minutes. Where a lecture does not, the split is explicit. Tick sessions off as you go. Progress saves in your browser and survives closing the tab.</p>
+    <p class="sec-kicker">路线图</p>
+    <h2>十周，每周五节</h2>
+    <p class="lede">每节课 30 分钟。做不完的留到缓冲日。打勾记录进度，存在浏览器本地，关掉标签页也不会丢。核心 50 节之外，另有第 8 周（续）与第 11 周两处可选加深，各 5 节，单独计数。图例：<strong>读</strong>表示这节课是输入背景知识，<strong>做</strong>表示这节课要产出东西。<strong>略读</strong>表示相关概念你可能已经知道，价值在动手部分。论文标记为<strong>选读</strong>：README 对应章节已有详细总结，读原文是可选的加深步骤。</p>
 
     <div class="track">
       <div class="track-l">
-        <span class="track-num" id="tnum">0<small>/ 50 sessions</small></span>
+        <span class="track-num" id="tnum">核心 0<small>/ 50 节 · 可选加深 0/ 10 节</small></span>
         <span class="bar"><i id="tbar"></i></span>
       </div>
       <div class="track-r">
-        <button id="tlink" title="Copy a link that carries your progress, for another device">Copy sync link</button>
-        <button id="texp" title="Download your progress as a JSON file">Export</button>
-        <button id="timp" title="Restore progress from a JSON file">Import</button>
-        <button id="trst" title="Clear all progress">Reset</button>
+        <button id="tlink" title="复制一条携带进度的链接，用于另一台设备">复制同步链接</button>
+        <button id="texp" title="把进度下载为 JSON 文件">导出</button>
+        <button id="timp" title="从 JSON 文件恢复进度">导入</button>
+        <button id="trst" title="清除全部进度">重置</button>
         <input type="file" id="tfile" accept="application/json,.json" hidden>
       </div>
-      <p class="track-warn" id="twarn">Progress cannot be saved in this browser context, most likely private browsing or a sandboxed frame. Ticks will work for this visit only. Use Export before you close the tab.</p>
+      <p class="track-warn" id="twarn">这是一个无法保存进度的浏览器环境（隐私浏览或沙箱 frame 的可能性最大）。本次访问内打勾仍然有效，关闭标签页前请先导出备份。</p>
     </div>
 
-    <div id="weeks"></div>
+    <div id="weeklist"></div>
   </section>
 
   <section class="sec" id="gate">
-    <p class="sec-kicker">Week 10 dependency</p>
-    <h2>Before you publish a benchmark</h2>
-    <p class="lede">These are the mistakes that get public inference benchmarks taken apart. Read them in week 5, apply them in week 10.</p>
+    <p class="sec-kicker">第 10 周依赖</p>
+    <h2>发表 benchmark 之前</h2>
+    <p class="lede">这些是公开的推理 benchmark 最容易被拆台的地方。第 5 周先读，第 10 周再用。</p>
     <div class="gate">
-      <p class="gate-h">Methodology checklist</p>
+      <p class="gate-h">方法论检查清单</p>
       <div id="gatelist"></div>
     </div>
   </section>
 
   <section class="sec" id="decisions">
-    <p class="sec-kicker">Judgement calls</p>
-    <h2>Decision points</h2>
-    <p class="lede">Moments where following the schedule blindly is the wrong move.</p>
+    <p class="sec-kicker">判断</p>
+    <h2>决策点</h2>
+    <p class="lede">这些时刻，盲目跟进度是错的。</p>
     <table>
-      <thead><tr><th style="width:38%">If</th><th>Then</th></tr></thead>
+      <thead><tr><th style="width:38%">如果</th><th>那么</th></tr></thead>
       <tbody>
-        <tr><td><b>Week 5.</b> TTFT spikes and <code>num_requests_waiting</code> climbs before target concurrency.</td><td>The server is preempting. Stop and tune <code>--max-num-seqs</code>, <code>--gpu-memory-utilization</code>, and chunked prefill first. A run measured at the preemption point is not publishable.</td></tr>
-        <tr><td><b>Week 6.</b> INT4 costs more than 1 to 2 percent on your quality proxy for the throughput it returns.</td><td>Keep FP16 or FP8 as the default. Treat INT4 as a memory-pressure lever, not a throughput default.</td></tr>
-        <tr><td><b>Week 7.</b> Speculative decoding slows you down at your real request rate.</td><td>Expected. Gains appear at low query rate and vanish when the GPU is compute-saturated. Publish the crossover point, it is more useful than the speedup.</td></tr>
-        <tr><td><b>Week 8.</b> Kubernetes starts eating whole sessions on cluster plumbing.</td><td>Use a managed cluster, or fall back to single-node Docker plus the KEDA reading. The autoscaling signal matters more than a bespoke cluster.</td></tr>
+        <tr><td><b>第 5 周。</b> 还没到目标并发，TTFT 就飙升、<code>num_requests_waiting</code> 爬升。</td><td>服务器在抢占。先停下来调 <code>--max-num-seqs</code>、<code>--gpu-memory-utilization</code> 和分块 prefill。在抢占点上测出来的数据不能发表。</td></tr>
+        <tr><td><b>第 6 周。</b> INT4 换来的吞吐，让质量代理指标掉了超过 1–2%。</td><td>保留 FP16 或 FP8 作默认。把 INT4 当作缓解显存压力的杠杆，不当作默认的吞吐手段。</td></tr>
+        <tr><td><b>第 7 周。</b> 在你真实的请求速率下，投机解码反而变慢了。</td><td>预期之内。收益出现在低查询率下，GPU 被计算打满时就消失了。把交叉点发表出来，它比加速比更有用。</td></tr>
+        <tr><td><b>第 8 周。</b> Kubernetes 开始整节整节地吃掉你搭集群的时间。</td><td>用托管集群，或者退回单节点 Docker 加 KEDA 那篇阅读。自动扩缩容的信号比自己搭的集群重要。</td></tr>
+        <tr><td><b>第 8 周（续）。</b> 解耦后 TTFT 反而变差。</td><td>先算传输账：KV 传输时间超过了 prefill 排队省下的时间，解耦在你的 prompt 长度和带宽下不划算。先缩短传输路径（同机、更高速的互联）或退回同机部署，再谈扩池子。</td></tr>
       </tbody>
     </table>
   </section>
 
   <section class="sec" id="reference">
-    <p class="sec-kicker">Reference</p>
-    <h2>Papers, courses and tools</h2>
+    <p class="sec-kicker">参考资料</p>
+    <h2>论文、课程与工具</h2>
+    <p class="lede">本表所有论文均为选读：正文对应章节已有详细总结，读原文是加深理解的可选步骤。总结见 <a class="lk" href="https://github.com/tdccccc/time-to-first-token/blob/main/README.md" target="_blank" rel="noopener">README 各周章节</a>。</p>
     <table>
-      <thead><tr><th style="width:34%">Paper</th><th style="width:18%">Venue</th><th>Topic</th></tr></thead>
+      <thead><tr><th style="width:30%">论文</th><th style="width:14%">会议</th><th>主题</th><th style="width:14%">本计划总结</th></tr></thead>
       <tbody>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2309.06180" target="_blank" rel="noopener">PagedAttention / vLLM</a></td><td>SOSP 2023</td><td>KV cache paging</td></tr>
-        <tr><td><a class="lk" href="https://www.usenix.org/conference/osdi22/presentation/yu" target="_blank" rel="noopener">Orca</a></td><td>OSDI 2022</td><td>Continuous batching</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2312.07104" target="_blank" rel="noopener">SGLang</a></td><td>NeurIPS 2024</td><td>RadixAttention, prefix reuse</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2403.02310" target="_blank" rel="noopener">Sarathi-Serve</a></td><td>OSDI 2024</td><td>Chunked prefill</td></tr>
-        <tr><td><a class="lk" href="https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin" target="_blank" rel="noopener">DistServe</a></td><td>OSDI 2024</td><td>Prefill/decode disaggregation</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2311.18677" target="_blank" rel="noopener">Splitwise</a></td><td>ISCA 2024</td><td>Phase splitting across GPU types</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2407.00079" target="_blank" rel="noopener">Mooncake</a></td><td>FAST 2025</td><td>KV-cache-centric serving</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2309.17453" target="_blank" rel="noopener">StreamingLLM</a></td><td>ICLR 2024</td><td>Attention sinks, long context</td></tr>
-        <tr><td><a class="lk" href="https://arxiv.org/abs/2401.15077" target="_blank" rel="noopener">EAGLE</a></td><td>arXiv</td><td>Speculative sampling</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2309.06180" target="_blank" rel="noopener">PagedAttention / vLLM</a></td><td>SOSP 2023</td><td>KV 缓存分页</td><td>第 2 周</td></tr>
+        <tr><td><a class="lk" href="https://www.usenix.org/conference/osdi22/presentation/yu" target="_blank" rel="noopener">Orca</a></td><td>OSDI 2022</td><td>连续批处理</td><td>第 4 周</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2312.07104" target="_blank" rel="noopener">SGLang</a></td><td>NeurIPS 2024</td><td>RadixAttention、前缀复用</td><td>第 4 周</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2403.02310" target="_blank" rel="noopener">Sarathi-Serve</a></td><td>OSDI 2024</td><td>分块 prefill</td><td>第 4 周</td></tr>
+        <tr><td><a class="lk" href="https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin" target="_blank" rel="noopener">DistServe</a></td><td>OSDI 2024</td><td>prefill/decode 解耦</td><td>第 8 周</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2311.18677" target="_blank" rel="noopener">Splitwise</a></td><td>ISCA 2024</td><td>按阶段拆分到不同 GPU</td><td>第 8 周（续）</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2407.00079" target="_blank" rel="noopener">Mooncake</a></td><td>FAST 2025</td><td>以 KV 缓存为中心的服务</td><td>第 8 周（续）</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2309.17453" target="_blank" rel="noopener">StreamingLLM</a></td><td>ICLR 2024</td><td>注意力汇、长上下文</td><td>第 7 周</td></tr>
+        <tr><td><a class="lk" href="https://arxiv.org/abs/2401.15077" target="_blank" rel="noopener">EAGLE</a></td><td>arXiv</td><td>投机采样</td><td>第 7 周</td></tr>
       </tbody>
     </table>
-    <p class="lede" style="margin-top:16px">For GPTQ, AWQ, SmoothQuant, LLM.int8(), Medusa, H2O, SnapKV and the FlashAttention family, use <a class="lk" href="https://lilianweng.github.io/posts/2023-01-10-inference-optimization/" target="_blank" rel="noopener">Lilian Weng's survey</a> and the <a class="lk" href="https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/" target="_blank" rel="noopener">NVIDIA optimization survey</a>, which cite them directly. Search exact titles rather than guessing arXiv IDs.</p>
+    <p class="lede" style="margin-top:16px">GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention 系列，请用 <a class="lk" href="https://lilianweng.github.io/posts/2023-01-10-inference-optimization/" target="_blank" rel="noopener">Lilian Weng 的综述</a>和 <a class="lk" href="https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/" target="_blank" rel="noopener">NVIDIA 优化综述</a>，它们直接引用了这些工作。搜精确标题，不要猜 arXiv 编号。</p>
     <div class="cards">
       <div class="card">
-        <h4>Courses and series</h4>
-        <p class="sub">Full playlists worth having open</p>
+        <h4>课程与系列</h4>
+        <p class="sub">值得开着的完整播放列表</p>
         <ul>
-          <li><a class="lk" href="https://cs336.stanford.edu/spring2025/" target="_blank" rel="noopener">Stanford CS336</a>, Percy Liang and Tatsunori Hashimoto. Lectures 5, 6, 7-8, 10</li>
-          <li><a class="lk" href="https://hanlab.mit.edu/courses/2024-fall-65940" target="_blank" rel="noopener">MIT 6.5940 EfficientML.ai</a>, Song Han</li>
-          <li><a class="lk" href="https://www.youtube.com/@vllm-project" target="_blank" rel="noopener">vLLM Office Hours</a>, from the engine team</li>
-          <li><a class="lk" href="https://www.youtube.com/@GPUMODE" target="_blank" rel="noopener">GPU MODE</a>, kernel and systems lectures</li>
-          <li><a class="lk" href="https://www.usenix.org/conferences" target="_blank" rel="noopener">USENIX</a>, talks by paper authors</li>
+          <li><a class="lk" href="https://cs336.stanford.edu/spring2025/" target="_blank" rel="noopener">Stanford CS336</a>，Percy Liang 与 Tatsunori Hashimoto 主讲。第 5、6、7–8、10 讲</li>
+          <li><a class="lk" href="https://hanlab.mit.edu/courses/2024-fall-65940" target="_blank" rel="noopener">MIT 6.5940 EfficientML.ai</a>，Song Han 主讲</li>
+          <li><a class="lk" href="https://www.youtube.com/@vllm-project" target="_blank" rel="noopener">vLLM Office Hours</a>，双周，来自引擎团队</li>
+          <li><a class="lk" href="https://www.youtube.com/@GPUMODE" target="_blank" rel="noopener">GPU MODE</a>，kernel 与系统级讲座</li>
+          <li><a class="lk" href="https://www.usenix.org/conferences" target="_blank" rel="noopener">USENIX</a>，论文作者的报告</li>
         </ul>
       </div>
       <div class="card">
-        <h4>Tools</h4>
-        <p class="sub">Cross-check benchmarks with two, never one</p>
+        <h4>工具</h4>
+        <p class="sub">benchmark 至少用两个工具交叉验证</p>
         <ul>
-          <li><a class="lk" href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener">vLLM</a>, primary serving engine</li>
-          <li><a class="lk" href="https://docs.sglang.io" target="_blank" rel="noopener">SGLang</a>, prefix-reuse comparison</li>
-          <li><a class="lk" href="https://github.com/vllm-project/guidellm" target="_blank" rel="noopener">GuideLLM</a>, SLO-aware rate sweeps</li>
-          <li><a class="lk" href="https://github.com/triton-inference-server/perf_analyzer" target="_blank" rel="noopener">genai-perf</a>, TTFT and ITL</li>
-          <li><a class="lk" href="https://github.com/vllm-project/production-stack" target="_blank" rel="noopener">production-stack</a>, Kubernetes deployment</li>
+          <li><a class="lk" href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener">vLLM</a>，主要服务引擎</li>
+          <li><a class="lk" href="https://docs.sglang.io" target="_blank" rel="noopener">SGLang</a>，前缀复用对比</li>
+          <li><a class="lk" href="https://github.com/NVIDIA/TensorRT-LLM" target="_blank" rel="noopener">TensorRT-LLM</a>，编译式推理引擎，三引擎对比的第三极</li>
+          <li><a class="lk" href="https://github.com/vllm-project/guidellm" target="_blank" rel="noopener">GuideLLM</a>，SLO 感知的速率扫描</li>
+          <li><a class="lk" href="https://github.com/triton-inference-server/perf_analyzer" target="_blank" rel="noopener">genai-perf</a>，TTFT 与 ITL 测量</li>
+          <li><a class="lk" href="https://github.com/ray-project/llmperf" target="_blank" rel="noopener">LLMPerf</a>，托管端点的 benchmark</li>
+          <li><a class="lk" href="https://github.com/vllm-project/production-stack" target="_blank" rel="noopener">production-stack</a>，Kubernetes 部署</li>
+          <li><a class="lk" href="https://github.com/kvcache-ai/Mooncake" target="_blank" rel="noopener">Mooncake</a>，分布式 KV 缓存与传输引擎</li>
+          <li><a class="lk" href="https://llm-d.ai" target="_blank" rel="noopener">llm-d</a>，Kubernetes 上的分布式推理编排与智能路由</li>
         </ul>
       </div>
       <div class="card">
-        <h4>Weekly reading habit</h4>
-        <p class="sub">30 minutes, after week 10</p>
-        <p>Scan titles on <a class="lk" href="https://arxiv.org/list/cs.DC/recent" target="_blank" rel="noopener">arXiv cs.DC</a> and the systems conferences. Read exactly one paper's abstract, method figure and evaluation. Track applied writeups on the <a class="lk" href="https://blog.vllm.ai" target="_blank" rel="noopener">vLLM</a> and <a class="lk" href="https://lmsys.org/blog/" target="_blank" rel="noopener">LMSYS</a> blogs.</p>
-        <p>Read the systems paper, skip the model-release press.</p>
+        <h4>每周阅读习惯</h4>
+        <p class="sub">30 分钟，第 10 周之后</p>
+        <p>扫 <a class="lk" href="https://arxiv.org/list/cs.DC/recent" target="_blank" rel="noopener">arXiv cs.DC</a> 和系统会议的标题，只读一篇论文的摘要、方法图和实验。在 <a class="lk" href="https://blog.vllm.ai" target="_blank" rel="noopener">vLLM</a> 和 <a class="lk" href="https://lmsys.org/blog/" target="_blank" rel="noopener">LMSYS</a> 博客以及 <a class="lk" href="https://modal.com/llm-almanac/summary" target="_blank" rel="noopener">Modal Almanac</a> 上跟踪应用型写作。</p>
+        <p>读系统论文，跳过模型发布的新闻稿。</p>
       </div>
     </div>
   </section>
 
   <section class="sec" id="notes">
-    <p class="sec-kicker">Fine print</p>
-    <h2>Notes on the sources</h2>
-    <p class="lede">Every video here has a named speaker from a university, an engine team, or a conference, and is paired with a text covering the same material, so you can read instead of watch. Where no video met that bar, the week is text-only rather than padded.</p>
+    <p class="sec-kicker">细则</p>
+    <h2>关于来源的说明</h2>
+    <p class="lede">这里的每个视频都有具名的讲者——来自大学、引擎团队或会议——并且配有覆盖同样内容的文字材料，所以你可以读而不是看。没有视频达到这个标准的地方，这一周就是纯文字，而不是硬凑。</p>
     <ul class="cav">
-      <li>Timestamps are targets. Talks get re-uploaded and re-cut, so use the on-video chapter markers to place split points.</li>
-      <li>MIT 6.5940 was not offered in Fall 2025. Fall 2023 and Fall 2024 recordings both exist and either works.</li>
-      <li>vLLM serves its blog at two URL shapes and its docs change with versions. If a link 404s, search the exact title rather than editing the path.</li>
-      <li>Performance figures quoted here are the sources' own claims from their papers and blogs, not independently reproduced. Treat them as the number that source is willing to defend, not as ground truth for your hardware.</li>
-      <li>Cost per million tokens and GPU hourly rates move fast. The economics reading is valuable for its method. Re-derive every number against your own hardware.</li>
+      <li>时间戳是目标值。讲座会被重新上传、重新剪辑，用视频里的章节标记来定位分割点。</li>
+      <li>MIT 6.5940 在 2025 秋没有开课。2023 秋和 2024 秋的录像都存在，任选其一。</li>
+      <li>vLLM 的博客有两种 URL 形式，文档随版本变化。如果链接 404，搜精确标题，不要改路径。</li>
+      <li>这里引用的性能数字是论文和博客各自宣称的，没有独立复现。把它当作那个来源愿意为之辩护的数字，而不是你硬件上的事实。</li>
+      <li>每百万 token 的成本和 GPU 每小时价格变化很快。经济学那部分阅读的价值在于方法。每个数字都要按你自己的硬件重新算。</li>
     </ul>
-    <h2 style="margin-top:34px">Contributing</h2>
-    <p class="lede">Corrections and additions are welcome, particularly broken links, newer primary sources that supersede something listed here, videos that meet the bar for a week currently marked text-only, and your own benchmark writeup if you finish the roadmap.</p>
+    <h2 style="margin-top:34px">参与贡献</h2>
+    <p class="lede">欢迎纠错和补充，尤其欢迎：失效或搬家的链接；取代了这里某项内容的新的一手资料；达到标准的视频（具名讲者、可信机构、配有文字），给目前标记为纯文字的周；如果你走完了路线图，你自己的 benchmark 写作。</p>
   </section>
 
   <footer>
-    <span>Open source · CC BY 4.0 · use it, adapt it, teach from it</span>
-    <span>Progress is stored locally in this page</span>
+    <span>开源 · CC BY 4.0 · 自由使用、改编、教学</span>
+    <span>进度保存在本地浏览器里</span>
   </footer>
 </div>
 
 <script>
-const DAYS = ["Mon","Tue","Wed","Thu","Fri"];
+const DAYS = ["周一","周二","周三","周四","周五"];
 const WEEKS = [
-{n:1,theme:"The mental model",
- focus:"Install the one model everything else hangs on. Roofline, arithmetic intensity, and why decode waits on memory while prefill waits on compute.",
- med:["v","Video-first. Roofline reasoning benefits from live derivation and diagrams."],
- del:"A hand-derived arithmetic intensity figure for the model you will serve, and the ability to say which phase is bandwidth-bound and why.",
+{n:1,theme:"心智模型",
+ focus:"装上后面一切都挂在上面的那个模型。Roofline、算术强度，以及为什么解码等显存、prefill 等计算。",
+ med:["v","以视频为主。Roofline 的推导配上现场画图和示意图更容易理解。"],
+ del:"手算出你要服务的那个模型的算术强度，并且能说清哪个阶段受带宽限制、为什么。",
  days:[
-  {k:"read",t:["CORE"],x:"Read Making Deep Learning Go Brrrr From First Principles, first half through the compute versus memory-bandwidth versus overhead regimes. The factory analogy is the model you keep for ten weeks.",r:[["text","Making Deep Learning Go Brrrr From First Principles","https://horace.io/brrr_intro.html","Horace He"]]},
-  {k:"read",t:["CORE"],x:"Finish the post. Operator fusion, overhead, and why adding FLOPS does nothing for a memory-bandwidth-bound kernel.",r:[["text","Same post, second half","https://horace.io/brrr_intro.html","Horace He"]]},
-  {k:"read",t:["CORE"],x:"Stanford CS336 lecture 5, GPUs, first 30 minutes: execution model and memory hierarchy. Read the slides alongside if the pace is fast.",r:[["video","CS336 Lecture 5: GPUs","https://www.youtube.com/watch?v=6OBtO9niT00","Stanford · Percy Liang, Tatsunori Hashimoto"],["text","CS336 lecture slides","https://github.com/stanford-cs336/spring2025-lectures","Stanford CS336 repo"]]},
-  {k:"read",t:["CORE"],x:"CS336 lecture 5, second 30 minutes: arithmetic intensity, roofline, and why data movement dominates. This is the half that matters most.",r:[["video","CS336 Lecture 5, second half","https://www.youtube.com/watch?v=6OBtO9niT00","Stanford Online"],["text","Transformer Inference Arithmetic","https://kipp.ly/transformer-inference-arithmetic/","kipply · the same math in text"]]},
-  {k:"build",t:["CORE","SKIM"],x:"Hand-derive arithmetic intensity for your target model, using kipply's numbers as the worked example. The value is producing your own figure.",r:[["text","Transformer Inference Arithmetic","https://kipp.ly/transformer-inference-arithmetic/","kipply"]]}],
- buf:{x:"Watch CS336 lecture 10 on inference, then read the prefill versus decode opening of the Databricks post.",r:[["video","CS336 Lecture 10: Inference","https://www.youtube.com/watch?v=fcgPYo3OtV0","Stanford Online"],["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"]]}},
+  {k:"read",t:["CORE"],x:"读《Making Deep Learning Go Brrrr From First Principles》前半部分：计算、显存带宽、开销三种区间。工厂类比是你要用十周的模型。",r:[["text","Making Deep Learning Go Brrrr From First Principles","https://horace.io/brrr_intro.html","Horace He"]]},
+  {k:"read",t:["CORE"],x:"读完这篇文章。算子融合、开销，以及为什么给一个受显存带宽限制的 kernel 加 FLOPs 没有用。",r:[["text","同一篇文章，后半部分","https://horace.io/brrr_intro.html","Horace He"]]},
+  {k:"read",t:["CORE"],x:"Stanford CS336 第 5 讲：GPUs，前 30 分钟：执行模型与显存层级。节奏快的话对照讲义一起读。",r:[["video","CS336 第 5 讲：GPUs","https://www.youtube.com/watch?v=6OBtO9niT00","Stanford · Percy Liang、Tatsunori Hashimoto"],["text","CS336 讲义","https://github.com/stanford-cs336/spring2025-lectures","Stanford CS336 仓库"]]},
+  {k:"read",t:["CORE"],x:"CS336 第 5 讲后 30 分钟：算术强度、Roofline、为什么数据搬运占主导。这是最重要的那一半。",r:[["video","CS336 第 5 讲，后半部分","https://www.youtube.com/watch?v=6OBtO9niT00","Stanford Online"],["text","Transformer Inference Arithmetic","https://kipp.ly/transformer-inference-arithmetic/","kipply · 同样的数学，文字版"]]},
+  {k:"build",t:["CORE","SKIM"],x:"手算目标模型的算术强度，用 kipply 的数字作 worked example。价值在于你自己算出这个数，而不是再读一遍解释。",r:[["text","Transformer Inference Arithmetic","https://kipp.ly/transformer-inference-arithmetic/","kipply"]]}],
+ buf:{x:"看 CS336 第 10 讲推理，然后读 Databricks 那篇开头 prefill 与 decode 的部分。",r:[["video","CS336 第 10 讲：Inference","https://www.youtube.com/watch?v=fcgPYo3OtV0","Stanford Online"],["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"]]}},
 
-{n:2,theme:"vLLM: deploy it, then read its internals",
- focus:"Stand the service up, then go into the block manager and scheduler until the paging design is obvious from the code.",
- med:["t","Text-first for PagedAttention, where the paper is more precise. Video-first for the V1 architecture."],
- del:"An OpenAI-compatible endpoint serving a 7-8B model, plus your own notes explaining PagedAttention and the V1 scheduler from source.",
+{n:2,theme:"vLLM：先部署，再读内部实现",
+ focus:"先把服务跑起来，然后钻进 block manager 和调度器，直到 paging 的设计从代码里看出来是显然的。",
+ med:["t","PagedAttention 以文字为主，论文比视频更精确；V1 架构以视频为主。"],
+ del:"一个跑着 7–8B 模型的 OpenAI 兼容接口，加上你自己写的、从源码讲清 PagedAttention 和 V1 调度器的笔记。",
  days:[
-  {k:"read",t:["CORE","SKIM"],x:"Read the PagedAttention announcement for the mechanism: prior systems waste 60 to 80 percent of KV memory on fragmentation and over-reservation, fixed-size blocks cut waste under 4 percent. Then skim the paper's block-table section.",r:[["text","vLLM: Easy, Fast, and Cheap LLM Serving with PagedAttention","https://blog.vllm.ai/2023/06/20/vllm.html","vLLM blog"],["paper","Efficient Memory Management for LLM Serving","https://arxiv.org/abs/2309.06180","Kwon, Li, Zhuang, Sheng et al · SOSP 2023"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Serve Llama-3.1-8B-Instruct or Qwen2.5-7B behind vLLM's OpenAI-compatible server. Save the launch command, you reuse it for ten weeks.",r:[["docs","Modal vLLM example","https://modal.com/docs/examples/vllm_inference","Modal docs"],["tool","RunPod","https://www.runpod.io","GPU rental"]]},
-  {k:"read",t:["CORE"],x:"vLLM Office Hours 22, Intro to vLLM V1, covering the V1 scheduler, memory manager, model runner and API server. Read the V1 blog as the written version.",r:[["video","vLLM Office Hours 22: Intro to vLLM V1","https://www.youtube.com/watch?v=jmzIvQZCLZM","vLLM official · Michael Goin, Red Hat"],["text","vLLM V1 architecture","https://blog.vllm.ai/2025/01/27/v1-alpha-release.html","vLLM blog"]]},
-  {k:"read",t:["CORE"],x:"Read Inside vLLM: Anatomy of a High-Throughput Inference System, scheduler and block manager sections only.",r:[["text","Inside vLLM: Anatomy of a High-Throughput System","https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html","vLLM blog"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Follow the block table code path in the repo. Write three sentences on how a request's blocks get looked up. If you cannot, read it again rather than moving on.",r:[["tool","vllm-project/vllm","https://github.com/vllm-project/vllm","GitHub"]]}],
- buf:{x:"Re-read the V1 blog's scheduler section against the code you read on Friday, and note where the blog simplifies.",r:[["text","vLLM V1 architecture","https://blog.vllm.ai/2025/01/27/v1-alpha-release.html","vLLM blog"]]}},
+  {k:"read",t:["CORE","SKIM"],x:"读 PagedAttention 发布文章：以前的系统在 KV 显存碎片和过度预留上浪费 60–80%，固定大小的 block 把浪费压到 4% 以下。然后（选读）SOSP 论文的 block table 部分，核心内容见 README 第 2 周总结。",r:[["text","vLLM: Easy, Fast, and Cheap LLM Serving with PagedAttention","https://blog.vllm.ai/2023/06/20/vllm.html","vLLM 博客"],["paper","Efficient Memory Management for LLM Serving","https://arxiv.org/abs/2309.06180","Kwon, Li, Zhuang, Sheng 等 · SOSP 2023"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 vLLM 的 OpenAI 兼容服务跑起 Llama-3.1-8B-Instruct 或 Qwen2.5-7B。把启动命令存下来，十周都要复用。",r:[["docs","Modal vLLM 示例","https://modal.com/docs/examples/vllm_inference","Modal 文档"],["tool","RunPod","https://www.runpod.io","GPU 租赁"]]},
+  {k:"read",t:["CORE"],x:"看 vLLM Office Hours 22：Intro to vLLM V1，讲 V1 调度器、显存管理器、模型运行器和 API 服务器。文字版读 V1 博客。",r:[["video","vLLM Office Hours 22: Intro to vLLM V1","https://www.youtube.com/watch?v=jmzIvQZCLZM","vLLM 官方 · Michael Goin, Red Hat"],["text","vLLM V1 架构","https://blog.vllm.ai/2025/01/27/v1-alpha-release.html","vLLM 博客"]]},
+  {k:"read",t:["CORE"],x:"读《Inside vLLM: Anatomy of a High-Throughput Inference System》，只读调度器和 block manager 部分。",r:[["text","Inside vLLM: Anatomy of a High-Throughput System","https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html","vLLM 博客"]]},
+  {k:"build",t:["CORE","BUILD"],x:"跟着仓库里的 block table 代码走一遍。写三句话，讲清一个请求的 block 是怎么被查到的。写不出来就再读一遍。",r:[["tool","vllm-project/vllm","https://github.com/vllm-project/vllm","GitHub"]]}],
+ buf:{x:"对照代码重读 V1 博客的调度器部分，记下博客做了哪些简化。",r:[["text","vLLM V1 架构","https://blog.vllm.ai/2025/01/27/v1-alpha-release.html","vLLM 博客"]]}},
 
-{n:3,theme:"Measurement infrastructure",
- focus:"Build the lens before the optimizations. Everything after this week is only legible because of this week.",
- med:["t","Text-first. The writing on benchmarking methodology is stronger than any available video."],
- del:"A live Grafana dashboard showing TTFT, inter-token latency, throughput and queue depth on your own service.",
+{n:3,theme:"度量基础设施",
+ focus:"先造出“看”的工具，再做优化。这一周之后的所有内容，都是因为这一周才看得清楚。",
+ med:["t","以文字为主。关于 benchmark 方法论的文字，比现有的任何视频都强。"],
+ del:"一个实时 Grafana 看板，在你自己的服务上展示 TTFT、token 间延迟、吞吐和排队深度。",
  days:[
-  {k:"read",t:["CORE"],x:"Read the vLLM metrics design doc. Learn what num_requests_running, num_requests_waiting and the latency histograms actually measure.",r:[["docs","vLLM V1 metrics design","https://docs.vllm.ai/en/latest/design/v1/metrics/","vLLM docs"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Stand up the Prometheus and Grafana Docker Compose stack against your running service.",r:[["docs","Prometheus and Grafana example","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM docs"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Import the dashboard JSON and confirm live panels move under a trickle of load. Fix the scrape config now, not in week 5 under 1000 concurrent requests.",r:[["docs","Same example, dashboard JSON","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM docs"]]},
-  {k:"read",t:["CORE"],x:"Read the Databricks and NVIDIA pieces, then map every metric they define to a panel. Panels without a definition get deleted.",r:[["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"],["text","LLM Inference Benchmarking: Fundamental Concepts","https://developer.nvidia.com/blog/llm-inference-benchmarking-fundamental-concepts/","NVIDIA Developer"]]},
-  {k:"read",t:["CORE"],x:"Read the Modal benchmarking methodology: why you sweep request rate rather than pick one, and why the saturation point gets discarded.",r:[["text","How to Benchmark LLM Engines","https://modal.com/llm-almanac/how-to-benchmark","Modal"]]}],
- buf:{x:"Optional video. The production stack deep dive covers observability panels in a deployed setting.",r:[["video","vLLM Office Hours 21: Production Stack Deep Dive","https://www.youtube.com/watch?v=0ZVu0A4wWQg","vLLM official"]]}},
+  {k:"read",t:["CORE"],x:"读 vLLM 指标设计文档。弄清 num_requests_running、num_requests_waiting 和延迟直方图到底在量什么。",r:[["docs","vLLM 指标设计文档","https://docs.vllm.ai/en/latest/design/v1/metrics/","vLLM 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"按 Prometheus 和 Grafana 教程把监控搭在你的服务上。",r:[["docs","Prometheus 和 Grafana 示例","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"导入看板 JSON，确认在少量负载下面板真的在动。抓取配置现在就修好，别等第 5 周 1000 并发的时候再修。",r:[["docs","同一教程，看板 JSON","https://docs.vllm.ai/en/latest/examples/online_serving/prometheus_grafana/","vLLM 文档"]]},
+  {k:"read",t:["CORE"],x:"读 Databricks 性能工程和 NVIDIA benchmarking 基础，把它们定义的每个指标对应到一个面板上。没有定义的面板删掉。",r:[["text","LLM Inference Performance Engineering","https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices","Databricks"],["text","LLM Inference Benchmarking: Fundamental Concepts","https://developer.nvidia.com/blog/llm-inference-benchmarking-fundamental-concepts/","NVIDIA Developer"]]},
+  {k:"read",t:["CORE"],x:"读 Modal 的 benchmark 方法论：为什么要扫请求速率而不是只测一个点，为什么饱和点要丢掉。",r:[["text","How to Benchmark LLM Engines","https://modal.com/llm-almanac/how-to-benchmark","Modal"]]}],
+ buf:{x:"可选视频。Production Stack Deep Dive 讲已部署场景下的可观测性。",r:[["video","vLLM Office Hours 21: Production Stack Deep Dive","https://www.youtube.com/watch?v=0ZVu0A4wWQg","vLLM 官方"]]}},
 
-{n:4,theme:"SGLang, RadixAttention and batching internals",
- focus:"The contrast that teaches the design space: fixed-block paging versus tree-structured prefix reuse.",
- med:["v","Mixed. The RadixAttention talk is from the project lead. Chunked prefill is text-only."],
- del:"An SGLang variant of the same service, and a first prefix-reuse comparison against vLLM.",
+{n:4,theme:"SGLang、RadixAttention 与批处理内部",
+ focus:"通过对比学设计空间：固定 block 分页 vs 树形前缀复用。",
+ med:["v","混合。RadixAttention 的讲解来自项目负责人。分块 prefill 只有文字资料。"],
+ del:"同一个服务的 SGLang 版本，以及第一份与 vLLM 的前缀复用对比。",
  days:[
-  {k:"read",t:["CORE"],x:"Read the RadixAttention post. It reports up to 5x higher throughput on prefix-heavy workloads with no noticeable overhead when there are no cache hits, which tells you which workloads it wins on.",r:[["text","RadixAttention and SGLang","https://lmsys.org/blog/2024-01-17-sglang/","LMSYS"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Deploy SGLang with the same model as week 2. Same hardware, same prompt, so the engine is the only variable left.",r:[["docs","SGLang documentation","https://docs.sglang.io","SGLang"]]},
-  {k:"read",t:["CORE"],x:"Watch the SGLang project lead explain RadixAttention, cache-aware routing and the zero-overhead scheduler. Pair with the NeurIPS paper.",r:[["video","Efficient LLM Inference with SGLang","https://www.youtube.com/watch?v=Ny4xxErgFgQ","Lianmin Zheng · SGLang lead"],["paper","SGLang","https://arxiv.org/abs/2312.07104","Zheng, Yin, Xie et al · NeurIPS 2024"]]},
-  {k:"read",t:["CORE","SKIM"],x:"Read the Anyscale continuous batching post, then the Orca paper it is built on. Focus on iteration-level scheduling and the heavy-tailed length assumption that makes the numbers real.",r:[["text","Continuous batching","https://www.anyscale.com/blog/continuous-batching-llm-inference","Anyscale"],["paper","Orca","https://www.usenix.org/conference/osdi22/presentation/yu","Yu et al · OSDI 2022"]]},
-  {k:"read",t:["CORE"],x:"Read Sarathi-Serve on chunked prefill and stall-free scheduling. This is why chunked prefill became the default in both engines.",r:[["paper","Sarathi-Serve","https://arxiv.org/abs/2403.02310","Agrawal et al · OSDI 2024"],["paper","SARATHI","https://arxiv.org/abs/2308.16369","the original chunked prefill paper"]]}],
- buf:{x:"Read the SGLang v0.4 scheduler post, then run a shared-system-prompt workload against both engines and watch the TTFT gap. This is your first real measurement.",r:[["text","SGLang v0.4 zero-overhead scheduler","https://lmsys.org/blog/2024-12-04-sglang-v0-4/","LMSYS"]]}},
+  {k:"read",t:["CORE"],x:"读 RadixAttention 那篇。在前缀很重的负载上吞吐最高可达 5 倍，没有缓存命中时也没有明显开销，这就告诉你它赢在哪些负载上。",r:[["text","RadixAttention and SGLang","https://lmsys.org/blog/2024-01-17-sglang/","LMSYS"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 SGLang 部署和第 2 周相同的模型。同一硬件、同一 prompt，唯一的变量是引擎。",r:[["docs","SGLang 文档","https://docs.sglang.io","SGLang"]]},
+  {k:"read",t:["CORE"],x:"看 SGLang 项目负责人讲 RadixAttention、缓存感知路由和零开销调度器。配上 NeurIPS 论文（选读），核心内容见 README 第 4 周总结。",r:[["video","Efficient LLM Inference with SGLang","https://www.youtube.com/watch?v=Ny4xxErgFgQ","Lianmin Zheng · SGLang 负责人"],["paper","SGLang","https://arxiv.org/abs/2312.07104","Zheng, Yin, Xie 等 · NeurIPS 2024"]]},
+  {k:"read",t:["CORE","SKIM"],x:"读 Anyscale 的连续批处理文章，然后读它基于的 Orca 论文（选读），核心内容见 README 第 4 周总结。重点是迭代级调度和重尾长度假设——正是它让那些数字成立。",r:[["text","Continuous batching","https://www.anyscale.com/blog/continuous-batching-llm-inference","Anyscale"],["paper","Orca","https://www.usenix.org/conference/osdi22/presentation/yu","Yu 等 · OSDI 2022"]]},
+  {k:"read",t:["CORE"],x:"读 Sarathi-Serve（选读），关于分块 prefill 和无停顿调度，核心内容见 README 第 4 周总结。这就是分块 prefill 成为两个引擎默认策略的原因。",r:[["paper","Sarathi-Serve","https://arxiv.org/abs/2403.02310","Agrawal 等 · OSDI 2024"],["paper","SARATHI","https://arxiv.org/abs/2308.16369","分块 prefill 的源头论文"]]}],
+ buf:{x:"读 SGLang v0.4 零开销调度器那篇，然后用一个共享 system prompt 的负载同时跑两个引擎，看 TTFT 的差距。这是你第一次真正的测量。",r:[["text","SGLang v0.4 零开销调度器","https://lmsys.org/blog/2024-12-04-sglang-v0-4/","LMSYS"]]}},
 
-{n:5,theme:"Load testing to 1000 concurrent",
- focus:"Build the reproducible harness and learn what makes a benchmark defensible before you have anything to defend.",
- med:["t","Text-first. Documentation and hands-on only."],
- del:"A scripted concurrency sweep past 1000 concurrent requests with p50, p95 and p99 output, cross-checked by two independent tools.",
+{n:5,theme:"压测到 1000 并发",
+ focus:"搭建可复现的压测工具，学会什么叫一份站得住脚的 benchmark——在你有东西可辩护之前。",
+ med:["t","以文字为主，只用文档和动手。"],
+ del:"一份脚本化的并发扫描，超过 1000 并发，输出 p50、p95、p99，并用两个独立工具交叉验证。",
  days:[
-  {k:"read",t:["CORE"],x:"Read the GuideLLM introduction and install it. It sweeps from a synchronous baseline up to saturation rather than testing one arbitrary load level.",r:[["text","GuideLLM: Evaluate LLM deployments","https://developers.redhat.com/articles/2025/06/20/guidellm-evaluate-llm-deployments-real-world-inference","Red Hat Developer"],["tool","vllm-project/guidellm","https://github.com/vllm-project/guidellm","GitHub"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Run a GuideLLM sweep with fixed input and output token lengths. Fixed lengths determine KV cache size and therefore the entire result.",r:[["tool","GuideLLM","https://github.com/vllm-project/guidellm","GitHub"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Run vllm bench serve on the same workload as an independent cross-check. Two tools disagreeing is information, not a problem.",r:[["docs","vLLM benchmark CLI","https://docs.vllm.ai/en/latest/benchmarking/cli/","vLLM docs"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Run a genai-perf concurrency sweep at 1, 2, 4 up to 128 and find where throughput saturates while latency degrades. That knee is the only interesting point on the curve.",r:[["tool","genai-perf","https://github.com/triton-inference-server/perf_analyzer","NVIDIA Triton"],["text","LLM Inference Benchmarking Guide","https://developer.nvidia.com/blog/llm-inference-benchmarking-guide-nvidia-genai-perf-and-nim/","NVIDIA · Elias Bermudez"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Rent an H100 for this session only. Push past 1000 concurrent, watching KV cache utilization and num_requests_waiting for preemption.",r:[["text","Practical strategies for vLLM performance tuning","https://developers.redhat.com/articles/2026/03/03/practical-strategies-vllm-performance-tuning","Red Hat Developer"]]}],
- buf:{x:"Write the methodology checklist into your benchmark repo as a file. It is the section further down this page.",r:[]}},
+  {k:"read",t:["CORE"],x:"读 GuideLLM 介绍并安装。它从同步基线扫到饱和，而不是只测一个任意的负载点。",r:[["text","GuideLLM: Evaluate LLM deployments","https://developers.redhat.com/articles/2025/06/20/guidellm-evaluate-llm-deployments-real-world-inference","Red Hat Developer"],["tool","vllm-project/guidellm","https://github.com/vllm-project/guidellm","GitHub"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 GuideLLM 跑一次扫描，输入和输出 token 长度固定。固定长度决定了 KV 缓存大小，也就决定了整个结果。",r:[["tool","GuideLLM","https://github.com/vllm-project/guidellm","GitHub"]]},
+  {k:"build",t:["CORE","BUILD"],x:"在同一个负载上跑 vllm bench serve 做交叉验证。两个工具结果不一致是信息，不是问题。",r:[["docs","vLLM benchmark CLI","https://docs.vllm.ai/en/latest/benchmarking/cli/","vLLM 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 genai-perf 做并发扫描，从 1、2、4 一直到 128。找到吞吐饱和、延迟恶化的点，那个拐点是整条曲线上唯一有意思的点。",r:[["tool","genai-perf","https://github.com/triton-inference-server/perf_analyzer","NVIDIA Triton"],["text","LLM Inference Benchmarking Guide","https://developer.nvidia.com/blog/llm-inference-benchmarking-guide-nvidia-genai-perf-and-nim/","NVIDIA · Elias Bermudez"]]},
+  {k:"build",t:["CORE","BUILD"],x:"只在这节课租一台 H100。冲到 1000 并发以上，同时盯着 KV 缓存利用率和 num_requests_waiting 看有没有抢占。跑的时候读 vLLM 调优策略。",r:[["text","Practical strategies for vLLM performance tuning","https://developers.redhat.com/articles/2026/03/03/practical-strategies-vllm-performance-tuning","Red Hat Developer"]]}],
+ buf:{x:"把发表前的检查清单写进你的 benchmark 仓库。",r:[]}},
 
-{n:6,theme:"Quantization tradeoffs",
- focus:"The first tuning knob, and the first week your harness earns its keep.",
- med:["v","Video-first. The lectures are the entry point, the papers are the deep dive."],
- del:"FP8 and INT4 or AWQ variants benchmarked against the FP16 baseline on both throughput and a quality proxy.",
+{n:6,theme:"量化取舍",
+ focus:"第一个调优旋钮，也是你的压测工具第一次真正派上用场的周。",
+ med:["v","以视频为主。讲座是入口，论文是深挖。"],
+ del:"FP8 和 INT4/AWQ 变体，在吞吐和质量代理指标上都与 FP16 基线做了对比。",
  days:[
-  {k:"read",t:["CORE"],x:"MIT 6.5940 lecture 5, Quantization Part I, first half.",r:[["video","EfficientML.ai Lecture 5: Quantization Part I","https://www.youtube.com/watch?v=TSc_BibWRhM","MIT HAN Lab · Prof. Song Han"],["text","MIT 6.5940 course page and slides","https://hanlab.mit.edu/courses/2024-fall-65940","MIT HAN Lab"]]},
-  {k:"read",t:["CORE"],x:"Finish lecture 5, start lecture 6 for AWQ, GPTQ and SmoothQuant depth. SmoothQuant and AWQ came out of this lab, so this is the authors teaching their own work.",r:[["video","EfficientML.ai Lectures 5 and 6","https://www.youtube.com/watch?v=TSc_BibWRhM","MIT HAN Lab · Song Han"]]},
-  {k:"read",t:["CORE","SKIM"],x:"Read the quantization section of Lilian Weng's survey, then write down which method each engine you run actually implements. That decides what you can ship.",r:[["text","Large Transformer Model Inference Optimization","https://lilianweng.github.io/posts/2023-01-10-inference-optimization/","Lilian Weng"],["docs","Hugging Face quantization docs","https://huggingface.co/docs/transformers/main/en/quantization/overview","practitioner reference"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Serve an AWQ or GPTQ checkpoint and an FP8 variant. Capture throughput and memory under the same sweep you used in week 5.",r:[["docs","vLLM quantization","https://docs.vllm.ai/en/latest/features/quantization/","vLLM docs"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Run a fixed eval set or perplexity proxy across FP16, FP8 and INT4. This table is the deliverable, not the speedup number.",r:[]}],
- buf:{x:"Watch Tim Dettmers, author of LLM.int8() and QLoRA, on outlier features and 4-bit NormalFloat, then the LLM Compressor session for the checkpoint workflow.",r:[["video","QLoRA: Efficient Finetuning of Quantized LLMs","https://www.youtube.com/watch?v=fQirE9N5q_Y","Applied ML Days · Tim Dettmers"],["video","vLLM Office Hours 31: LLM Compressor","https://www.youtube.com/watch?v=WVenRmF4dPY","vLLM official"]]}},
+  {k:"read",t:["CORE"],x:"MIT 6.5940 第 5 讲：Quantization Part I，前半部分。",r:[["video","EfficientML.ai 第 5 讲：Quantization Part I","https://www.youtube.com/watch?v=TSc_BibWRhM","MIT HAN Lab · Song Han"],["text","MIT 6.5940 课程主页与讲义","https://hanlab.mit.edu/courses/2024-fall-65940","MIT HAN Lab"]]},
+  {k:"read",t:["CORE"],x:"读完第 5 讲，开始第 6 讲，深入 AWQ、GPTQ、SmoothQuant。SmoothQuant 和 AWQ 都是这个实验室的成果。",r:[["video","EfficientML.ai 第 5、6 讲","https://www.youtube.com/watch?v=TSc_BibWRhM","MIT HAN Lab · Song Han"]]},
+  {k:"read",t:["CORE","SKIM"],x:"读 Lilian Weng 综述里的量化部分。写下来：你跑的每个引擎实际上实现了其中哪种方法。",r:[["text","Large Transformer Model Inference Optimization","https://lilianweng.github.io/posts/2023-01-10-inference-optimization/","Lilian Weng"],["docs","Hugging Face 量化文档","https://huggingface.co/docs/transformers/main/en/quantization/overview","从业者参考"]]},
+  {k:"build",t:["CORE","BUILD"],x:"跑一个 AWQ 或 GPTQ 检查点和一个 FP8 变体。在与第 5 周相同的扫描下记录吞吐和显存。",r:[["docs","vLLM 量化文档","https://docs.vllm.ai/en/latest/features/quantization/","vLLM 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"在 FP16、FP8、INT4 上跑一组固定评测集或困惑度代理指标。这张表才是产出，不是加速比那个数字。",r:[]}],
+ buf:{x:"看 Tim Dettmers（LLM.int8() 和 QLoRA 的作者）讲离群特征和 4-bit NormalFloat，然后看 LLM Compressor 那期。",r:[["video","QLoRA: Efficient Finetuning of Quantized LLMs","https://www.youtube.com/watch?v=fQirE9N5q_Y","Applied ML Days · Tim Dettmers"],["video","vLLM Office Hours 31: LLM Compressor","https://www.youtube.com/watch?v=WVenRmF4dPY","vLLM 官方"]]}},
 
-{n:7,theme:"Speculative decoding and KV eviction",
- focus:"Two knobs where the concept is widely known but the implementation detail is not.",
- med:["v","Video-first for speculative decoding, taught by the person who wrote vLLM's implementation. Text-first for KV eviction."],
- del:"A speculative decoding variant and a long-context eviction configuration, both benchmarked, including negative results.",
+{n:7,theme:"投机解码与 KV 淘汰",
+ focus:"两个概念上广为人知、实现细节上少有人知的旋钮。",
+ med:["v","投机解码以视频为主，由写了 vLLM 实现的人来讲；KV 淘汰以文字为主。"],
+ del:"一个投机解码变体和一个长上下文淘汰配置，都做了 benchmark，包括负面结果。",
  days:[
-  {k:"read",t:["CORE","SKIM"],x:"Read the docs for the method-selection table, then the vLLM benchmark post: up to 2.8x at QPS 1, but 1.4 to 1.8x slowdown at high QPS. The crossover is the finding, not the speedup.",r:[["docs","Speculative decoding","https://docs.vllm.ai/en/latest/features/speculative_decoding/","vLLM docs"],["text","How Speculative Decoding Boosts vLLM Performance","https://blog.vllm.ai/2024/10/17/spec-decode.html","vLLM blog"]]},
-  {k:"read",t:["CORE"],x:"GPU MODE lecture 22, first half: proposers, scorers, verifiers and the draft model worker. Taught by the original author of vLLM's implementation, which is why it is worth the time despite a familiar topic.",r:[["video","Lecture 22: Hacker's Guide to Speculative Decoding in vLLM","https://www.youtube.com/watch?v=9wNAgpX6z_4","GPU MODE · Cade Daniel, Anyscale"],["paper","EAGLE","https://arxiv.org/abs/2401.15077","the draft-model method vLLM implements"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Enable speculative decoding and benchmark inter-token latency at both low and high QPS. Finding your own crossover point is the session.",r:[["docs","Speculative decoding","https://docs.vllm.ai/en/latest/features/speculative_decoding/","vLLM docs"]]},
-  {k:"read",t:["CORE"],x:"Long context and KV eviction. StreamingLLM reports up to 22.2x speedup over sliding-window recomputation and stays stable past 4M tokens.",r:[["paper","Efficient Streaming Language Models with Attention Sinks","https://arxiv.org/abs/2309.17453","Guangxuan Xiao et al · ICLR 2024"],["video","StreamingLLM and DuoAttention","https://www.csail.mit.edu/event/scale-ml-guangxuan-xiao-streamingllm-and-duoattention-efficient-and-effective-long-sequence","MIT CSAIL · Guangxuan Xiao"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Configure a long-context workload and an eviction strategy, then measure the effect on memory and TTFT. Long context is where eviction stops being theoretical.",r:[]}],
- buf:{x:"Finish GPU MODE lecture 22, the vLLM integration and benchmarks half, then skim the speculators library.",r:[["video","GPU MODE Lecture 22, second half","https://www.youtube.com/watch?v=9wNAgpX6z_4","Cade Daniel, Anyscale"],["tool","vllm-project/speculators","https://github.com/vllm-project/speculators","GitHub"]]}},
+  {k:"read",t:["CORE","SKIM"],x:"读投机解码文档里的方法选择表，然后读 vLLM 的 benchmark 文章：QPS 为 1 时最高 2.8 倍，但高 QPS 时会慢 1.4–1.8 倍。交叉点才是发现，不是加速比。",r:[["docs","投机解码文档","https://docs.vllm.ai/en/latest/features/speculative_decoding/","vLLM 文档"],["text","How Speculative Decoding Boosts vLLM Performance","https://blog.vllm.ai/2024/10/17/spec-decode.html","vLLM 博客"]]},
+  {k:"read",t:["CORE"],x:"GPU MODE 第 22 讲前半部分：提议器、打分器、验证器、草稿模型 worker。由 vLLM 实现的原作者来讲，所以哪怕话题熟悉也值得花时间。",r:[["video","第 22 讲：Hacker's Guide to Speculative Decoding in vLLM","https://www.youtube.com/watch?v=9wNAgpX6z_4","GPU MODE · Cade Daniel, Anyscale"],["paper","EAGLE","https://arxiv.org/abs/2401.15077","vLLM 实现的草稿模型方法"]]},
+  {k:"build",t:["CORE","BUILD"],x:"打开投机解码，在低 QPS 和高 QPS 下分别测 token 间延迟。找到你自己的交叉点，这就是这节课。",r:[["docs","投机解码文档","https://docs.vllm.ai/en/latest/features/speculative_decoding/","vLLM 文档"]]},
+  {k:"read",t:["CORE"],x:"长上下文与 KV 淘汰。StreamingLLM（选读）报告相对滑动窗口重算最高 22.2 倍加速，超过 400 万 token 依然稳定，核心内容见 README 第 7 周总结。",r:[["paper","Efficient Streaming Language Models with Attention Sinks","https://arxiv.org/abs/2309.17453","Guangxuan Xiao 等 · ICLR 2024"],["video","StreamingLLM and DuoAttention","https://www.csail.mit.edu/event/scale-ml-guangxuan-xiao-streamingllm-and-duoattention-efficient-and-effective-long-sequence","MIT CSAIL · Guangxuan Xiao"]]},
+  {k:"build",t:["CORE","BUILD"],x:"配一个长上下文负载和一套淘汰策略，测显存和 TTFT。长上下文是淘汰从理论变成现实的地方。",r:[]}],
+ buf:{x:"读完 GPU MODE 第 22 讲后半部分（vLLM 集成与 benchmark），然后略读 speculators 库。",r:[["video","GPU MODE 第 22 讲，后半部分","https://www.youtube.com/watch?v=9wNAgpX6z_4","Cade Daniel, Anyscale"],["tool","vllm-project/speculators","https://github.com/vllm-project/speculators","GitHub"]]}},
 
-{n:8,theme:"Disaggregated serving and Kubernetes",
- focus:"The prefill and decode asymmetry from week 1 becomes an architecture, then the operations layer that runs it.",
- med:["v","Video-first for disaggregation. Text-first for Kubernetes, which changes too fast for video to stay current."],
- del:"Your service on Kubernetes with autoscaling driven by queue depth rather than CPU.",
+{n:8,theme:"解耦式服务与 Kubernetes",
+ focus:"第 1 周的 prefill/decode 不对称变成一种架构，再加上运行它的运维层。",
+ med:["v","解耦式部署以视频为主；Kubernetes 以文字为主，它变化太快，视频跟不上。"],
+ del:"你的服务跑在 Kubernetes 上，用排队深度而不是 CPU 驱动自动扩缩容。",
  days:[
-  {k:"read",t:["CORE"],x:"The DistServe talk from OSDI 2024, presented by the first author. Short enough for one session. It reports serving 7.4x more requests or holding 12.6x tighter SLOs.",r:[["video","OSDI 24: DistServe","https://www.youtube.com/watch?v=WwJvecXOeUA","USENIX · Yinmin Zhong, Peking University"],["paper","DistServe","https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin","USENIX OSDI 2024"]]},
-  {k:"read",t:["CORE"],x:"Splitwise, where an H100-for-prefill and power-capped-A100-for-decode split gave 1.4x throughput at 20 percent lower cost, then vLLM's disaggregated prefilling docs.",r:[["paper","Splitwise","https://arxiv.org/abs/2311.18677","Patel et al · Microsoft · ISCA 2024"],["docs","Disaggregated prefilling","https://docs.vllm.ai/en/latest/features/disagg_prefill/","vLLM docs"]]},
-  {k:"read",t:["CORE"],x:"Mooncake, the KV-cache-centric design running in production at Kimi, then the SGLang PD-disaggregation docs. Compare how each engine splits the phases.",r:[["paper","Mooncake","https://arxiv.org/abs/2407.00079","Qin et al · Moonshot AI · FAST 2025"],["docs","SGLang PD disaggregation","https://docs.sglang.io/docs/advanced_features/pd_disaggregation","SGLang docs"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Deploy with the vLLM production stack Helm charts, on a managed cluster or kind for the control-plane parts.",r:[["tool","vllm-project/production-stack","https://github.com/vllm-project/production-stack","GitHub"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Scale on the num_requests_waiting custom metric instead of CPU. CPU-based autoscaling on a GPU service is the mistake this session prevents.",r:[["text","KServe autoscaling for vLLM with KEDA","https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda","Red Hat Developer"],["docs","llm-d","https://llm-d.ai","Kubernetes-native distributed inference"]]}],
- buf:{x:"Place the rest of the ecosystem on the map without adopting any of it.",r:[["text","Disaggregated Inference at Scale with PyTorch and vLLM","https://pytorch.org/blog/disaggregated-inference-at-scale-with-pytorch-vllm/","PyTorch Foundation"],["tool","NVIDIA Dynamo","https://github.com/ai-dynamo/dynamo","GitHub"]]}},
+  {k:"read",t:["CORE"],x:"OSDI 2024 的 DistServe 报告，由第一作者讲。一节课能看完。报告称可多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍。论文（选读），核心内容见 README 第 8 周总结。",r:[["video","OSDI 24: DistServe","https://www.youtube.com/watch?v=WwJvecXOeUA","USENIX · Yinmin Zhong, 北京大学"],["paper","DistServe","https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin","USENIX OSDI 2024"]]},
+  {k:"read",t:["CORE"],x:"Splitwise（选读），核心内容见第 8 周（续）的总结：prefill 用 H100、decode 用降功耗 A100，吞吐 1.4 倍、成本低 20%。然后读 vLLM 的解耦式 prefill 文档。",r:[["paper","Splitwise","https://arxiv.org/abs/2311.18677","Patel 等 · Microsoft · ISCA 2024"],["docs","Disaggregated prefilling","https://docs.vllm.ai/en/latest/features/disagg_prefill/","vLLM 文档"]]},
+  {k:"read",t:["CORE"],x:"Mooncake（选读），核心内容见第 8 周（续）的总结，以 KV 缓存为中心，已在 Kimi 生产使用。然后读 SGLang PD 解耦文档。比较每个引擎怎么拆分这两个阶段。",r:[["paper","Mooncake","https://arxiv.org/abs/2407.00079","Qin 等 · Moonshot AI · FAST 2025"],["docs","SGLang PD 解耦","https://docs.sglang.io/docs/advanced_features/pd_disaggregation","SGLang 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 vLLM production stack 的 Helm chart 部署，在托管集群或 kind 上。",r:[["tool","vllm-project/production-stack","https://github.com/vllm-project/production-stack","GitHub"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用 num_requests_waiting 这个自定义指标做扩缩容，而不是 CPU。在 GPU 服务上按 CPU 扩缩容，正是这节课要防止的错误。",r:[["text","KServe autoscaling for vLLM with KEDA","https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda","Red Hat Developer"],["docs","llm-d","https://llm-d.ai","Kubernetes 原生分布式推理"]]}],
+ buf:{x:"把生态图谱补上，不采用其中任何一个。",r:[["text","Disaggregated Inference at Scale with PyTorch and vLLM","https://pytorch.org/blog/disaggregated-inference-at-scale-with-pytorch-vllm/","PyTorch Foundation"],["tool","NVIDIA Dynamo","https://github.com/ai-dynamo/dynamo","GitHub"]]}},
 
-{n:9,theme:"Unit economics and the router",
- focus:"Turn cost reading into code. This is where the roadmap stops being about latency and starts being about margin.",
- med:["t","Text-first."],
- del:"A router that picks a backend by cost, latency and quality, plus per-request token budgeting with cost on the dashboard.",
+{n:9,theme:"单位经济学与路由器",
+ focus:"把成本的阅读变成代码。路线图从这里开始不只是关于延迟，也关于利润。",
+ med:["t","以文字为主。"],
+ del:"一个按成本、延迟、质量选后端的路由器，加上按请求计 token 预算、把成本打到看板上的中间件。",
  days:[
-  {k:"read",t:["CORE"],x:"LLM Inference Economics from First Principles: GPU-hour-to-token math, and why utilization rather than price per hour drives cost.",r:[["text","LLM Inference Economics from First Principles","https://www.tensoreconomics.com/p/llm-inference-economics-from-first","Tensor Economics"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Take the formula, hourly rate divided by peak tokens per second times seconds times utilization, and re-derive cost per million tokens for your own GPU using your week 5 throughput. Your numbers, not theirs.",r:[["text","Token Economics Across Traffic Profiles","https://www.digitalocean.com/community/tutorials/llm-inference-cost","DigitalOcean · worked formula"],["text","LLM Engineer's Almanac","https://modal.com/llm-almanac/workloads","Modal"]]},
-  {k:"read",t:["CORE"],x:"Optimizing AI Inference at Character.AI. A 33x serving cost reduction via int8 on weights, activations and KV cache plus multi-query attention and cross-layer KV sharing. Every lever is one you studied in weeks 6 and 7.",r:[["text","Optimizing AI Inference at Character.AI","https://blog.character.ai/optimizing-ai-inference-at-character-ai-2/","Character.AI engineering"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Build the router: a thin service that picks cheap-small or expensive-large under a cost, latency and quality policy, logging the chosen path and its cost to Prometheus.",r:[]},
-  {k:"build",t:["CORE","BUILD"],x:"Add token-budgeting middleware that caps and accounts tokens per request. Put per-request cost on the dashboard next to latency. Cost and latency on one screen is the point of the week.",r:[]}],
- buf:{x:"Read the NVIDIA optimization survey as a consolidation pass over weeks 1 through 9.",r:[["text","Mastering LLM Techniques: Inference Optimization","https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/","NVIDIA"]]}},
+  {k:"read",t:["CORE"],x:"读《LLM Inference Economics from First Principles》：GPU 小时到 token 的换算，以及为什么利用率而不是每小时单价决定成本。",r:[["text","LLM Inference Economics from First Principles","https://www.tensoreconomics.com/p/llm-inference-economics-from-first","Tensor Economics"]]},
+  {k:"build",t:["CORE","BUILD"],x:"用公式（每小时价格 ÷（峰值 token/秒 × 3600 × 利用率）× 100 万）结合你第 5 周的吞吐，重新算你自己那块 GPU 每百万 token 的成本。算你自己的数，不用他们的。",r:[["text","Token Economics Across Traffic Profiles","https://www.digitalocean.com/community/tutorials/llm-inference-cost","DigitalOcean · 公式示例"],["text","LLM Engineer's Almanac","https://modal.com/llm-almanac/workloads","Modal"]]},
+  {k:"read",t:["CORE"],x:"读 Character.AI 的优化文章：通过权重、激活、KV 缓存的 int8 加上多查询注意力和跨层 KV 共享，服务成本降了 33 倍。每一个杠杆都是你在第 6、7 周学过的。",r:[["text","Optimizing AI Inference at Character.AI","https://blog.character.ai/optimizing-ai-inference-at-character-ai-2/","Character.AI engineering"]]},
+  {k:"build",t:["CORE","BUILD"],x:"搭建路由器。一个瘦服务，按成本/延迟/质量策略在便宜的小模型和贵的的大模型之间选择，并把选择的路径和成本记到 Prometheus。",r:[]},
+  {k:"build",t:["CORE","BUILD"],x:"Token 预算中间件：按请求封顶并记账。把每次请求的成本放到看板上，和延迟并排。成本和延迟同屏，就是这周的意义。",r:[]}],
+ buf:{x:"读 NVIDIA 优化综述，把第 1–9 周做一次整合。",r:[["text","Mastering LLM Techniques: Inference Optimization","https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/","NVIDIA"]]}},
 
-{n:10,theme:"Publish, then build the reading habit",
- focus:"Ship the artifact and set up the inputs that keep it current.",
- med:["t","Text-first. Publishing is a writing task, and the models to imitate are papers and methodology pages."],
- del:"A published repo and writeup with pinned versions and reproducible commands, plus a weekly research session on the calendar.",
+{n:10,theme:"发表，然后养成阅读习惯",
+ focus:"把产物发出去，并建立让它保持新鲜的输入渠道。",
+ med:["t","以文字为主。发表是写作任务，模仿的对象是论文和方法论文档。"],
+ del:"一份发表出来的仓库和写作，版本固定、命令可复现，外加日历上每周一次的研究时间。",
  days:[
-  {k:"build",t:["CORE","BUILD"],x:"Draft the writeup: hardware, model, exact token lengths, concurrency sweep, p50, p95 and p99 for TTFT and inter-token latency, and throughput. Run the checklist against it first.",r:[["text","How to Benchmark LLM Engines","https://modal.com/llm-almanac/how-to-benchmark","Modal"],["text","MLPerf Inference","https://mlcommons.org/benchmarks/inference-datacenter/","MLCommons"]]},
-  {k:"build",t:["CORE","BUILD"],x:"Add quantization, speculative decoding and KV eviction as labeled variants with reproducible commands and pinned engine versions. Publish the repo and the post.",r:[]},
-  {k:"read",t:["CORE"],x:"Set up the weekly habit: MLSys, OSDI and NeurIPS efficiency tracks plus arXiv cs.DC. Queue three items.",r:[["text","arXiv cs.DC recent","https://arxiv.org/list/cs.DC/recent","arXiv"],["text","MLSys","https://mlsys.org","MLSys"]]},
-  {k:"read",t:["CORE"],x:"First habit session. One paper's abstract, method figure and evaluation in 30 minutes. Not the whole paper, that is the rule that makes it last.",r:[["text","vLLM blog","https://blog.vllm.ai","vLLM"],["text","LMSYS blog","https://lmsys.org/blog/","LMSYS"]]},
-  {k:"read",t:["STRETCH"],x:"Optional edge sampler. Where ONNX Runtime, TensorRT-LLM and WebLLM each fit, noting these are client-side runtimes rather than an extension of what you built.",r:[["docs","ONNX Runtime","https://onnxruntime.ai","onnxruntime.ai"],["tool","TensorRT-LLM","https://github.com/NVIDIA/TensorRT-LLM","NVIDIA"],["docs","WebLLM","https://webllm.mlc.ai","MLC"]]}],
- buf:{x:"Circulate the benchmark for feedback and iterate on any methodology criticism. Criticism you can answer is proof the harness is real.",r:[]}}
+  {k:"build",t:["CORE","BUILD"],x:"起草写作：硬件、模型、精确的输入输出 token 长度、并发扫描、TTFT 和 ITL 的 p50/p95/p99、吞吐。先拿下面的检查清单过一遍。",r:[["text","How to Benchmark LLM Engines","https://modal.com/llm-almanac/how-to-benchmark","Modal"],["text","MLPerf Inference","https://mlcommons.org/benchmarks/inference-datacenter/","MLCommons"]]},
+  {k:"build",t:["CORE","BUILD"],x:"把量化、投机解码、KV 淘汰作为有标签的变体加进去，附可复现的命令和固定版本。发表。",r:[]},
+  {k:"read",t:["CORE"],x:"建立每周的阅读习惯。MLSys、OSDI、NeurIPS 效率方向，加 arXiv cs.DC。先排三篇。",r:[["text","arXiv cs.DC 最新","https://arxiv.org/list/cs.DC/recent","arXiv"],["text","MLSys","https://mlsys.org","MLSys"]]},
+  {k:"read",t:["CORE"],x:"第一次习惯性阅读。30 分钟读一篇论文的摘要、方法图和实验，不读全文。",r:[["text","vLLM 博客","https://blog.vllm.ai","vLLM"],["text","LMSYS 博客","https://lmsys.org/blog/","LMSYS"]]},
+  {k:"read",t:["STRETCH"],x:"可选：端侧采样。ONNX Runtime、WebLLM 各自适合哪里，注意这些是客户端运行时，不是你所建东西的延伸。TensorRT-LLM 不在这里，它有自己的第 11 周。",r:[["docs","ONNX Runtime","https://onnxruntime.ai","onnxruntime.ai"],["docs","WebLLM","https://webllm.mlc.ai","MLC"]]}],
+ buf:{x:"把 benchmark 拿去征求反馈，根据方法论上的批评迭代。能回答的批评，证明你的压测工具是真的。",r:[]}}
+];
+
+const OPTWEEKS = [
+{n:"8续",key:"8c",nav:"8续",opt:true,theme:"大规模集群 PD 优化",
+ focus:"第 8 周把 prefill 和 decode 拆开了，这一续周回答拆开之后在真实集群上要解决的问题：KV 怎么跨节点走、池子怎么共享、两池配比怎么定、节点挂了怎么办。",
+ med:["t","以文字为主。论文一律是选读：核心内容已经写进 README 对应章节。"],
+ del:"一张 Mooncake 架构图、一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的表、一张“信号→动作→验证方法”的扩缩容与容错策略表，以及一份注明实际跑了多大集群的解耦 vs 同机部署对比。",
+ days:[
+  {k:"read",t:["CORE"],x:"按 README 第 8 周（续）的 Mooncake 总结精读：核心思想、Conductor 的 TTFT 估算式、早期拒绝。画一张架构图：prefill 池、decode 池、KV 池（Mooncake Store）、Conductor、传输引擎，标出请求和 KV 各走哪条路。论文（选读）。",r:[["paper","Mooncake","https://arxiv.org/abs/2407.00079","Qin 等 · Moonshot AI · FAST 2025 最佳论文"],["text","README 第 8 周（续）论文精读","https://github.com/tdccccc/time-to-first-token/blob/main/README.md","本仓库 README · 总结在正文里"]]},
+  {k:"build",t:["CORE","BUILD"],x:"手算传输账：7B 模型每个 token 的 KV 是 128KB；4096 token 的 prompt 是 512MB；100Gb/s 约 40ms、400Gb/s InfiniBand 约 10ms、10Gb/s TCP 约 400ms。做一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的表，解耦划不划算从这个数开始。",r:[["tool","Mooncake Transfer Engine","https://github.com/kvcache-ai/Mooncake","mooncake-transfer-engine"]]},
+  {k:"read",t:["CORE"],x:"跨节点 KV 池与复用：Mooncake Store 的分布式缓存、内容寻址、跨实例前缀复用、热块复制与 LRU 淘汰；再对照 vLLM 解耦式 prefill 文档里 9 种 connector 的分工。画出 GPU→CPU→远端三级层级，写清每一级命中意味着什么。",r:[["docs","Disaggregated prefilling","https://docs.vllm.ai/en/latest/features/disagg_prefill/","vLLM 文档 · 9 种 connector 的分工"]]},
+  {k:"build",t:["CORE","BUILD"],x:"多节点解耦部署：用 vLLM production-stack 的 Helm chart 装两套独立部署——prefill 一套、decode 一套，再用 M0 的压测脚本在同一负载下测解耦 vs 同机部署的 TTFT 和吞吐。注意：kind 多节点只能验证拓扑和配置，测不出性能；租不到多卡集群就记“部署验证完成，性能对比待补测”。",r:[["tool","vllm-project/production-stack","https://github.com/vllm-project/production-stack","GitHub"],["docs","M0 压测脚本 bench_openai.py","https://github.com/tdccccc/time-to-first-token/blob/main/docs/modules/M0-foundations/scripts/bench_openai.py","本仓库"]]},
+  {k:"read",t:["CORE"],x:"池配比、扩缩容与容错：先用第 5 周的负载特征判断 prefill-heavy 还是 decode-heavy，再定两池的卡数；扩缩容信号用 num_requests_waiting、TTFT 和队列深度；容错对照 SGLang PD 解耦文档的心跳与超时，节点挂了 KV 丢了要重算，路由器负责摘掉故障节点。产出：一张“信号→动作→验证方法”的策略表。",r:[["docs","SGLang PD 解耦","https://docs.sglang.io/docs/advanced_features/pd_disaggregation","SGLang 文档 · 心跳 5 秒、连续 2 次失败摘节点、KV 等待超时 300 秒"],["docs","llm-d","https://llm-d.ai","智能路由与预测延迟调度"]]}],
+ buf:{x:"对照 Mooncake 文档和 vLLM 解耦文档把周四的配置再走一遍；或在 llm-d 文档里找 Mooncake PD 部署指南。",r:[["text","Mooncake 文档","https://kvcache-ai.github.io/Mooncake/","Mooncake"],["docs","llm-d","https://llm-d.ai","Mooncake PD 部署指南"]]}},
+
+{n:"11",key:"11",nav:"W11",opt:true,theme:"TensorRT-LLM——编译式推理引擎",
+ focus:"第三台引擎，走编译式路线。学完要能讲清：同样的模型，为什么 TensorRT-LLM 要在加载时多做一步“编译”，这一步换来了什么，又锁死了什么。",
+ med:["t","论文一律选读：三篇投机解码论文的深度总结写在 README 正文里；动手以 trtllm-serve 与 LLM API 为主。"],
+ del:"一个跑着同一模型的 TensorRT-LLM 服务、一张 FP16/FP8 对比表、一份三引擎对比报告与选型指南。",
+ days:[
+  {k:"read",t:["CORE"],x:"读 TensorRT-LLM 架构总览与分页注意力、IFB 与调度：PyExecutor 后台循环每步在干什么；Scheduler、KVCacheManager、ModelEngine、Sampler 各自管什么；max_batch_size、max_seq_len、max_num_tokens 三个预算怎么卡住调度和吞吐；“编译”发生在引擎加载时。最后对照第 2 周的 vLLM 写三句话：两者分页 KV 的相同点和不同点。",r:[["docs","TensorRT-LLM 架构总览","https://nvidia.github.io/TensorRT-LLM/developer-guide/overview.html","NVIDIA 文档"],["docs","分页注意力、IFB 与调度","https://nvidia.github.io/TensorRT-LLM/features/paged-attention-ifb-scheduler.html","NVIDIA 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"按安装指南拉 NGC 预编译容器或 pip 安装，在容器里跑 trtllm-serve，确认 8000 端口的 /v1/chat/completions 通了。同一模型、同一硬件，和第 2/4 周对齐。",r:[["docs","TensorRT-LLM 安装指南","https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html","NVIDIA 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"先跑 ModelOpt 预量化权重（FP8），没有现成权重就用 ModelOpt 离线量化；再用 M0 的压测脚本在同一 prompt、同一 max-tokens、同一并发下测 FP16 与 FP8 两档，记 TTFT/ITL/吞吐。FP8 权重需要 Hopper 或更新；只有 A100 时改跑 W4A16 AWQ/GPTQ。",r:[["docs","TensorRT-LLM 量化文档","https://nvidia.github.io/TensorRT-LLM/features/quantization.html","NVIDIA 文档"],["docs","M0 压测脚本 bench_openai.py","https://github.com/tdccccc/time-to-first-token/blob/main/docs/modules/M0-foundations/scripts/bench_openai.py","本仓库"]]},
+  {k:"read",t:["CORE"],x:"先读 README 里的三篇投机解码论文深度总结（原文选读），弄清 draft-verify 机制和接受率为什么决定一切；再动手：给 Llama-3.1-8B-Instruct 开 EAGLE-3，在低并发下测接受率与延迟变化，验证“只在低 batch 下加速”；再用同一 system prompt 的两批请求对比 TTFT，验证跨请求 KV block 复用；最后读解耦式服务文档，写出 cache_transceiver_config（backend: NIXL）的配置。解耦实测需要多卡/多节点，这节只做到配置层面，注明“需多卡环境，待补测”。",r:[["paper","Fast Inference from Transformers via Speculative Decoding","https://arxiv.org/abs/2211.17192","Leviathan 等 · ICML 2023 Oral"],["paper","Accelerating Large Language Model Decoding with Speculative Sampling","https://arxiv.org/abs/2302.01318","Chen 等"],["paper","EAGLE-3","https://arxiv.org/abs/2503.01840","Li 等 · NeurIPS 2025"],["docs","TensorRT-LLM 投机解码","https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html","NVIDIA 文档"],["docs","TensorRT-LLM 解耦式服务","https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html","NVIDIA 文档"]]},
+  {k:"build",t:["CORE","BUILD"],x:"三引擎对比报告。同一硬件、同一模型、同一 prompt 与输出长度、同一并发扫描，把 vLLM（第 2/5 周数据）、SGLang（第 4 周数据）、TensorRT-LLM（本周数据）放进一张表：TTFT p50/p95、ITL p50/p95、吞吐；再写选型指南。最后写一句适用边界：TensorRT-LLM 只支持官方列表里的 NVIDIA 架构，换国产芯片不在它的射程内，那是 M3 的事。",r:[]}],
+ buf:{x:"补做第 4 天的解耦配置实测（有多卡时），或重跑第 3 天的量化对比。",r:[]}}
 ];
 
 const GATE = [
- "Sweep the request rate. A single concurrency level is an anecdote.",
- "Report exact input and output token lengths. KV cache size and therefore throughput depend entirely on them.",
- "Report p50, p95 and p99. Means hide the tail that users feel.",
- "Keep TTFT and inter-token latency separate. Collapsing prefill and decode into one number destroys the finding.",
- "Do not measure at the saturation point where the server is preempting. Report the knee, not the collapse.",
- "Avoid synthetic uniform-length traffic. Uniform lengths hide the heavy tail that makes continuous batching matter.",
- "Account for tokenizer differences between engines before comparing tokens per second.",
- "Pin engine versions and publish exact commands, so a critic can reproduce rather than speculate."
+ "扫描请求速率。只测一个并发级别是轶事，不是 benchmark。",
+ "报告精确的输入和输出 token 长度。KV 缓存大小、进而吞吐，完全取决于它们。",
+ "报告 p50、p95、p99。平均值会藏住用户实际感受到的长尾。",
+ "TTFT 和 token 间延迟分开报。把 prefill 和 decode 压成一个数，会毁掉结论。",
+ "不要在服务器已经抢占的饱和点上测。报拐点，不报崩溃点。",
+ "别用均匀长度的合成流量。均匀长度会藏住让连续批处理有意义的重尾分布。",
+ "比较每秒 token 数之前，先处理不同引擎之间的分词器差异。",
+ "固定引擎版本，公布精确命令，让批评者可以复现而不是猜测。"
 ];
 
 /* ---------------------------------------------------------------
-   Progress persistence.
-   Primary store is localStorage: no server, no accounts, works on
-   GitHub Pages and from a local file. If localStorage is blocked
-   (private mode, sandboxed frame) we fall back to memory for the
-   session and tell the user so they can export before closing.
-   Cross-device is handled by the sync link and the JSON export
-   rather than by a backend.
+   进度持久化。
+   主存储是 localStorage：没有服务器、没有账号，在 GitHub Pages
+   和本地文件打开都能用。如果 localStorage 被禁（隐私模式、沙箱
+   frame），退回当次访问的内存，并提示用户在关闭前导出。
+   跨设备靠同步链接和 JSON 导出，而不是后端。
 ------------------------------------------------------------------ */
 const KEY = "llm-inference-roadmap:v1";
 let state = {days:{}, gate:{}};
@@ -551,14 +607,20 @@ function storageOK(){
     return true;
   }catch(e){ return false; }
 }
+const objOrEmpty = v => (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
 
 function load(){
   durable = storageOK();
   if(durable){
     try{
       const raw = window.localStorage.getItem(KEY);
-      if(raw) state = Object.assign(state, JSON.parse(raw));
-    }catch(e){ /* corrupt value, start clean */ }
+      if(raw){
+        const parsed = JSON.parse(raw);
+        if(parsed && typeof parsed === "object"){
+          state = {days: objOrEmpty(parsed.days), gate: objOrEmpty(parsed.gate)};
+        }
+      }
+    }catch(e){ /* 损坏的值，从头开始 */ }
   }
   const fromLink = readHash();
   if(fromLink){ state = fromLink; save(); history.replaceState(null,"",location.pathname+location.search); }
@@ -569,12 +631,16 @@ function save(){
   try{ window.localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){ durable = false; paintWarn(); }
 }
 
-/* --- compact encoding for the sync link: 58 flags into 12 chars --- */
+/* --- 同步链接的紧凑编码：68 个标志位，14 个字符 ---
+   顺序是固定的：50 节核心课、8 项检查清单、10 节可选加深。
+   旧的 12 字符链接只有 60 位，解码时多出的可选课一律视为未完成，
+   不会崩，也不会错位。 */
 const ALPHA = "0123456789abcdefghijklmnopqrstuv";
 function slots(){
   const s = [];
   for(let w=1; w<=10; w++) for(let d=0; d<5; d++) s.push(["days", id(w,d)]);
   for(let g=0; g<GATE.length; g++) s.push(["gate", String(g)]);
+  OPTWEEKS.forEach(w=>{ for(let d=0; d<5; d++) s.push(["days", id(w.key,d)]); });
   return s;
 }
 function encode(){
@@ -611,75 +677,88 @@ function paintWarn(){
 }
 const pad = n => String(n).padStart(2,"0");
 const id = (w,d) => "w"+w+"d"+d;
+const isOptKey = k => k.startsWith("w8c") || k.startsWith("w11");
 
+const RT = {video:"视频", text:"文章", paper:"论文", docs:"文档", tool:"工具"};
 function res(list){
   if(!list||!list.length) return "";
   return `<ul class="res">${list.map(([type,title,url,meta])=>
-    `<li><span class="rt ${type}">${type}</span><span><a class="lk" href="${url}" target="_blank" rel="noopener">${title}</a><span class="meta">${meta||""}</span></span></li>`).join("")}</ul>`;
+    `<li><span class="rt ${type}">${RT[type]||type}</span><span><a class="lk" href="${url}" target="_blank" rel="noopener">${title}</a><span class="meta">${meta||""}${type==="paper" ? " · 选读" : ""}</span></span></li>`).join("")}</ul>`;
 }
-function dayRow(w,i,d){
-  const key = id(w,i);
+function dayRow(prefix, label, i, d){
+  const key = prefix+"d"+i;
   const tags = d.t.map(t=>{
     const cls = t==="STRETCH"?"stretch":t==="SKIM"?"skim":t==="BUILD"?"build":"core";
-    const label = t==="SKIM"?"skim if known":t==="BUILD"?"build":t.toLowerCase();
-    return `<span class="tag ${cls}">${label}</span>`;
+    const lab = t==="SKIM"?"略读":t==="BUILD"?"做":t==="STRETCH"?"延伸":"核心";
+    return `<span class="tag ${cls}">${lab}</span>`;
   }).join("");
   return `<div class="day" id="${key}">
-    <input class="chk" type="checkbox" data-key="${key}" aria-label="Mark week ${w} ${DAYS[i]} complete">
+    <input class="chk" type="checkbox" data-key="${key}" aria-label="标记第 ${label} 周 ${DAYS[i]} 完成">
     <div class="day-d">${DAYS[i]}</div>
     <div class="day-body">
-      <div class="tags"><span class="tag ${d.k}">${d.k==="read"?"read":"build"}</span>${tags}</div>
+      <div class="tags"><span class="tag ${d.k}">${d.k==="read"?"读":"做"}</span>${tags}</div>
       <p>${d.x}</p>${res(d.r)}
     </div></div>`;
 }
 function renderNav(){
   document.getElementById("nav").innerHTML =
     WEEKS.map(w=>`<a href="#wk${w.n}" data-wk="${w.n}">W${pad(w.n)}</a>`).join("")
-    + `<a href="#setup">Setup</a><a href="#gate">Checklist</a><a href="#decisions">Decisions</a><a href="#reference">Reference</a>`;
+    + OPTWEEKS.map(w=>`<a href="#wk${w.key}" data-wk="${w.key}">${w.nav}</a>`).join("")
+    + `<a href="#modules">模块地图</a><a href="#setup">环境准备</a><a href="#gate">检查清单</a><a href="#decisions">决策点</a><a href="#reference">参考资料</a>`;
 }
-function renderWeeks(){
-  document.getElementById("weeks").innerHTML = WEEKS.map(w=>`
-    <article class="wk" id="wk${w.n}">
+function weekHTML(w){
+  const prefix = w.opt ? "w"+w.key : "w"+w.n;
+  const wkId = w.opt ? "wk"+w.key : "wk"+w.n;
+  const num = w.opt ? w.n : pad(w.n);
+  const sub = w.opt ? "可选" : "周";
+  const label = w.opt ? w.n : String(w.n);
+  return `
+    <article class="wk" id="${wkId}">
       <div class="wk-head">
-        <div class="wk-n">${pad(w.n)}<span>WEEK</span></div>
+        <div class="wk-n">${num}<span>${sub}</span></div>
         <div>
-          <button class="wk-toggle" data-wk="${w.n}" aria-label="Toggle all sessions in week ${w.n}"><span data-count="${w.n}">0/5</span></button>
+          <button class="wk-toggle" data-prefix="${prefix}" aria-label="切换第 ${label} 周全部课程"><span data-count="${prefix}">0/5</span></button>
           <h3 class="wk-theme">${w.theme}</h3>
           <p class="wk-focus">${w.focus}</p>
-          <p class="wk-med">Medium · <b class="${w.med[0]}">${w.med[1]}</b></p>
-          <div class="wk-del"><b>Deliverable</b><span>${w.del}</span></div>
+          <p class="wk-med">形式 · <b class="${w.med[0]}">${w.med[1]}</b></p>
+          <div class="wk-del"><b>产出</b><span>${w.del}</span></div>
         </div>
       </div>
       <div class="days">
-        ${w.days.map((d,i)=>dayRow(w.n,i,d)).join("")}
-        <div class="day buf"><span></span><div class="day-d">Buffer</div>
+        ${w.days.map((d,i)=>dayRow(prefix,label,i,d)).join("")}
+        <div class="day buf"><span></span><div class="day-d">缓冲</div>
           <div class="day-body"><p>${w.buf.x}</p>${res(w.buf.r)}</div></div>
       </div>
-    </article>`).join("");
+    </article>`;
+}
+function renderWeeks(){
+  document.getElementById("weeklist").innerHTML =
+    WEEKS.map(weekHTML).join("") + OPTWEEKS.map(weekHTML).join("");
 }
 function renderGate(){
   document.getElementById("gatelist").innerHTML = GATE.map((t,i)=>
     `<label><input class="chk" type="checkbox" data-gate="${i}"><span>${t}</span></label>`).join("");
 }
 function paint(){
-  let done = 0;
+  let done = 0, odone = 0;
   document.querySelectorAll('.chk[data-key]').forEach(cb=>{
     const on = !!state.days[cb.dataset.key];
     cb.checked = on; cb.closest(".day").classList.toggle("done", on);
-    if(on) done++;
+    if(on){ if(isOptKey(cb.dataset.key)) odone++; else done++; }
   });
   document.querySelectorAll('.chk[data-gate]').forEach(cb=>{ cb.checked = !!state.gate[cb.dataset.gate]; });
   document.querySelectorAll(".wk-toggle").forEach(btn=>{
-    const w = Number(btn.dataset.wk);
-    const n = [0,1,2,3,4].filter(d => state.days[id(w,d)]).length;
+    const prefix = btn.dataset.prefix;
+    const keys = [0,1,2,3,4].map(d => prefix+"d"+d);
+    const n = keys.filter(k => state.days[k]).length;
     btn.querySelector("span").textContent = n + "/5";
     btn.classList.toggle("full", n === 5);
-    btn.title = n === 5 ? "Clear this week" : "Mark this week done";
+    btn.title = n === 5 ? "清除这一周" : "标记这一周完成";
   });
   const pct = Math.round((done/50)*100);
   const wk = done ? Math.min(10, Math.floor(done/5)+1) : 0;
   document.getElementById("tnum").innerHTML =
-    `${done}<small>/ 50 sessions${done ? ` · week ${wk} · ${(done*0.5).toFixed(1).replace(/\.0$/,"")} h` : ""}</small>`;
+    `核心 ${done}<small>/ 50 节 · 可选加深 ${odone}/ 10 节${done ? ` · 第 ${wk} 周 · ${(done*0.5).toFixed(1).replace(/\.0$/,"")} h` : ""}</small>`;
   document.getElementById("tbar").style.width = pct + "%";
   paintWarn();
 }
@@ -699,12 +778,12 @@ function boot(){
     }
   });
 
-  /* week-level toggle: fills an incomplete week, clears a complete one */
-  document.getElementById("weeks").addEventListener("click", e=>{
+  /* 整周切换：未满的一周填满，已满的一周清空 */
+  document.getElementById("weeklist").addEventListener("click", e=>{
     const btn = e.target.closest(".wk-toggle");
     if(!btn) return;
-    const w = Number(btn.dataset.wk);
-    const keys = [0,1,2,3,4].map(d => id(w,d));
+    const prefix = btn.dataset.prefix;
+    const keys = [0,1,2,3,4].map(d => prefix+"d"+d);
     const allDone = keys.every(k => state.days[k]);
     keys.forEach(k => { if(allDone) delete state.days[k]; else state.days[k] = true; });
     save(); paint();
@@ -712,8 +791,8 @@ function boot(){
 
   document.getElementById("tlink").addEventListener("click", async e=>{
     const url = location.origin + location.pathname + "#p=" + encode();
-    try{ await navigator.clipboard.writeText(url); flash(e.target, "Copied"); }
-    catch(err){ window.prompt("Copy this link:", url); }
+    try{ await navigator.clipboard.writeText(url); flash(e.target, "已复制"); }
+    catch(err){ window.prompt("复制这个链接：", url); }
   });
   document.getElementById("texp").addEventListener("click", e=>{
     const blob = new Blob([JSON.stringify({app:"llm-inference-roadmap", version:1, saved:new Date().toISOString(), state}, null, 2)], {type:"application/json"});
@@ -722,7 +801,7 @@ function boot(){
     a.download = "inference-roadmap-progress.json";
     a.click();
     URL.revokeObjectURL(a.href);
-    flash(e.target, "Saved");
+    flash(e.target, "已保存");
   });
   document.getElementById("timp").addEventListener("click", ()=> document.getElementById("tfile").click());
   document.getElementById("tfile").addEventListener("change", ev=>{
@@ -734,16 +813,16 @@ function boot(){
         const parsed = JSON.parse(reader.result);
         const incoming = parsed.state || parsed;
         if(!incoming || typeof incoming !== "object") throw new Error("bad shape");
-        state = {days: incoming.days || {}, gate: incoming.gate || {}};
+        state = {days: objOrEmpty(incoming.days), gate: objOrEmpty(incoming.gate)};
         save(); paint();
-        flash(document.getElementById("timp"), "Loaded");
-      }catch(err){ window.alert("That file could not be read as a progress export."); }
+        flash(document.getElementById("timp"), "已载入");
+      }catch(err){ window.alert("这个文件无法作为进度导出读取。"); }
       ev.target.value = "";
     };
     reader.readAsText(file);
   });
   document.getElementById("trst").addEventListener("click", ()=>{
-    if(!window.confirm("Clear all ticked sessions? This cannot be undone.")) return;
+    if(!window.confirm("清除所有已打勾的课？无法撤销。")) return;
     state = {days:{}, gate:{}}; save(); paint();
   });
   const links = [...document.querySelectorAll('.nav a[data-wk]')];
@@ -754,7 +833,7 @@ function boot(){
       links.forEach(a=>a.classList.toggle("here", a.dataset.wk===n));
     });
   },{rootMargin:"-64px 0px -70% 0px"});
-  WEEKS.forEach(w=>{ const el=document.getElementById("wk"+w.n); if(el) obs.observe(el); });
+  [...WEEKS, ...OPTWEEKS].forEach(w=>{ const el=document.getElementById(w.opt ? "wk"+w.key : "wk"+w.n); if(el) obs.observe(el); });
 }
 load();
 boot();
