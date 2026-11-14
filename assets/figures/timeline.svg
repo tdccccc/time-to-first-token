@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-label="TTFT 与 ITL 时间线">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:15px;font-weight:600;fill:#1f2937}.small{font-size:13px;fill:#6b7280}
+</style>
+<rect width="900" height="360" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">一次请求的时间账</text>
+<text x="40" y="64" class="sub">TTFT 量的是排队与 prefill；ITL 量的是 decode 阶段两个 token 之间的间隔。</text>
+<rect x="90" y="150" width="95" height="48" rx="6" fill="#e5e7eb"/>
+<text x="137" y="179" class="small" text-anchor="middle">排队</text>
+<rect x="185" y="150" width="175" height="48" rx="6" fill="#3f51b5"/>
+<text x="272" y="179" class="label" fill="#fff" text-anchor="middle">prefill</text>
+<text x="560" y="140" class="small" fill="#0284c7" text-anchor="middle">decode / 逐 token</text>
+<g fill="#0ea5e9">
+<rect x="370" y="150" width="45" height="48" rx="5"/><rect x="425" y="150" width="45" height="48" rx="5"/><rect x="480" y="150" width="45" height="48" rx="5"/><rect x="535" y="150" width="45" height="48" rx="5"/><rect x="590" y="150" width="45" height="48" rx="5"/><rect x="645" y="150" width="45" height="48" rx="5"/><rect x="700" y="150" width="45" height="48" rx="5"/>
+</g>
+<line x1="90" y1="225" x2="360" y2="225" stroke="#f59e0b" stroke-width="3"/>
+<polygon points="360,225 350,219 350,231" fill="#f59e0b"/>
+<text x="225" y="248" class="small" fill="#b45309" text-anchor="middle">TTFT（首 token 延迟）</text>
+<line x1="90" y1="128" x2="365" y2="128" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="92" y="118" class="small">请求到达</text>
+<text x="365" y="118" class="small">首 token</text>
+<text x="790" y="118" class="small" text-anchor="end">请求结束</text>
+<line x1="370" y1="270" x2="745" y2="270" stroke="#0ea5e9" stroke-width="2"/>
+<line x1="370" y1="264" x2="370" y2="276" stroke="#0ea5e9" stroke-width="2"/>
+<line x1="745" y1="264" x2="745" y2="276" stroke="#0ea5e9" stroke-width="2"/>
+<text x="557" y="292" class="small" fill="#0284c7" text-anchor="middle">ITL：相邻 token 的间隔</text>
+<text x="90" y="332" class="small">优化 TTFT 先看 prefill 与排队；优化 ITL 先看 decode 的 batch、KV 读取与调度。</text>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="静态批处理与连续批处理对比">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:15px;font-weight:600;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+</style>
+<rect width="900" height="420" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">批处理的时间线</text>
+<text x="40" y="64" class="sub">静态 batch 等最慢的请求；连续批处理在请求结束时立即换入新请求。</text>
+<text x="70" y="110" class="label">静态批处理</text>
+<g>
+<rect x="70" y="125" width="150" height="26" rx="5" fill="#c7d2fe"/><text x="145" y="143" class="small" text-anchor="middle">A</text>
+<rect x="70" y="160" width="230" height="26" rx="5" fill="#bae6fd"/><text x="185" y="178" class="small" text-anchor="middle">B</text>
+<rect x="70" y="195" width="310" height="26" rx="5" fill="#fde68a"/><text x="225" y="213" class="small" text-anchor="middle">C</text>
+<rect x="310" y="125" width="150" height="26" rx="5" fill="#e5e7eb"/>
+<rect x="300" y="160" width="160" height="26" rx="5" fill="#e5e7eb"/>
+<text x="470" y="180" class="small" fill="#b45309">GPU 空等：batch 要等 C 结束</text>
+</g>
+<text x="70" y="270" class="label">连续批处理</text>
+<g>
+<rect x="70" y="285" width="150" height="26" rx="5" fill="#c7d2fe"/><text x="145" y="303" class="small" text-anchor="middle">A</text>
+<rect x="220" y="285" width="150" height="26" rx="5" fill="#bae6fd"/><text x="295" y="303" class="small" text-anchor="middle">B</text>
+<rect x="70" y="320" width="230" height="26" rx="5" fill="#fde68a"/><text x="185" y="338" class="small" text-anchor="middle">C</text>
+<rect x="300" y="320" width="140" height="26" rx="5" fill="#d1fae5"/><text x="370" y="338" class="small" text-anchor="middle">D</text>
+<rect x="440" y="320" width="120" height="26" rx="5" fill="#e0e7ff"/><text x="500" y="338" class="small" text-anchor="middle">E</text>
+<text x="580" y="338" class="small" fill="#0f9f6e">结束即换入，GPU 不空转</text>
+</g>
+<line x1="70" y1="370" x2="830" y2="370" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="450" y="392" class="small" text-anchor="middle">时间 →</text>
+</svg>

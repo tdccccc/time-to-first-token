@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-label="投机解码">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:15px;font-weight:600;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+</style>
+<rect width="900" height="360" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">投机解码：先猜，再验证</text>
+<text x="40" y="64" class="sub">draft 模型连续猜多个 token，target 模型一次前向验证；接受率决定收益。</text>
+<text x="70" y="110" class="small">draft 模型（小、快）</text>
+<g>
+<rect x="70" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="105" y="155" class="small" text-anchor="middle">d1</text>
+<rect x="150" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="185" y="155" class="small" text-anchor="middle">d2</text>
+<rect x="230" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="265" y="155" class="small" text-anchor="middle">d3</text>
+<rect x="310" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="345" y="155" class="small" text-anchor="middle">d4</text>
+</g>
+<line x1="395" y1="149" x2="485" y2="149" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
+<rect x="495" y="105" width="250" height="90" rx="10" fill="#fff" stroke="#dbe3ef"/>
+<text x="620" y="135" class="label" text-anchor="middle">target 模型</text>
+<text x="620" y="158" class="small" text-anchor="middle">一次前向，并行验证 4 个</text>
+<text x="620" y="178" class="small" text-anchor="middle">接受 / 拒绝，从修正分布重采样</text>
+<line x1="620" y1="205" x2="620" y2="245" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
+<g>
+<rect x="300" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="345" y="283" class="small" text-anchor="middle">接受</text>
+<rect x="400" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="445" y="283" class="small" text-anchor="middle">接受</text>
+<rect x="500" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="545" y="283" class="small" text-anchor="middle">接受</text>
+<rect x="600" y="255" width="90" height="44" rx="7" fill="#fee2e2" stroke="#fecaca"/><text x="645" y="283" class="small" text-anchor="middle">拒绝</text>
+</g>
+<text x="70" y="330" class="small">期望产出 ≈ 1 + α + α² + …；α 是接受率。α 低时，draft 的开销可能吃掉收益。</text>
+<text x="70" y="350" class="small">所以要看交叉点：低 QPS 的加速比不是结论，负载曲线才是。</text>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+</svg>

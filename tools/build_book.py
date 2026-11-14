@@ -15,6 +15,7 @@ chapter/section references; code blocks are left untouched.
 """
 from __future__ import annotations
 
+import html
 import posixpath
 import re
 import shutil
@@ -100,6 +101,57 @@ CHAPTERS = [
     (30, 4, "精度回归与调优报告", "m3", 5, False),
     (31, 5, "跨芯片推理优化报告", "m4", 0, False),
 ]
+
+
+CHAPTER_SUMMARIES = {
+    1: "解码常常卡在显存带宽，prefill 常常卡在算力；先用 Roofline 算出瓶颈，再决定优化方向。",
+    2: "TTFT、ITL、吞吐、排队深度量的是四件不同的事；只报平均值会藏住长尾。",
+    3: "Profiling 先问时间花在哪个 kernel、哪类访存、哪次启动上，再谈优化。",
+    4: "压测脚本的价值不在跑得快，而在每次跑的条件都一样、结果能复现。",
+    5: "第一份基线要能回答：拐点在哪、p99 多长、瓶颈在算力还是带宽。",
+    6: "一个 kernel 慢，先问它在等什么：算力、带宽，还是启动开销。",
+    7: "MHA、GQA、MLA、MoE 改变的是每 token 的 KV 账本，优化清单要按模型重算。",
+    8: "vLLM 的核心不是某个 kernel，而是 PagedAttention 把 KV 变成可分页的块。",
+    9: "度量基础设施要先定义每个面板在量什么，再谈 Grafana 好不好看。",
+    10: "SGLang 的 RadixAttention 把前缀复用做成一棵树；连续批处理让 batch 不再是固定集合。",
+    11: "压测要扫到拐点，不测饱和崩溃点；1000 并发只是边界，不是勋章。",
+    12: "量化省的是搬运量，代价落在精度；先看质量表，再看加速比。",
+    13: "投机解码的收益由接受率决定；交叉点比低 QPS 的加速比更有用。",
+    14: "解耦的前提是传输账算得过来：prefill 与 decode 的瓶颈不同，才值得分开。",
+    15: "大规模 PD 的难点在 KV 池、传输和容错，不在把两个服务拆开。",
+    16: "单位经济学最终都落到每百万 token 成本；利用率比单价更影响成本。",
+    17: "发表 benchmark 是把条件、命令、分位数写全；阅读习惯是让输入持续更新。",
+    18: "TensorRT-LLM 用编译换极限性能，也换来了架构锁定；选型看边界条件。",
+    19: "一个 GEMM 的四次提速：分块、向量化、占用率，最后都回到 Roofline 验证。",
+    20: "Triton 够用时写 Triton，需要精确控制 warp 与流水线时回 CUDA/CUTLASS。",
+    21: "Fused attention 的核心是 online softmax 与 SRAM 容量约束，不是把公式抄一遍。",
+    22: "量化 matmul 的关键在 scale 粒度与 dequant 融合，省搬运而不是省 FLOPs。",
+    23: "读工业实现先画骨架：主循环、tile 加载、rescale；特化分支是后面的事。",
+    24: "把自写 kernel 接回引擎，才算完成从 kernel 到端到端收益的闭环。",
+    25: "国产芯片适配先画软件栈地图，再问模型能不能跑、算子覆盖到哪。",
+    26: "CANN/AscendC 的算子链路是定义、编译、调用；读懂最小闭环比背 API 有用。",
+    27: "同一模型在 Ascend 上跑通，难点在版本矩阵、插件 hook 与踩坑记录。",
+    28: "算子覆盖分析要拿 profiler 的真实清单逐条对照，不靠猜。",
+    29: "移植 kernel 先找语义等价的最小闭环，再处理内存层级与同步差异。",
+    30: "精度回归与性能对比要同评测集、同负载、同版本；差异要归因到算子。",
+    31: "毕业设计不是提出新算法，而是把同一件事在两套硬件上做两遍并写清楚。",
+}
+
+CHAPTER_FIGURES = {
+    1: ("roofline.svg", "Roofline 图：带宽斜线、算力横线，以及解码与 prefill 的位置", "Roofline：解码落在带宽斜线一侧，prefill 越过脊点后才受算力限制。"),
+    2: ("timeline.svg", "一次请求的时间线：排队、prefill、TTFT 与逐 token 的 ITL", "TTFT 与 ITL：一次请求从排队、prefill 到逐 token decode 的时间线。"),
+    6: ("roofline.svg", "Roofline 图：同一个模型在不同硬件上的瓶颈位置", "同一个 Roofline，换模型或换硬件，点的位置会变，判断方法不变。"),
+    8: ("kv-pages.svg", "PagedAttention：逻辑块通过块表映射到非连续物理页", "PagedAttention：逻辑块通过块表映射到非连续物理页。"),
+    10: ("batching.svg", "静态批处理与连续批处理的时间线对比", "连续批处理：请求结束就换入新请求，batch 不再等最慢的那一个。"),
+    12: ("quant.svg", "FP16、FP8、INT4 的位数、权重体积与 scale 示意", "量化格式：位数越少，权重体积越小，scale 与误差的账越复杂。"),
+    13: ("spec.svg", "投机解码：draft 猜多个 token，target 一次验证", "投机解码：draft 先猜，target 一次验证，接受率决定收益。"),
+    14: ("pd.svg", "解耦式服务：prefill 池、decode 池与 KV 传输", "解耦式服务：prefill 与 decode 分池，KV 通过传输层搬家。"),
+    15: ("pd.svg", "大规模 PD：KV 池、传输与两池配比", "大规模 PD：KV 池、传输与两池配比是主要成本项。"),
+    19: ("cuda-ladder.svg", "CUDA 优化阶梯：朴素版、分块、向量化、占用率", "CUDA 优化阶梯：分块、向量化、占用率，每一步都用 Roofline 验证。"),
+    22: ("quant.svg", "量化 matmul：scale 粒度与 dequant 融合", "量化 matmul：scale 粒度与 dequant 融合决定省下多少搬运。"),
+    25: ("chip-stack.svg", "国产芯片软件栈：驱动、SDK、算子库、插件与引擎", "国产芯片软件栈：驱动、SDK、算子库、插件、引擎，缺一层都跑不起来。"),
+    27: ("chip-stack.svg", "vllm-ascend 插件在软件栈中的位置", "vllm-ascend 插件把芯片实现挂到 vLLM 的算子分发链路上。"),
+}
 
 M1_WEEK_TO_CH = {
     "1": 6, "1续": 7, "2": 8, "3": 9, "4": 10, "5": 11, "6": 12,
@@ -243,6 +295,210 @@ def restore(text: str, store: list[str]) -> str:
     def back(match: re.Match[str]) -> str:
         return store[int(match.group(1))]
     return re.sub(r"\x00(\d+)\x00", back, text)
+
+
+
+
+KEYLINE_RE = re.compile(r"^\*\*(本章目标|本章产出|本章主线|阅读材料|目标|怎么做|产出|阅读锚点|硬件门槛|状态|小结|验收|产出物)([。：:])?\*\*")
+BRIEF_RE = re.compile(r"^\*\*(本章目标|本章产出)[。：:]?\*\*\s*(.+)$")
+KEYLINE_KIND = {
+    "本章目标": "goal", "目标": "goal", "本章主线": "goal",
+    "本章产出": "output", "产出": "output", "产出物": "output",
+    "阅读材料": "read", "阅读锚点": "read",
+    "怎么做": "how",
+    "硬件门槛": "note", "状态": "note",
+    "小结": "summary", "验收": "summary",
+}
+
+
+def chapter_brief(lines: list[str]) -> tuple[list[str], list[str]]:
+    """Pull the chapter-level goal/output out of the intro into cards."""
+    items: list[tuple[str, str]] = []
+    kept: list[str] = []
+    for line in lines:
+        match = BRIEF_RE.match(line)
+        if match:
+            items.append((match.group(1), match.group(2).strip()))
+            continue
+        kept.append(line)
+    if not items:
+        return [], lines
+    out = ['<div class="chapter-brief">']
+    for label, body in items:
+        kind = "goal" if label == "本章目标" else "output"
+        out += [
+            f'<div class="chapter-brief__item chapter-brief__item--{kind}">',
+            f'<span class="chapter-brief__label">{label}</span>',
+            '<div class="chapter-brief__body" markdown>',
+            "",
+            body,
+            "",
+            "</div>",
+            "</div>",
+        ]
+    out += ["</div>"]
+    return out, kept
+
+
+def chapter_map(chapter: Chapter, titles: list[str]) -> list[str]:
+    if not titles:
+        return []
+    out = [
+        '<div class="chapter-map">',
+        f'<div class="chapter-map__head"><span>本章结构</span><span>{len(titles)} 节</span></div>',
+        '<ol class="chapter-map__list">',
+    ]
+    for i, title in enumerate(titles, 1):
+        out.append(
+            f'<li><span class="chapter-map__num">{chapter.num}.{i}</span>'
+            f'<span>{html.escape(title)}</span></li>'
+        )
+    out += ["</ol>", "</div>"]
+    return out
+
+
+def chapter_figure(chapter: Chapter) -> list[str]:
+    figure = CHAPTER_FIGURES.get(chapter.num)
+    if not figure:
+        return []
+    filename, alt, caption = figure
+    return [
+        '<figure class="book-figure">',
+        f'<img src="../../../assets/figures/{filename}" alt="{html.escape(alt)}" loading="lazy">',
+        f'<figcaption><span class="book-figure__label">图 {chapter.num}-1</span>{html.escape(caption)}</figcaption>',
+        "</figure>",
+    ]
+
+
+def split_long_paragraph(line: str) -> list[str]:
+    if len(line) <= 280 or line.startswith(("|", "#", ">", "- ", "* ", "+ ", "    ", "<", "!")):
+        return [line]
+    if re.match(r"^\d+\.\s", line):
+        return [line]
+    protected, store = protect(line)
+    sentences = [part.strip() for part in re.split(r"(?<=[。！？])", protected) if part.strip()]
+    if len(sentences) <= 1:
+        return [line]
+    groups: list[str] = []
+    buf = ""
+    for sentence in sentences:
+        if buf and len(buf) + len(sentence) > 260:
+            groups.append(buf)
+            buf = sentence
+        else:
+            buf += sentence
+        if len(buf) >= 190:
+            groups.append(buf)
+            buf = ""
+    if buf:
+        groups.append(buf)
+    if len(groups) <= 1:
+        return [line]
+    return [restore(group, store) for group in groups]
+
+
+def format_blocks(lines: list[str]) -> list[str]:
+    """Split walls of text, wrap labels in callouts, and keep code/tables separate."""
+    out: list[str] = []
+    i = 0
+
+    def blank() -> None:
+        if out and out[-1] != "":
+            out.append("")
+
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("```"):
+            blank()
+            if line.strip() == "```":
+                out.append("```text")
+            else:
+                out.append(line)
+            i += 1
+            while i < len(lines) and not lines[i].startswith("```"):
+                out.append(lines[i])
+                i += 1
+            if i < len(lines):
+                out.append(lines[i])
+                i += 1
+            blank()
+            continue
+
+        if line.lstrip().startswith("|"):
+            blank()
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                out.append(lines[i])
+                i += 1
+            blank()
+            continue
+
+        match = KEYLINE_RE.match(line)
+        if match:
+            blank()
+            kind = KEYLINE_KIND.get(match.group(1), "note")
+            out += [f'<div class="keyline keyline--{kind}" markdown>', "", line, "", "</div>"]
+            blank()
+            i += 1
+            continue
+
+        if line.startswith("#"):
+            blank()
+            out.append(line)
+            blank()
+            i += 1
+            continue
+
+        if line.startswith(">"):
+            blank()
+            while i < len(lines) and lines[i].startswith(">"):
+                out.append(lines[i])
+                i += 1
+            blank()
+            continue
+
+        if line.startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s", line):
+            blank()
+            while i < len(lines) and (
+                lines[i].startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s", lines[i])
+            ):
+                out.append(lines[i])
+                i += 1
+            blank()
+            continue
+
+        if not line.strip():
+            blank()
+            i += 1
+            continue
+
+        for paragraph in split_long_paragraph(line):
+            out.append(paragraph)
+            out.append("")
+        i += 1
+
+    text = "\n".join(out)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.splitlines()
+
+
+def validate_markdown(path: Path) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    problems: list[str] = []
+    fence: str | None = None
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            if fence is None:
+                fence = line.strip()
+                if fence == "```":
+                    problems.append(f"{path}:{i + 1}: code fence without language")
+            else:
+                fence = None
+        if line.lstrip().startswith("|") and (i == 0 or not lines[i - 1].lstrip().startswith("|")):
+            if i + 1 >= len(lines) or not re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", lines[i + 1]):
+                problems.append(f"{path}:{i + 1}: table without separator row")
+    if fence is not None:
+        problems.append(f"{path}: unclosed code fence")
+    return problems
 
 
 def map_week(text: str, module: str) -> str:
@@ -580,6 +836,8 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     body = raw[hs[0].line + 1:]
     body_hs = scan(body)
     sections = [h for h in body_hs if chapter_is_section(h, module)]
+    section_titles = [section_title(h.title, module, chapter) for h in sections]
+    chapter.sections = section_titles
     first_section_line = sections[0].line if sections else len(body)
     intro = body[:first_section_line]
     source_dir = {
@@ -589,6 +847,8 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
         "m3": "docs/modules/M3-domestic-chips",
         "m4": "docs/modules/M4-capstone",
     }[module]
+    summary = CHAPTER_SUMMARIES.get(chapter.num, "")
+    count_label = f"{len(section_titles)} 节" if section_titles else "专题"
     out: list[str] = [
         '<div class="chapter-cover" markdown>',
         "",
@@ -596,13 +856,27 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
         "",
         f'# 第 {chapter.num} 章 {chapter.title} {{ .chapter-title }}',
         "",
-        f'<div class="chapter-meta"><span>{PART_CN[chapter.part]}</span><span>{f"{len(sections)} 节" if sections else "专题"}</span>' + ('<span>选读</span>' if chapter.optional else '') + '</div>',
+        f'<p class="chapter-summary">{html.escape(summary)}</p>' if summary else "",
+        f'<div class="chapter-meta"><span>{count_label}</span>' + ('<span>选读</span>' if chapter.optional else '') + '</div>',
         "",
         "</div>",
         "",
     ]
-    if intro:
-        out.extend(transform_lines(intro, module, chapter))
+    intro_lines = transform_lines(intro, module, chapter) if intro else []
+    brief, intro_lines = chapter_brief(intro_lines)
+    if brief:
+        out += brief
+        out.append("")
+    map_lines = chapter_map(chapter, section_titles)
+    if map_lines:
+        out += map_lines
+        out.append("")
+    figure_lines = chapter_figure(chapter)
+    if figure_lines:
+        out += figure_lines
+        out.append("")
+    if intro_lines:
+        out += format_blocks(intro_lines)
         out.append("")
     sec = 0
     for i, h in enumerate(body_hs):
@@ -610,20 +884,20 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
         chunk = body[h.line:end]
         if chapter_is_section(h, module):
             sec += 1
-            title = section_title(h.title, module, chapter)
-            chapter.sections.append(title)
+            title = section_titles[sec - 1]
             out.append(f"## {chapter.num}.{sec} {title}")
             out.append("")
-            out.extend(transform_lines(chunk[1:], module, chapter))
+            out += format_blocks(transform_lines(chunk[1:], module, chapter))
             out.append("")
         else:
             level = subhead_level(h, module)
             title = transform_title(h.title, module, chapter)
             out.append("#" * level + " " + title)
             out.append("")
-            out.extend(transform_lines(chunk[1:], module, chapter))
+            out += format_blocks(transform_lines(chunk[1:], module, chapter))
             out.append("")
     text = "\n".join(out)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     text = rewrite_links(text, source_dir, "docs/chapters")
     if chapter.num == 17:
         text = override_chapter_17(text)

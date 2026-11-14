@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="Roofline 模型">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:16px;font-weight:600;fill:#1f2937}.small{font-size:13px;fill:#6b7280}
+.axis{stroke:#94a3b8;stroke-width:1.5}.grid{stroke:#e2e8f0;stroke-width:1}
+.indigo{fill:#3f51b5}.sky{fill:#0ea5e9}.green{fill:#10b981}.amber{fill:#f59e0b}
+</style>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">Roofline：先定位，再优化</text>
+<text x="40" y="64" class="sub">横轴算术强度，纵轴可达性能；两条屋顶线围出的区域才是可实现范围。</text>
+<g>
+<line x1="90" y1="350" x2="840" y2="350" class="axis"/>
+<line x1="90" y1="90" x2="90" y2="350" class="axis"/>
+<line x1="250" y1="90" x2="250" y2="350" class="grid"/>
+<line x1="410" y1="90" x2="410" y2="350" class="grid"/>
+<line x1="570" y1="90" x2="570" y2="350" class="grid"/>
+<line x1="730" y1="90" x2="730" y2="350" class="grid"/>
+<line x1="90" y1="270" x2="840" y2="270" class="grid"/>
+<line x1="90" y1="190" x2="840" y2="190" class="grid"/>
+<line x1="90" y1="110" x2="840" y2="110" class="grid"/>
+</g>
+<polygon points="100,340 430,155 430,350 100,350" fill="#eef4ff"/>
+<line x1="100" y1="340" x2="430" y2="155" stroke="#0ea5e9" stroke-width="5"/>
+<line x1="430" y1="155" x2="820" y2="155" stroke="#3f51b5" stroke-width="5"/>
+<line x1="430" y1="155" x2="430" y2="350" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5"/>
+<circle cx="125" cy="330" r="8" fill="#f59e0b"/>
+<circle cx="650" cy="155" r="8" fill="#10b981"/>
+<text x="140" y="318" class="small">decode：算术强度 ≈ 1，带宽受限</text>
+<text x="662" y="142" class="small">prefill：越过脊点，计算受限</text>
+<text x="438" y="145" class="small">脊点 156 FLOP/B</text>
+<text x="205" y="235" class="label" fill="#0284c7">带宽受限</text>
+<text x="590" y="205" class="label" fill="#3f51b5">计算受限</text>
+<text x="465" y="395" class="small" text-anchor="middle">算术强度（FLOP / 字节）→</text>
+<text x="34" y="220" class="small" transform="rotate(-90 34 220)" text-anchor="middle">可达性能 →</text>
+<rect x="600" y="285" width="18" height="8" fill="#0ea5e9"/><text x="626" y="294" class="small">带宽上限</text>
+<rect x="720" y="285" width="18" height="8" fill="#3f51b5"/><text x="746" y="294" class="small">算力上限</text>
+<text x="100" y="408" class="small">解码点远在斜线一侧：加算力几乎无用，省搬运、量化、增大 batch 才有用。</text>
+</svg>

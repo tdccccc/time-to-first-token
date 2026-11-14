@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="CUDA 优化阶梯">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:16px;font-weight:700;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+</style>
+<rect width="900" height="420" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">一个 GEMM 的四次提速</text>
+<text x="40" y="64" class="sub">每一步只动一个变量，再用 ncu 与 Roofline 验证它到底动了哪个数。</text>
+<line x1="80" y1="300" x2="840" y2="300" stroke="#94a3b8" stroke-width="1.5"/>
+<line x1="80" y1="300" x2="80" y2="90" stroke="#94a3b8" stroke-width="1.5"/>
+<line x1="80" y1="85" x2="840" y2="85" stroke="#3f51b5" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="835" y="76" class="small" text-anchor="end" fill="#3f51b5">Roofline 上限</text>
+<g>
+<rect x="110" y="250" width="160" height="50" rx="6" fill="#e5e7eb"/><text x="190" y="280" class="label" text-anchor="middle">朴素版</text><text x="190" y="318" class="small" text-anchor="middle">1×</text>
+<rect x="300" y="200" width="160" height="100" rx="6" fill="#c7d2fe"/><text x="380" y="245" class="label" text-anchor="middle">shared 分块</text><text x="380" y="318" class="small" text-anchor="middle">约 3×</text>
+<rect x="490" y="145" width="160" height="155" rx="6" fill="#a5b4fc"/><text x="570" y="215" class="label" text-anchor="middle">向量化访存</text><text x="570" y="318" class="small" text-anchor="middle">约 6×</text>
+<rect x="680" y="105" width="160" height="195" rx="6" fill="#818cf8"/><text x="760" y="195" class="label" text-anchor="middle" fill="#fff">占用率调优</text><text x="760" y="318" class="small" text-anchor="middle">约 8×</text>
+</g>
+<text x="80" y="350" class="small">横轴：优化步骤；纵轴：性能。柱子高到 Roofline 附近，说明这一层的空间基本用完了。</text>
+<text x="80" y="374" class="small">每次只改一个变量：分块看 DRAM%，向量化看 load 指令数，占用率看 warp 活跃度。</text>
+<text x="80" y="398" class="small">数字是示意，不是实测；你的卡、你的尺寸、你的编译选项都会改写柱子高度。</text>
+</svg>

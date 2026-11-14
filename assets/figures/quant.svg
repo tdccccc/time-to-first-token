@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 380" role="img" aria-label="FP16、FP8 与 INT4 量化">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:16px;font-weight:700;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+.cell{stroke:#fff;stroke-width:1}.fp{fill:#3f51b5}.ef{fill:#0ea5e9}.m{fill:#c7d2fe}
+</style>
+<rect width="900" height="380" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">量化：位数、体积与 scale</text>
+<text x="40" y="64" class="sub">同一个 7B 模型，权重位数决定权重体积，也决定误差与反量化开销。</text>
+<g>
+<rect x="60" y="95" width="230" height="190" rx="10" fill="#fff" stroke="#dbe3ef"/>
+<text x="80" y="126" class="label">FP16</text><text x="80" y="148" class="small">16 bit / 参数</text>
+<text x="80" y="170" class="small">7B ≈ 14 GB</text>
+<g transform="translate(80,190)">
+<rect width="15" height="15" class="cell fp"/><rect x="16" width="15" height="15" class="cell fp"/><rect x="32" width="15" height="15" class="cell fp"/><rect x="48" width="15" height="15" class="cell fp"/><rect x="64" width="15" height="15" class="cell fp"/><rect x="80" width="15" height="15" class="cell fp"/><rect x="96" width="15" height="15" class="cell fp"/><rect x="112" width="15" height="15" class="cell fp"/>
+<rect y="16" width="15" height="15" class="cell fp"/><rect x="16" y="16" width="15" height="15" class="cell fp"/><rect x="32" y="16" width="15" height="15" class="cell fp"/><rect x="48" y="16" width="15" height="15" class="cell fp"/><rect x="64" y="16" width="15" height="15" class="cell fp"/><rect x="80" y="16" width="15" height="15" class="cell fp"/><rect x="96" y="16" width="15" height="15" class="cell fp"/><rect x="112" y="16" width="15" height="15" class="cell m"/>
+</g>
+<text x="80" y="250" class="small">基线：精度最高，搬运最贵</text>
+</g>
+<g>
+<rect x="335" y="95" width="230" height="190" rx="10" fill="#fff" stroke="#dbe3ef"/>
+<text x="355" y="126" class="label">FP8</text><text x="355" y="148" class="small">8 bit / 参数</text>
+<text x="355" y="170" class="small">7B ≈ 7 GB</text>
+<g transform="translate(355,190)">
+<rect width="15" height="15" class="cell ef"/><rect x="16" width="15" height="15" class="cell ef"/><rect x="32" width="15" height="15" class="cell ef"/><rect x="48" width="15" height="15" class="cell ef"/><rect x="64" width="15" height="15" class="cell ef"/><rect x="80" width="15" height="15" class="cell ef"/><rect x="96" width="15" height="15" class="cell ef"/><rect x="112" width="15" height="15" class="cell m"/>
+</g>
+<text x="355" y="250" class="small">需要 scale；Hopper 起有原生 FP8</text>
+</g>
+<g>
+<rect x="610" y="95" width="230" height="190" rx="10" fill="#fff" stroke="#dbe3ef"/>
+<text x="630" y="126" class="label">INT4 / AWQ</text><text x="630" y="148" class="small">4 bit / 参数</text>
+<text x="630" y="170" class="small">7B ≈ 3.5 GB</text>
+<g transform="translate(630,190)">
+<rect width="15" height="15" class="cell amber"/><rect x="16" width="15" height="15" class="cell amber"/><rect x="32" width="15" height="15" class="cell amber"/><rect x="48" width="15" height="15" class="cell amber"/>
+</g>
+<text x="630" y="246" class="small">scale / zero point 更关键</text>
+<text x="630" y="264" class="small">质量代价更大</text>
+</g>
+<text x="60" y="320" class="small">位数越少：权重体积越小、搬运越少；但 scale 粒度、离群值与反量化都要付代价。</text>
+<text x="60" y="344" class="small">量化省的是搬运量，不是 FLOPs；质量表与加速比必须一起报。</text>
+</svg>
