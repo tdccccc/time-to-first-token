@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------
    Book layout + notes panel for 边做边学 LLM 推理服务
    - Chinese-first system font stack (no Google Fonts request)
-   - Left: collapsible book navigation (Material's nav, toc.integrate)
+   - Left: chapter-level book navigation (no page subsection TOC)
    - Right: page notes panel; turns into a drawer below desktop width
    --------------------------------------------------------------------------- */
 
@@ -14,7 +14,22 @@
   --notes-width: 17rem;
 }
 
-/* A three-column book: navigation | content | notes. */
+/* A three-column book: navigation | content | notes.
+   The nav stays at chapter level: hide the integrated page subsection TOC
+   and Material's separate page TOC sidebar. */
+.md-nav--primary .md-nav__item--active > nav.md-nav--secondary,
+.md-nav--primary .md-nav__item--active > label.md-nav__link[for="__toc"],
+.md-nav--primary .md-nav__item--active > input#__toc,
+.md-sidebar--secondary {
+  display: none !important;
+}
+
+/* Material hides the active page link under 76.25em because it expects the
+   TOC toggle label to take its place. We keep the chapter link instead. */
+.md-nav--primary .md-nav__item--active > a.md-nav__link {
+  display: flex !important;
+}
+
 @media screen and (min-width: 76.25em) {
   .md-grid {
     /* 1rem = 20px under Material's desktop scale; 72rem = 1440px.
@@ -608,56 +623,6 @@
   line-height: 1.7;
 }
 
-.chapter-map {
-  margin: 0 0 1.1rem;
-  padding: 0.7rem 0.85rem 0.55rem;
-  border: 0.05rem solid var(--md-default-fg-color--lightest);
-  border-radius: 0.3rem;
-  background: var(--md-code-bg-color);
-}
-
-.chapter-map__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.45rem;
-  color: var(--md-default-fg-color--light);
-  font-family: var(--md-code-font-family);
-  font-size: 0.58rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.md-typeset .chapter-map__list {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.2rem 1.2rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: none;
-}
-
-.md-typeset .chapter-map__list > li {
-  display: flex;
-  gap: 0.45rem;
-  align-items: baseline;
-  min-width: 0;
-  margin: 0;
-  padding: 0.22rem 0;
-  border-bottom: 0.05rem dotted var(--md-default-fg-color--lightest);
-  font-size: 0.7rem;
-  line-height: 1.45;
-}
-
-.chapter-map__num {
-  flex: 0 0 auto;
-  color: var(--md-accent-fg-color);
-  font-family: var(--md-code-font-family);
-  font-size: 0.58rem;
-}
-
 .md-typeset .book-figure {
   display: block;
   width: 100% !important;
@@ -816,8 +781,7 @@
 }
 
 @media screen and (max-width: 44em) {
-  .chapter-brief,
-  .md-typeset .chapter-map__list {
+  .chapter-brief {
     grid-template-columns: 1fr;
   }
 

@@ -413,23 +413,6 @@ def chapter_brief(lines: list[str]) -> tuple[list[str], list[str]]:
     return out, kept
 
 
-def chapter_map(chapter: Chapter, titles: list[str]) -> list[str]:
-    if not titles:
-        return []
-    out = [
-        '<div class="chapter-map">',
-        f'<div class="chapter-map__head"><span>本章结构</span><span>{len(titles)} 节</span></div>',
-        '<ol class="chapter-map__list">',
-    ]
-    for i, title in enumerate(titles, 1):
-        out.append(
-            f'<li><span class="chapter-map__num">{chapter.num}.{i}</span>'
-            f'<span>{html.escape(title)}</span></li>'
-        )
-    out += ["</ol>", "</div>"]
-    return out
-
-
 def chapter_figure(chapter: Chapter) -> list[str]:
     figure = CHAPTER_FIGURES.get(chapter.num)
     if not figure:
@@ -1156,10 +1139,6 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     if brief:
         out += brief
         out.append("")
-    map_lines = chapter_map(chapter, section_titles)
-    if map_lines:
-        out += map_lines
-        out.append("")
     figure_lines = chapter_figure(chapter)
     if figure_lines:
         out += figure_lines
@@ -1375,10 +1354,6 @@ def build_catalog(parts: dict[int, Part]) -> None:
         for ch in part.chapters:
             opt = " · 选读" if ch.optional else ""
             out += [f"### 第 {ch.num} 章 {ch.title}{opt}", ""]
-            if ch.sections:
-                for i, sec in enumerate(ch.sections, 1):
-                    out.append(f"- {ch.num}.{i} {sec}")
-                out.append("")
             out.append(f"[阅读本章](chapters/{ch.slug}.md)")
             out.append("")
     write("docs/catalog.md", "\n".join(out))
