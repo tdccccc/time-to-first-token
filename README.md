@@ -2079,137 +2079,200 @@ ONNX Runtime 与 WebLLM 的分工也值得说清：ONNX Runtime 是跨平台的�
 
 ### 第 18 章：TensorRT-LLM——编译式推理引擎（可选）
 
-**重点。** 第三台引擎，走编译式路线。学完要能讲清：同样的模型，为什么 TensorRT-LLM 要在加载时多做一步“编译”，这一步换来了什么，又锁死了什么。
+同一个 Llama-3.1-8B、同一张 H100，vLLM 的启动命令敲下去，加载完权重就能 curl；TensorRT-LLM 还要在加载时多定一层执行计划，把算子怎么融、kernel 用哪个、CUDA 图按哪些形状捕获、KV 缓存怎么分块定下来。多花的这段时间买到了什么，又锁死了什么？
 
-**形式。** 论文一律选读：三篇投机解码论文的深度总结写在下面正文里，不读原文也能掌握；动手以 `trtllm-serve` 与 LLM API 为主。
+本章是选读：没有 NVIDIA GPU，或者不需要编译式引擎时，读架构与边界即可，18.2 之后的容器与命令不必跟着跑。
 
-**产出。** 一个跑着同一模型的 TensorRT-LLM 服务、一张 FP16/FP8 对比表、一份三引擎对比报告与选型指南。
+**本章目标。** 能说清编译式引擎在加载时定下了哪些决定、三本预算（显存、计算、延迟）如何互相挤占，并写出同硬件、同模型、同负载、同分位数的三引擎对比框架；没有实测数据时，知道哪些格子必须留空。
 
-**硬件门槛。** 需 NVIDIA GPU：[官方支持列表](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)里最老的架构是 Ampere A100；FP8 权重需要 Hopper 或更新。没有卡的走纯读路径：第 1、4 天的读内容照常做，第 5 天只写选型分析框架，数字留空待补测。
+18.1 拆后台循环与三个预算；18.2 用容器把同一模型跑起来并存下启动命令；18.3 给出 FP16 与 FP8 的测量方案和预期方向；18.4 讲投机解码、KV 复用、解耦式服务在 TensorRT-LLM 里的对应机制；18.5 把 vLLM、SGLang、TensorRT-LLM 放进同一张表，写边界条件。
+
+版本说明：本章的命令、配置字段、硬件矩阵与支持模型都随版本变化。正文给机制与判断方法，具体名字以你装的版本对应文档为准；文中标“以文档为准”的地方，不要照抄旧教程。
 
 #### 第 1 节 · 架构：后台循环与三本预算账
 
-**目标**：讲清 PyExecutor 后台循环每步在干什么，Scheduler、KVCacheManager、ModelEngine、Sampler 各自管什么，以及 max_batch_size、max_seq_len、max_num_tokens 三个预算怎么卡住调度和吞吐；最后对照第 2 周的 vLLM 写三句话。
+先算 KV 这笔账，它决定了后面三个预算的地板。Llama-3.1-8B 是 32 层、每层 8 个 KV 头（分组查询注意力里真正存 K/V 的头数）、头维 128，权重与 KV 都按 FP16 的 2 字节算。一个 token 的 KV 是 K 一份加 V 一份：2 × 32 × 8 × 128 × 2 字节 = 131,072 字节，即 128 KiB。一个 4096 token 的序列占 4096 × 128 KiB = 512 MiB；一个 1024 token 的 prompt 进来先占 128 MiB。Qwen2.5-7B-Instruct 是 28 层、4 个 KV 头、头维 128：2 × 28 × 4 × 128 × 2 = 57,344 字节，约 56 KiB/token，同样长度下只有 Llama-3.1-8B 的 44%。换模型必须重算这笔账，层数或 KV 头数一变，每 token 的字节数和能装下的序列数都跟着变。
 
-先算一笔账，这笔账就是本周所有架构讨论的落点。Llama-3.1-8B 是 32 层、每层 8 个 KV 头（KV head，分组查询注意力里实际存 KV 的头数）、头维度（head_dim）128，权重 FP16 占 2 字节。一个 token 的 KV 缓存是 K 一份加 V 一份：2 × 32 层 × 8 头 × 128 维 × 2 字节 = 131,072 字节，即 128 KiB。注意这 128 KiB 只是“一个 token 在一层里 K 和 V 的全部字节”，层数、头数、维度、字节数四个因子缺一个，账就算错。一个 4096 token 的序列，KV 就是 4096 × 128 KiB = 512 MiB；一个 1024 token 的 prompt，进来先占 128 MiB。KV 不是按“几个请求”算的，是按 token 数算的，序列一长，显存立刻吃紧。Qwen2.5-7B-Instruct 的账可以对照着算：28 层、4 个 KV 头、头维度 128，2 × 28 × 4 × 128 × 2 = 57,344 字节，约 56 KiB/token，比 Llama-3.1-8B 的 128 KiB 少一半还多——同一长度下它能塞进更多的序列。这就是为什么换模型要重算 KV：层数与 KV 头数一变，每 token 的字节数跟着变，调度预算的底数全变了。
+PyExecutor（PyTorch 后端的执行器，引擎真正干活的后台循环）每步做五件事，顺序固定：取请求、调度、准备 KV、执行、采样。取请求从队列里拿新请求；调度决定这一步跑哪些序列、谁做 prefill、谁做 decode、batch 里放多少 token；准备 KV 给新序列分块、给结束的序列回收块；执行把这一步的 token 拼成一个 batch 做一次前向；采样从 logits（模型输出的未归一化分数）里抽出下一个 token，写回序列并判断谁结束。四个部件各管一段：Scheduler 拍板，KVCacheManager 记账，ModelEngine 干活，Sampler 收尾。它们不是四层流水线，而是同一个循环里的四个角色；循环每转一圈产一批 token，区别全在每一步的预算怎么定。
 
-PyExecutor（PyTorch 后端的执行器，引擎真正干活的后台循环）每步只做五件事，顺序固定：取请求、调度、准备 KV、执行、采样。取请求是把新到的请求从队列里拿出来；调度是决定这一步跑哪些序列、每个序列跑 prefill（预填充，把 prompt 一次算完并写 KV）还是 decode（解码，每步产一个 token）；准备 KV 是给新序列分 KV 块、给要退出的序列回收 KV 块；执行是把这一步的 token 拼成一个 batch 送进模型做一次前向；采样是按采样参数从 logits（模型输出的未归一化分数）里抽出下一个 token，写回序列，决定哪些序列结束、哪些继续。五步里最容易被低估的是“准备 KV”：它不产生 token，却决定了哪些请求能进这一步。循环本身没有魔法，它只是一个不停转的 while 循环，每转一圈产一批 token，区别全在每一步的预算怎么定。
+三个预算参数管着三本账，不是一一对应。`max_batch_size` 卡并发序列数，`max_seq_len` 卡单条序列的长度上限（prompt 加已生成 token），这两个一起决定显存账：KV 池最多能装多少 token。`max_num_tokens` 卡每步的 token 总量，prefill 的 token 与 decode 的 token 共用一个池子，它同时决定计算账与延迟账：池子大，每步 GEMM 的形状大、算力利用率高；池子被 decode 占满，prefill 排不进来，TTFT 就上去。
 
-四个部件的分工，按“谁拍板、谁记账、谁干活、谁收尾”来分。Scheduler（调度器）拍板：这一步跑哪些请求、跑 prefill 还是 decode、batch 里塞多少 token，它的依据就是下面三个预算。KVCacheManager（KV 缓存管理器）记账：KV 块分给了谁、哪块空闲、哪块能复用，分配与回收都经它手，显存不够时它先知道。ModelEngine（模型引擎）干活：拿着拼好的 batch 跑一次前向，返回 logits，它不管请求从哪来，也不管 token 去哪。Sampler（采样器）收尾：按 temperature（温度，控制分布平坦程度）、top_p、top_k 这些采样参数把 logits 变成 token，并判断停不停止。一个常见的误解是把这四个部件看成四层流水线：不是。它们是同一循环里的四个角色，Scheduler 定名单，KVCacheManager 备料，ModelEngine 下锅，Sampler 装盘，循环一圈，各干各的一步。
+拿一组数算一遍。设 `max_num_tokens = 8192`：一个 1024 token 的 prompt 做 prefill 占 1024 个名额，一步理论上能塞 8192 ÷ 1024 = 8 个。如果已有 32 条序列在 decode，每条每步产 1 个 token，decode 先占 32 个名额，剩 8192 − 32 = 8160 个给 prefill；8160 ÷ 1024 = 7.97，只能放 7 个 1024 token 的 prompt（7 × 1024 = 7168），第 8 个要 8192 个名额，差 32 个。文档里的调度器先给 generation 排 token，这不是偏好，是延迟账：decode 序列已经在跑，停一步就多一个 ITL；prefill 多等一步只增加 TTFT。池子的大小就是两段延迟的交换比。
 
-三个预算是三本不同的账，别混成一本。max_batch_size（最大 batch 大小）卡的是并发序列数：同时跑的序列不能超过这个数，32 就是 32 条序列，不管每条多长。max_seq_len（最大序列长度）卡的是单条序列的长度上限：prompt 加已生成 token 超过这个数，序列要么截断要么拒绝，KV 分配的上限也按它算。max_num_tokens（每步最大 token 数）卡的是每步的 token 总量：这一步里 prefill 的 token 加 decode 的 token 不能超过它。举个具体数：设 max_num_tokens = 8192，一个 1024 token 的 prompt 做 prefill 占 1024 个名额，一步最多塞 8192 ÷ 1024 = 8 个这样的 prefill；如果已有 32 条序列在 decode，每条占 1 个名额，decode 先占 32 个，剩下 8192 − 32 = 8160 个名额给 prefill，能塞 7 个 1024 token 的 prompt（7 × 1024 = 7168，8 个要 8192，超了 32）。这笔账说明，max_num_tokens 是 prefill 与 decode 共用的池子，decode 的序列一多，prefill 的位置就被挤掉，TTFT（首 token 延迟）就往上走——排队不是玄学，是这本账算出来的。
+再把 `max_batch_size` 与 `max_seq_len` 合起来。`max_batch_size = 32`、`max_seq_len = 4096`、每 token 128 KiB 时，KV 的理论上限是 32 × 4096 × 128 KiB = 16 GiB。这是全满的上限，实际装不到：序列长短不一，块分配有碎片，权重与激活还占着显存。反向算：一张卡留给 KV 40 GiB，按 128 KiB/token 能装 40 × 2³⁰ ÷ 131,072 = 327,680 个 token；按每条平均 2048 token 算约 160 条序列的容量，但 `max_batch_size = 32` 把并发卡在 32 条，多出来的 KV 容量只能用来放更长的序列，不能变成更多并发。调参先分清卡在哪本账：并发上不去看 `max_batch_size`，单条一长就报错看 `max_seq_len`，prefill 排队看 `max_num_tokens`。
 
-再把 max_batch_size 和 max_seq_len 的账合起来：max_batch_size = 32、max_seq_len = 4096 时，KV 的理论上限是 32 条 × 4096 token × 128 KiB = 16 GiB。这 16 GiB 是“全满”的上限，实际跑不满，因为序列长短不一、KV 块按块分配会有碎片。反过来算也一样：一张卡留给 KV 的显存如果是 40 GiB，装得下的 token 总数是 40 × 2³⁰ ÷ 131,072 = 327,680 个 token；按每条序列平均 2048 token 算，约 160 条序列的 KV 容量——但 max_batch_size 卡在 32，KV 容量再大也跑不出第 33 条并发序列。两个预算卡的是不同维度的天花板，调参时要先分清这一步卡在哪本账上：并发上不去看 max_batch_size，单序列一长就报错看 max_seq_len，prefill 排队严重看 max_num_tokens。
+“编译”发生在哪一步？先分清两条流水线。旧版 TensorRT-LLM 用 TensorRT 后端：`trtllm-build` 把网络定义编译成一个 engine 文件，运行时再加载这个文件；engine 与 TensorRT 版本、GPU 架构、`max_batch_size`/`max_seq_len` 这些形状参数绑在一起。较新的文档里有一页《Migration Guide: TensorRT Backend Removed》，CLI 参考只列 `trtllm-bench`、`trtllm-eval`、`trtllm-serve`——在那一版里，旧的 TensorRT 后端已经移除，`trtllm-build` 属于旧流程。当前路线是 PyTorch 后端：`trtllm-serve` 直接读 Hugging Face 权重，在加载时做图优化、kernel 选择与 JIT（just-in-time，运行时才编译）、执行图捕获、KV 缓存布局，不再生成一个独立的 engine 文件。两条路线名字不同，共同点是一样的：把执行计划从每步挪到加载时。你装的版本走哪条，看它的安装指南、CLI 参考和迁移页，以当前版本文档为准。
 
-“编译”到底发生在什么时候？当前版本默认走 PyTorch 后端，算子融合（把多个小算子合并成一个 kernel，减少访存与启动开销）、CUDA 图捕获（CUDA graph capture，把一串 kernel 启动录成一张图，之后一次提交整张图，省掉逐个启动的开销）、KV 缓存布局都在引擎加载时定下来并缓存复用。换句话说，第一次加载要花时间做这些决定，后面再加载同一配置，走的是缓存好的结果，启动就快了。加载耗时本身这节不给数字：它随模型大小、硬件、缓存是否命中变化，实测前写具体秒数就是编数，留待补测。老教程里的预编译流程别照着抄：文档的命令行里只有 `trtllm-bench`、`trtllm-eval`、`trtllm-serve`，没有独立的 `trtllm-build`——搜到 `trtllm-build` 的教程，对应的就是老版本里“先编译引擎文件、再加载”的两段式流程，当前版本里这一步已经收进加载过程了。把“编译”理解成“加载时定执行计划”，别理解成“生成一个独立的引擎文件”，版本一换，流程就对不上了。
+编译买到的是每步更少的决定：算子融好了，kernel 选好了，CUDA 图录好了，KV 块按固定布局放好了；运行时循环只做取请求、调度、执行、采样。锁死的是变更的自由度：换模型结构、换形状分布、换 GPU 架构、换引擎或驱动版本，执行计划都可能要重做。运行时（eager）路线按算子逐个执行，形状在每次前向时才定；编译式路线把这些决定提前。两条路线的典型差异可以拆成六行，边界就在每一行的右端：
 
-还有一个误解要拆开：“编译式”听起来像把模型换成了另一个东西，其实没有。权重还是那份权重，变的是执行计划：哪些算子融在一起、kernel 按什么顺序提交、KV 按什么布局放。编译换来的是启动后每步更低的开销，锁死的是灵活性：执行计划在加载时定死，换 batch 形状、换序列长度分布，都要回到加载时重定。这正是本周标题里“换来了什么，又锁死了什么”的第一层含义，第二层在周五的选型指南里收口。
+| 决策 | 运行时（eager）路线 | 编译式路线 | 边界与代价 |
+|---|---|---|---|
+| 图优化与算子融合 | 按算子逐个执行，融合靠框架或手写 kernel | 加载时把可融的算子融掉，减少 kernel 数与中间结果 | 融合规则与模型结构绑定，新结构要等支持 |
+| kernel 选择 | 按形状查表或启发式，运行时切换 | 加载时按目标 GPU 与形状选，甚至 JIT 编译 | 换 GPU 架构要重新选、重新编 |
+| 动态 shape | 每步按实际 batch 与长度组批 | 常用形状预捕获 CUDA 图，其他形状 padding 或回退 | 形状分布偏离捕获集合，命中率下降，padding 白算 token |
+| 插件与自定义算子 | 注册后可用，回退路径多 | 依赖目标版本支持的算子或插件，缺了要补 | 算子覆盖是硬门槛 |
+| 版本锁定 | 引擎升级相对独立 | 执行计划与 CUDA、驱动、引擎版本绑定 | 升级要重测、重编 |
+| 构建与加载时间 | 启动快，首请求前的开销小 | 首次加载要编译与捕获，冷启动长 | 扩缩容、滚动发布都受冷启动影响 |
 
-**阅读锚点**：[架构总览](https://nvidia.github.io/TensorRT-LLM/developer-guide/overview.html)与[分页注意力、IFB 与调度](https://nvidia.github.io/TensorRT-LLM/features/paged-attention-ifb-scheduler.html)。IFB（in-flight batching，飞行中批处理）就是上面那个后台循环的调度方式：序列不必等同一批的其它序列结束，进进出出都按步进行。
+适用的一端：模型固定、请求形状分布稳定、只用 NVIDIA、QPS 高到能把加载时间摊薄、p95 延迟是硬指标、团队能锁住驱动与引擎版本。不适用的一端：模型频繁更换、要覆盖多家芯片、请求形状长尾极重、低频服务或一次性实验、无法固定版本组合。
 
-**产出**：三句话，对照第 2 周的 vLLM 写清分页 KV 的相同点和不同点。相同点：两者都用分页 KV，把 KV 按块分配，块是分配与复用的单位，碎片与复用逻辑同源。不同点之一：vLLM 的分页 KV 是它从第一天起的核心抽象，调度与显存管理围绕它长出来；TensorRT-LLM 的分页 KV 嵌在 PyExecutor 的后台循环里，与算子融合、CUDA 图捕获这些编译期决定共用一套加载流程。不同点之二：vLLM 换配置多半是改启动参数、当场生效，TensorRT-LLM 换执行计划相关的配置要回到加载时重定，调参的反馈环更长。
+编译式引擎的失败模式也和这套结构有关。模型结构不在支持列表里，加载直接失败，或者退回一条没优化的路径；形状超出捕获的 CUDA 图集合，要么 padding 到邻近形状白算 token，要么回退到 eager，延迟抖动；显存不够捕获图或放 KV，加载时报 OOM，而不是等请求来了才报；容器标签与文档版本对不上，配置项名字先对不上。排错顺序因此是：先确认模型与硬件在支持列表里，再确认版本组合，最后才看参数。
+
+和第 8 章的 vLLM 对照，分页 KV 这一层是同源的：两者都把 KV 切成块，按块分配、按块复用，块是碎片与复用的单位。差别在执行计划的位置：vLLM 的调度与显存管理围绕分页 KV 长出来，换并发、换最大长度多半是改启动参数、重启服务；TensorRT-LLM 把分页 KV 嵌在 PyExecutor 的加载流程里，KV 布局与 CUDA 图、kernel 选择一起定，改执行计划相关的配置要重新加载。反馈环的长度不同：一个适合频繁试参数，一个适合参数定下来后压极限。
+
+18.1 的结论不是“编译更快”，是“编译把决定提前，收益与变更频率成反比”。
 
 #### 第 2 节 · 部署同一模型：容器、服务与一条存下来的启动命令
 
-**目标**：用 NGC 预编译容器把同一模型跑起来，确认 8000 端口的 `/v1/chat/completions` 通了，并把启动命令存下来；模型与硬件和第 2/4 周对齐。
+部署前先算下载与磁盘。Llama-3.1-8B-Instruct 是 80 亿参数，FP16 权重约 80 × 10⁸ × 2 = 16 GB；Qwen2.5-7B-Instruct 是 70 亿参数，FP16 约 14 GB。按 100 MB/s 下载，16 GB 要 16 × 10⁹ ÷ (100 × 10⁶) = 160 秒；50 MB/s 要 320 秒。镜像本身也占磁盘，拉镜像与拉权重是两段等待，都要算进租卡时间。磁盘剩余空间先看一眼，下载到一半磁盘满，重来一遍还是这个时间。
 
-先算下载这笔账。Llama-3.1-8B-Instruct 是 80 亿参数，FP16 每个参数 2 字节，权重文件约 80 × 10⁸ × 2 = 16 GB；Qwen2.5-7B-Instruct 是 70 亿参数，FP16 约 14 GB。按 100 MB/s 的下载速度算，16 GB 要 16 × 10⁹ ÷ 100 × 10⁶ = 160 秒；速度只有 50 MB/s 就要 320 秒，翻倍。这笔账的用处很实际：容器拉下来不等于模型就绪，权重下载与加载是另一段等待，租卡按小时计费，下载慢的那几分钟也要算进预算里。镜像本身也要占磁盘，拉之前先看一眼剩余空间，别让下载在半路因为磁盘满了断掉——断掉重来，160 秒又要重算一遍。
+安装按[安装指南](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)走，容器是首选：`docker pull nvcr.io/nvidia/tensorrt-llm/release:<版本>`。`<版本>` 保留占位，去安装指南或 NGC 的标签页里选，不要凭印象填。容器把 CUDA、PyTorch、驱动这一套组合锁死，pip 安装则要自己配；两条路都能走，容器省掉的是环境排查。拉之前确认 GPU 在[支持的硬件](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)列表里：文档列出的架构从 Ampere A100 到 Blackwell；具体到某张卡、某个精度能不能跑，还要看量化矩阵。
 
-部署按[安装指南](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)走，容器是首选：`docker pull nvcr.io/nvidia/tensorrt-llm/release:<版本>`，以安装指南里的版本标签为准；或按同一指南用 pip 安装。版本写法保留原样：`<版本>`，以安装指南里的版本标签为准，不要凭印象填一个版本号——容器标签与文档版本是绑定的，填错标签要么拉不到镜像，要么拉到一个文档对不上的旧版，后面按文档找配置项会处处对不上。为什么优先用容器？因为 TensorRT-LLM 对 CUDA、PyTorch、驱动版本的组合很敏感，容器把这套组合锁死了，pip 安装则是把“配齐组合”这件事交给你自己。两种路都能通，选容器是把环境变量先固定下来，出了问题先排服务本身，环境后排。
+容器起来后先确认 GPU 可见：`nvidia-smi`。然后启动服务：
 
-容器起来后，在容器里跑 `trtllm-serve "meta-llama/Llama-3.1-8B-Instruct"`（或 Qwen2.5-7B-Instruct；Llama 权重需先在 Hugging Face 上接受许可并登录账号）。`trtllm-serve` 是 TensorRT-LLM 自带的 OpenAI 兼容服务：它把引擎包成一个 HTTP 服务，对外讲 OpenAI 的接口语言。Llama 的许可是一道前置手续：没在 Hugging Face 上接受许可、没登录账号，权重拉不下来，服务起不来，报错看起来却像网络问题——先排许可，再排网络。Qwen2.5-7B-Instruct 没有这道手续，急着跑通链路时可以先拿它当第一模型，许可办好再换回 Llama。选哪个模型不是口味问题：周五的三引擎对比要求同一模型、同一硬件，和第 2/4 周对齐，模型一换，对比表里的数字就失去了共同基准。
+```bash
+# 宿主机：镜像标签以安装指南为准
+docker run --rm -it --ipc host --gpus all \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -p 8000:8000 nvcr.io/nvidia/tensorrt-llm/release:<版本>
 
-服务跑起来不等于服务通了，验证只认一条 curl。确认 8000 端口的 `/v1/chat/completions` 通了（curl 一条，和第 2 周一样的请求体）。端口通了、返回了第一个 token，才算部署完成；只看到容器日志里“服务已启动”不算——日志说的是进程活着，curl 说的是请求能走完取请求、调度、执行、采样整条链。curl 的请求体和第 2 周用的一样，是有意的：同一个请求体打到三个引擎上，返回格式、延迟口径才有得比。跑通之后把启动命令存下来，存进本周的实验记录里，连同容器标签、模型名、端口号一起写清。周三、周四、周五都要反复重启这个服务，启动命令每次现拼，拼错一个参数，量的就是另一个配置的数字。
+# 容器内：模型名换成要与 vLLM、SGLang 对比的那一个
+trtllm-serve "meta-llama/Llama-3.1-8B-Instruct"
+```
 
-服务启动后先别急着 curl，给引擎一点加载时间。加载时引擎要做三件事：把 16 GB 权重复制进显存、按 max_seq_len 与 max_batch_size 定 KV 缓存布局、把算子融合与 CUDA 图捕获的执行计划定下来。首次加载还要现编一部分 kernel，之后再加载同一配置，走的是缓存好的结果——首次与缓存命中后的加载耗时差多少，这节不给数字，实测前写具体秒数就是编数，留待补测。判断加载完成的标准只有一个，就是 curl 通了；日志里“服务已启动”只能说明进程活着，说明不了请求能走完取请求、调度、执行、采样整条链。容器启动时还要做两件事：把 GPU 交给容器、把 8000 端口映射到宿主机。curl 不通时按链路排：连接被拒绝，先看端口映射对不对、服务是不是还在加载；返回 404，先看路径是不是 `/v1/chat/completions`；返回模型未就绪，先等加载完成，别急着改配置。
+`trtllm-serve` 的默认端口是 8000，对外提供 OpenAI 兼容接口；`--host`、`--port`、`--backend`、`--config` 这些参数以当前版本的 CLI 参考为准。Llama 权重需要先在 Hugging Face 接受许可并登录；没做这一步，报错常像网络问题。Qwen2.5-7B-Instruct 没有这道手续，想先验证链路可以拿它当第一个模型，再换回与第 8、10 章一致的模型。
 
-模型对齐是本周最容易在无意中破坏的前提。第 2 周跑的是哪个模型，这周就跑哪个；如果第 2 周是 Llama-3.1-8B-Instruct，这周换成 Qwen2.5-7B-Instruct，对比表就失去了基准——模型一换，权重从 16 GB 变成 14 GB，每 token 的 KV 从 128 KiB 变成约 56 KiB，TTFT 的底数全变了，表里三行的差值就分不清是引擎带来的，还是模型带来的。硬件对齐也一样：同一张卡、同一台机器，换卡等于换了 Roofline 的天花板。启动命令存下来的时候，把容器标签、模型名、端口号、GPU 型号写在一起，周三、周四、周五重启服务都用同一条命令，量出来的才是一组数。
+模型对齐是最容易在无意中破坏的前提。第 8 章的 vLLM、第 10 章的 SGLang 用哪个模型，本章就用哪个；Llama-3.1-8B 换成 Qwen2.5-7B，权重从 16 GB 变 14 GB，每 token 的 KV 从 128 KiB 变约 56 KiB，TTFT 的底数全变，三引擎表里的差值就分不清是引擎还是模型带来的。硬件同理：同一张卡、同一台机器、同一驱动。若当前版本的支持模型列表里没有这个架构，不要假设能跑——先查[支持的模型](https://nvidia.github.io/TensorRT-LLM/models/supported-models.html)，列表随版本增删，以当前文档为准。
 
-curl 那条请求本身也值得说一句。请求体和第 2 周用的一样，里面有模型名、messages（对话内容）、max_tokens 这些字段；返回里看两样东西：choices 里的第一条回复内容，和 usage 里的 token 数。回复内容对了，说明采样链路是通的；usage 里 prompt_tokens 与 completion_tokens 的数对得上你发的 prompt 长度与 `--max-tokens`，说明计数链路也是通的。流式返回时 token 一个一个到，TTFT 就是第一个 token 到达的时间——周三的 bench 脚本量的正是这个时间点。curl 通了之后别关终端，把这条 curl 也和启动命令存在一起：周三、周五复测时，同一条 curl 打到三个引擎上，才是同一把尺子。8000 是 `trtllm-serve` 的默认端口，第 2 周的 vLLM 服务也占 8000——两个服务别同时跑，端口会撞；换引擎前先把上一个服务停掉，这也是周五“重启服务、清空 KV 状态”的前提。进容器后先跑一下 nvidia-smi，确认 GPU 在容器里可见、显存占用正常，再启动服务；卡不可见时服务起不来，报错却可能指向模型加载，排错的起点应该是 GPU 可见性。
+服务进程活着不等于服务可用，验证只认一条 curl。确认 `/v1/chat/completions` 返回了完整响应：`choices[0].message.content` 有内容，`usage.prompt_tokens` 与 `completion_tokens` 对得上你发的 prompt 与 `max_tokens`。流式请求看第一个 token 什么时候到，这就是 TTFT 的测量点。curl 不通时按链路排：容器里 `nvidia-smi` 看不到卡，先修 GPU 透传；连接被拒绝，查端口映射与服务是否还在加载；404，查路径；模型未就绪，等加载完成；401 或 403，查 Hugging Face 许可与 token。
 
-一个常见的误解：容器拉成功、镜像解压完，就以为部署完了。部署完成的标准只有一个，就是 curl 通了。镜像、权重、许可、端口、请求体，五环里任何一环断了，curl 都会告诉你——只不过报错信息经常指着别的地方：许可问题报成下载失败，端口映射问题报成连接拒绝。排错的顺序按链路走：许可、权重、端口、请求体，别按报错的字面意思走。
+```bash
+curl -s http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "messages": [{"role": "user", "content": "解释 KV 缓存的作用。"}],
+    "max_tokens": 64,
+    "temperature": 0
+  }' | python3 -m json.tool
+```
 
-**产出**：一个跑着同一模型的 TensorRT-LLM 服务（8000 端口、`/v1/chat/completions` 已用 curl 验证），以及一条存下来的启动命令，模型与硬件和第 2/4 周对齐。
+首次加载比后续加载慢，原因在三件事：权重要从磁盘读进显存；执行计划要定（图优化、kernel 选择、CUDA 图捕获）；KV 池要按 `max_seq_len` 与 `max_batch_size` 分配。加载耗时随模型大小、GPU、是否命中缓存变化，本章不给具体秒数，实测前写秒数就是编数；把它记成“首次加载”与“二次加载”两列，标待补测。判断加载完成的标准还是 curl，不是日志里的“server started”。
+
+把启动命令存下来，和容器标签、模型名、端口、GPU 型号、`max_batch_size`/`max_seq_len`/`max_num_tokens` 写在一起。18.3 到 18.5 每次重启都用同一条命令；参数现拼，拼错一个，量的就是另一个配置。版本也记在命令旁边：容器标签，以及容器里的 `pip show tensorrt_llm` 输出；以当前文档给的查询方式为准。
+
+8000 也是第 8 章 vLLM 的默认端口，两个服务不要同时跑。换引擎前先停上一个，等端口释放；否则 curl 打到的是上一个引擎，数字看起来“没变化”，其实是请求根本没到新服务。
+
+这一节最常见的失败不是命令写错，是把“镜像拉下来”当成“部署完成”。部署完成的标准只有 curl 通过；镜像、许可、权重、GPU 透传、端口、请求体，任何一环断了，curl 都会失败，报错却经常指向别处。按链路排，不按报错字面排。
 
 #### 第 3 节 · 量化与测量：FP16 与 FP8 的两档对比
 
-**目标**：拿到 ModelOpt 的 FP8 权重，用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py` 在同一 prompt、同一 `--max-tokens`、同一并发下测 FP16 与 FP8 两档，产出一张对比表；对比前先确认两档的数字是实测还是估算。
+权重账先算清：8B 模型 FP16 是 16 GB，FP8 每参数 1 字节是 8 GB，正好一半；7B 模型从 14 GB 降到 7 GB。省下的字节落在哪一段，要分 prefill 与 decode 看。decode 每步要把全部权重读一遍才产一个 token，落在带宽区间：按 2 TB/s 的带宽算例（A100 80GB 的厂商口径约 2 TB/s；换 H100，时间按带宽比例缩短），读 16 GB 要 16 × 10⁹ ÷ (2 × 10¹²) = 8 × 10⁻³ 秒，即 8 ms；读 8 GB 要 4 ms。这只是权重读取一项，真实单步还要加 attention、KV 读写与 kernel 启动。prefill 是计算受限，权重只读一遍、算很多遍，FP8 的收益主要来自更低的计算量与更高的算力利用率，不来自搬运量减半。
 
-先算权重这笔账。Llama-3.1-8B-Instruct 的 FP16 权重是 80 × 10⁸ × 2 字节 = 16 GB，FP8 每个参数 1 字节，权重是 8 GB，正好一半；Qwen2.5-7B-Instruct 从 14 GB 降到 7 GB。权重减半意味着什么，要分 prefill 与 decode 两段看。decode 每步要把全部权重读一遍才产一个 token，是访存 bound（受显存带宽限制，算力在等数据）：权重从 16 GB 降到 8 GB，每步要搬的字节数减半。拿一个假设带宽算一算就明白量级：假设显存带宽是 2 TB/s，读 16 GB 要 16 × 10⁹ ÷ 2 × 10¹² = 0.008 秒，即 8 毫秒，读 8 GB 要 4 毫秒——这只是“读权重”这一项的算例，不是实测延迟，真正的单步延迟还要加上 attention、KV 读写与 kernel 启动，数字以实测为准。prefill 是算力 bound（受算力限制，数据在等计算），权重只读一遍、算很多遍，FP8 的收益主要来自更低的计算量与更高的算力利用率，而不是搬运量。两档的收益结构不一样，测出来 FP8 在 decode 上提速多、在 prefill 上提速少，是符合机制的；反过来，如果两档在所有指标上都一样快，那更值得怀疑的是测量本身是不是出了问题。
+FP8 能不能用，先看硬件。很多资料把门槛写成 Hopper 或更新；当前文档的量化页有一张更细的硬件矩阵：Hopper、Ada Lovelace、Blackwell 列了 FP8 权重与激活的路径，Ampere 没有 FP8 权重与激活（矩阵里只有 FP8 KV 缓存一列是 Y）。同一页还有一句“默认 PyTorch 后端在最新 Blackwell 与 Hopper 上支持 FP4/FP8”，与 Ada 那一列并不完全一致。以你装的版本对应的量化文档为准，保守口径按 Hopper 起步；只有 A100 时不要硬跑 FP8，改跑 W4A16 AWQ/GPTQ（权重 4 bit、激活 16 bit），Ampere 的矩阵里这两条是支持的。
 
-权重来源有两条路。第一条是直接用 ModelOpt 预量化好的权重：`trtllm-serve "nvidia/Llama-3.1-8B-Instruct-FP8"`（[量化文档](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)里的示例）。第二条是没有现成权重时自己离线量化：`git clone https://github.com/NVIDIA/Model-Optimizer.git`，按量化文档跑 `examples/llm_ptq` 里的 `scripts/huggingface_example.sh --model <HF 模型> --quant fp8`，注意标定要花时间，留足租卡时长。标定（calibration）是用一小批真实数据跑模型、量出每层激活的分布，再定缩放因子（scale factor，把 FP8 的有限表示范围对准实际数值分布的系数）的过程：它不是“跑个脚本等几分钟”的附带步骤，标定数据量一上去，时间与显存占用都跟着上去。离线量化的产出是权重文件本身，量化完要先确认文件落盘完整再启动服务，别让服务启动时才发现权重缺了一半。
+W4A16 的权重按 0.5 字节/参数算是 80 × 10⁸ × 0.5 = 4 GB（忽略 scale 与打包开销），比 FP8 的 8 GB 还小一半，但激活仍是 FP16，计算路径不同，收益结构也不同。W4A16 的数字不能和 FP8 放进同一列比较：那是两种量化方案，不是同一方案的两档。A100 上跑 W4A16 是硬件决定的正确选项，不是退而求其次。
 
-测量用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py`，控制变量只有三个：同一 prompt、同一 `--max-tokens`、同一并发。prompt 一变，prefill 的 token 数就变，TTFT 跟着变；`--max-tokens` 一变，输出长度变，ITL（inter-token latency，平均每 token 间隔）与总耗时跟着变；并发一变，batch 形状变，调度与 KV 竞争全变。三个变量里任何一个没对齐，两档数字的差就分不清是量化带来的，还是负载带来的。记三个数：TTFT、ITL、吞吐（单位时间产出的 token 数）。吞吐的算法是总输出 token 数除以总耗时，分子分母都要来自同一轮测量，别拿一轮的 token 数除另一轮的时间。
+权重来源两条路。第一条直接用预量化权重：`trtllm-serve "nvidia/Llama-3.1-8B-Instruct-FP8"`（[量化文档](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)里的示例；模型名以 Hugging Face 上实际存在的 checkpoint 为准）。第二条自己离线量化：`git clone https://github.com/NVIDIA/Model-Optimizer.git`，在 `examples/llm_ptq` 下跑 `scripts/huggingface_example.sh --model <HF 模型> --quant fp8`。标定（calibration，用一小批真实数据量出每层激活分布、再定缩放因子）要花时间和显存；标定数据量越大，租卡时间越长。量化完先确认权重文件完整，再启动服务。
 
-这里有一个容易踩的坑，原文已经点出来了，值得展开讲透：如果服务端不在流里回 usage 字段，脚本会把 token 数按字符估算并标为估算值，对比前先确认两档的数字是实测还是估算。usage（OpenAI 接口里回传 token 用量的字段）是服务端告诉你的“这轮到底用了多少 token”；流式输出里有些服务端不回它，脚本只能按字符数估算 token 数——估算值带一个系统性偏差：中文、英文、代码的“每字符对应多少 token”各不相同，同一个估算系数用在两档上，偏差方向一致、大小却未必一致。更要命的是，一档实测、一档估算的对比，差值里混进了估算误差，FP8“快了百分之几”可能是真的，也可能是估算方法在两档 prompt 上表现不同。确认的方法很直接：看脚本输出里有没有标“估算值”，有就先解决 usage 回传问题（换非流式、或确认服务端配置），再谈对比。
+测量用第一部分的 `docs/modules/M0-foundations/scripts/bench_openai.py`，控制变量是同一 prompt、同一 `--max-tokens`、同一并发、同一采样参数。脚本把 prompt 与 `temperature = 0` 写死了；你要对齐的是 `--max-tokens`、`--concurrency` 与每档请求数。prompt 变，prefill 的 token 数变，TTFT 变；输出长度变，ITL 与总耗时变；并发变，batch 形状与排队变；采样参数变，EOS 位置变、实际输出长度变。每档跑 2–3 遍取中间值，表头写清容器标签、GPU 型号、模型、prompt、并发、输出长度、每档请求数。
 
-硬件边界要先认清再动手：FP8 权重需要 Hopper 或更新；只有 A100 时改跑 W4A16 AWQ/GPTQ（硬件矩阵里 Ampere 有支持）。W4A16 是权重 4 bit、激活 16 bit 的量化：8B 模型的权重是 80 × 10⁸ × 0.5 字节 = 4 GB，比 FP8 的 8 GB 还小一半，但激活仍是 FP16，计算路径与 FP8 不同，收益结构也不同——别把 W4A16 的数字和 FP8 的数字放进同一列比较，它们是两种量化方案，不是同一方案的两档。A100 上跑 W4A16 不是“退而求其次”，是硬件决定的正确选项：FP8 的算力路径在 Hopper 上才有，A100 上硬跑 FP8 权重，省掉的字节换不来对应的算力收益。
+一个容易把对比做废的问题在 token 计数：脚本优先读流式最后一块的 `usage.completion_tokens`，服务端不回 `usage` 时按 `len(text) / 4` 估算并标 `tokens_estimated`。一档实测、一档估算，差值里就混进了估算误差；中文、英文、代码的字符与 token 比例不同，两档偏差方向一致、大小未必一致。开测前先看输出表的 `tokens_estimated` 是不是 `false`；是 `true`，先确认服务端在流式响应里回了 `usage`，不回就换非流式或换脚本，别拿估算值做两档对比。
 
-怎么读这张对比表，先想好再测。预期的形态是：FP8 的收益主要落在 decode 段，ITL 下降；TTFT 变化小，因为 prefill 是算力 bound，权重减半省的主要是搬运，不是计算。如果测出来 TTFT 大幅下降，先怀疑 prompt 或并发没对齐，别急着庆祝量化有效——TTFT 的大头是 prefill 计算，权重精度对它的影响本就不大。反过来，如果 FP8 比 FP16 还慢，也别立刻下结论：先看两档的数字是不是一档实测、一档估算，再看并发与 `--max-tokens` 是不是真对齐了，最后看服务是不是刚重启、还在冷启动。量化对比里最常见的“结论”，其实是测量没对齐的副产品。
+预期方向可以写死，数字不能。FP8 的权重搬运减半，decode 段受益更直接，ITL 应该下降；prefill 是计算受限，TTFT 的下降幅度应该小于 ITL，甚至因为量化与反量化的额外开销而基本不动。如果 TTFT 大幅下降，先查 prompt 与并发有没有对齐；如果 FP8 全面变慢，先查两档是不是一档实测一档估算、服务是不是刚重启、标定是否失败。这些是待验证的预期，不是结论。
 
-测速度之前，先拿两三条 prompt 对一下回答质量：FP8 的回答应该与 FP16 大致一致，只是措辞有细微差别；如果回答驴唇不对马嘴，先停下来查量化配置，别急着测速度——速度数字再好看，质量垮了的量化档也没有对比价值。质量检查不用打分，人工读两三条就够，目的是拦住“量化错了还继续测”这种浪费。
+把表做成这个形状，空格先留待补测：
 
-测量习惯上还有两点。每档跑两到三遍，取中间值：单次测量的抖动（冷启动、后台任务、网络波动）会把百分之几的差异淹没，而 FP8 与 FP16 的真实差距可能就在百分之几的量级，单次测量分不清信号与噪声。表头写清环境：容器标签、GPU 型号、模型名、prompt、并发——换卡重跑时才知道数字变了是因为卡变了，而不是因为量化变了。一张没有表头的对比表，过一周就没人敢引用它，包括你自己。
+| 档位 | 权重 | 硬件 | TTFT p50 / p95 (ms) | ITL p50 / p95 (ms) | 吞吐 (token/s) | token 计数 | 状态 |
+|---|---|---|---|---|---|---|---|
+| FP16 | 16 GB | 1×H100 80GB | 待补测 | 待补测 | 待补测 | 待补测 | 未测 |
+| FP8 | 8 GB | 1×H100 80GB | 待补测 | 待补测 | 待补测 | 待补测 | 未测 |
 
-**产出**：一张 FP16/FP8 对比表（同一 prompt、同一 `--max-tokens`、同一并发，TTFT/ITL/吞吐三列），并在表下标明两档数字是实测还是估算；只有 A100 时，表里跑的是 W4A16 AWQ/GPTQ 档，并注明硬件原因。
+表头再补容器标签、模型名、prompt、`--max-tokens`、并发、每档请求数。只有 A100 时，表里换成 W4A16 AWQ/GPTQ 一行，并在备注写“Ampere 无 FP8 权重与激活路径”；不要拿 W4A16 与 FP8 的数字互相解释。
+
+测速度之前先做质量闸门：同一组 2–3 条 prompt，FP8 与 FP16 各生成一次，人工读一遍。回答明显跑偏就停下查量化配置，别急着测速度。这个闸门只拦“量化坏了”，不能替代第 12 章的质量评测；要写进报告的质量结论，得用固定评测集。
+
+测量习惯还有三条。每档跑 2–3 遍取中间值，单次抖动会把几个百分点的差异淹没。正式计时前预热几条请求，冷启动的加载与 CUDA 图捕获不属于 TTFT。换档之间重启服务并清空 KV 复用状态，否则上一档留下的前缀块会把下一档的 TTFT 拉低。三条都做到，FP8 与 FP16 的差值才有归因价值。
 
 #### 第 4 节 · 投机解码、KV 复用与解耦式服务
 
-**目标**：先读三篇论文总结弄清 draft-verify 机制和接受率为什么决定一切；再动手开 EAGLE-3，低并发下测接受率与延迟变化，验证“只在低 batch 下加速”；用同一 system prompt 的两批请求对比 TTFT，验证跨请求 KV block 复用；最后读解耦式服务文档，写出 `cache_transceiver_config`（`backend: NIXL`）的配置。
+投机解码先用一个小起草器猜几个 token，再让目标模型一次前向全部验证。设每轮猜 γ 个候选、每个候选被接受的概率是 α，从左到右接受，第一个被拒就停，记这一轮期望生成的 token 数为 E，E = 1 + α + α² + … + α^γ；第一项是目标模型自己补的那一个，后面每一项是前 k 个候选都被接受的概率。γ = 3 时：α = 0.5 给 1 + 0.5 + 0.25 + 0.125 = 1.875；α = 0.7 给 2.533；α = 0.9 给 3.439。α 从 0.5 涨到 0.9，期望生成量从 1.875 涨到 3.439，是 1.83 倍，不是 6 倍。
 
-先算接受率这笔账，它是全天的核心。draft-verify（起草-验证）机制是：draft 模型（小模型，或 EAGLE 这种复用目标模型特征的轻量起草器）先连猜 γ 个 token，target 模型（目标大模型）一次前向把这 γ 个候选全验一遍，从左到右逐个接受，第一个被拒的位置停下，再补一个 target 自己采出的 token。设每个候选被接受的概率是 α，γ = 3 时一轮期望产出的 token 数是 1 + α + α² + α³：第一项是保底的那 1 个 token，第二项是第一个候选被接受的概率，第三项是前两个都被接受、第三个才有机会被验的概率，依此类推。拿数走一遍：α = 0.5 时期望是 1 + 0.5 + 0.25 + 0.125 = 1.875 个 token；α = 0.7 时是 1 + 0.7 + 0.49 + 0.343 = 2.533 个；α = 0.9 时是 1 + 0.9 + 0.81 + 0.729 = 3.439 个。α 从 0.5 涨到 0.9，期望产出从 1.875 涨到 3.439，涨了 83%——接受率是决定加速比的第一变量，draft 模型猜得越准，target 每轮验证的产出越高。反过来，α 只有 0.5 时，一轮 1.875 个 token，看起来仍比 1 个多，但 draft 本身也要花算力：设 draft 每猜一个 token 的成本是 target 一次前向的 r 倍，一轮总成本是 1 + 3r 个 target 前向当量，净收益是 2.533 ÷ (1 + 3r)；r = 0.1 时净收益约 1.95，r = 0.2 时约 1.58。draft 越贵，净收益缩水越快——“加速比”从来不是期望产出那一个数，是期望产出除以总成本。论文总结块里的数字要和这笔账对上：Leviathan 等在 T5-XXL 上 2–3 倍，Chen 等在 Chinchilla 70B 上 2–2.5 倍，EAGLE-3 最高 6.5 倍、约比 EAGLE-2 快 1.4 倍——6.5 倍不是 draft 猜中 6.5 个 token，是高接受率加树形起草（一次验证多个候选分支）叠出来的，α 一掉，加速比跟着掉。
+生成量不等于加速。设起草器每猜一个 token 的成本是目标模型一次前向的 r 倍，一轮的成本是 1 + γr 个目标前向当量，净加速比是 E / (1 + γr)。γ = 3、α = 0.7、r = 0.1 时是 2.533 ÷ 1.3 ≈ 1.95；r = 0.2 时是 2.533 ÷ 1.6 ≈ 1.58。α = 0.5 时同样的成本给 1.875 ÷ 1.3 ≈ 1.44 与 1.875 ÷ 1.6 ≈ 1.17。保本条件是 E > 1 + γr，即 r < (E − 1) / γ：α = 0.5 时 r 要低于 0.29，α = 0.7 时低于 0.51。这个模型假设目标模型验证 γ + 1 个 token 的成本等于一次 decode 前向，且起草成本线性叠加；batch 一大，验证要抢算力，这个假设先失效——所以低并发加速、高并发不加速，不是经验口号，是成本模型换了区间。
 
-动手开 EAGLE-3：按[投机解码文档](https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html)用 LLM API 的 `Eagle3DecodingConfig(max_draft_len=3, speculative_model="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")` 给 Llama-3.1-8B-Instruct 开 EAGLE-3（以你装的版本文档为准）。`max_draft_len=3` 就是上面算例里的 γ = 3：draft 每轮最多猜 3 个 token。测两件事：接受率（接受的候选数除以 draft 猜的总数）与延迟变化，在低并发下测。为什么只在低 batch 下加速？低 batch 时 decode 是访存 bound，target 一次前向的算力大量闲置，验证 3 个候选几乎不增加耗时，多产的 token 是白赚的；batch 一大，算力先被 batch 本身占满，验证候选要抢算力，draft 的成本也跟着放大，净收益就没了。验证的方法是对比：同一 prompt、同一 `--max-tokens`，开 EAGLE-3 与不开各跑一轮，低并发下延迟降了、接受率不低，结论成立；高并发下延迟没降甚至涨了，同样是结论成立——“只在低 batch 下加速”是一个可证伪的预测，不是口号。接受率的实测值这节不给：它随 prompt 类型、draft 权重、采样参数变化，测出来是多少就是多少，写进实验记录。
+TensorRT-LLM 把投机解码做成配置项。当前文档的 LLM API 写法是 `Eagle3DecodingConfig(max_draft_len=3, speculative_model="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B")`，`trtllm-serve` 与 `trtllm-bench` 走 YAML 的 `speculative_config`（`decoding_type: Eagle3`）。`max_draft_len` 就是 γ。文档明确说：投机解码没有按请求动态关闭的开关，加速只在低 batch 下观察得到；Draft/Target 还要求起草器与目标模型共用 tokenizer，否则接受率会低到反而变慢。可用的起草算法与字段随版本变：文档的投机解码页列了 Draft/Target、EAGLE-3、MTP、PARD、SA 等条目，并注明不同后端与版本的支持范围不同（NGram 已标弃用）；本章只用到 EAGLE-3。以当前版本文档为准。
 
-KV 复用是另一笔账，算的是 prefill。跨请求 KV block 复用（默认开启，`kv_cache_config.enable_block_reuse`，见 [KV 缓存文档](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)）的意思是：两个请求共享同一段前缀（最典型的是同一 system prompt），第二请求的 prefill 不必重算共享部分，直接复用第一请求留下的 KV 块。验证的方法是：用同一 system prompt 的两批请求对比 TTFT，第一批是冷启动、第二批命中复用，第二批的 TTFT 应该更低。省多少可以先估算量级：设共享的 system prompt 是 512 个 token，假设 prefill 速度是 2000 token/s，省掉的 prefill 时间约 512 ÷ 2000 = 0.256 秒；prefill 速度 5000 token/s 时约 0.102 秒。这只是“省掉 512 个 token 的 prefill”的算例，真正的 TTFT 差值还要看 batch 排队与调度，数字以实测为准。一个常见的误解：复用省的是“计算”，不是“显存”——共享的 KV 块只存一份，显存也省了，但 TTFT 上体现出来的主要是省掉的 prefill 计算；反过来，两个请求的前缀只有一个 token 不同，共享部分按块对齐后能复用的只有对齐之前的块，复用收益按块算，不按 token 算。
+测两件事：接受率与延迟。接受率 = 被接受的草稿 token 数 ÷ 提出的草稿 token 数；延迟在低并发（1、2、4）下对比开与关两轮，同一 prompt、同一 `--max-tokens`、同一采样参数。低并发下延迟下降且接受率不低，结论成立；高并发下不降甚至变慢，结论同样成立——“只在低 batch 下加速”是一个可证伪的预测。接受率的具体数值不给：它随 prompt 类型、draft 权重、采样参数变，测出来多少写多少。
 
-最后是解耦式服务（disaggregated serving，把 prefill 与 decode 拆到不同实例上跑的部署方式）。读[解耦式服务文档](https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html)，写出 `cache_transceiver_config`（`backend: NIXL`）的配置。配置里要分清两个角色：context 实例（负责 prefill，算完 prompt 的 KV）与 generation 实例（负责 decode，接过 KV 后逐 token 生成）。KV 块在两者之间走 RDMA/NVLink（高速互联，绕过 CPU 与普通网络），传输与计算重叠：context 实例一边算下一批 prefill，一边把上一批的 KV 发出去，传输时间藏在计算时间里。理解到这个程度就够了：这节只做到配置层面，解耦实测需要多卡/多节点，注明“需多卡环境，待补测”。单卡上硬搭两个实例，KV 传输走的还是同一张卡内的路径，测出来的数字说明不了跨实例传输的开销——没条件就别硬测，配置写对、机制讲清，就是这节的完成标准。
+投机的失败模式集中在配对：draft 与 target 的 tokenizer 不一致，接受率接近零；draft checkpoint 与 target 模型版本不匹配，加载报错或输出错乱；采样参数（temperature、top_p）改了，接受率跟着变；把测试集换成重复性高的文本，接受率虚高，换回真实流量就掉。报告里写清 draft 权重名、`max_draft_len`、采样参数与并发，缺一项，别人就无法复现这个加速比。
 
-**阅读锚点**：下面三篇论文的深度总结（原文选读），以及[投机解码文档](https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html)、[KV 缓存文档](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)、[解耦式服务文档](https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html)。
+KV 复用算的是 prefill。TensorRT-LLM 默认开启跨请求的块复用（`kv_cache_config.enable_block_reuse`，置 `false` 可关）；块按前缀匹配，命中后第二个请求不再重算共享部分的 prefill，共享块只存一份，显存也省。当前文档的 KV 缓存系统用基数树管理块，支持部分复用（`enable_partial_reuse`）与按优先级的 LRU 淘汰；V1 与 V2 两个 manager 的配置面不同（`use_kv_cache_manager_v2`），以当前文档为准。
 
-**产出**：EAGLE-3 的接受率与延迟实测记录（低并发，验证“只在低 batch 下加速”）、同一 system prompt 两批请求的 TTFT 对比、一份写好的 `cache_transceiver_config`（`backend: NIXL`）配置，解耦实测注明“需多卡环境，待补测”。
+验证要设对照。同一 system prompt 的两批请求：第一批冷启动，第二批命中复用；再跑一轮关掉 `enable_block_reuse` 的同负载作为对照。没有对照，TTFT 的下降可能来自排队变短、也可能来自缓存，归因不了。省多少可以先估算：共享前缀 512 个 token，prefill 速度 2000 token/s 时省 512 ÷ 2000 = 0.256 秒；5000 token/s 时省 0.102 秒。这只是省掉的 prefill 计算，实际 TTFT 还含排队与调度。复用收益按块对齐算：前缀只有一个 token 不同，能复用的也只是分歧点之前的整块，不是整段前缀。
+
+解耦式服务把 prefill 与 decode 拆到不同实例：context 实例算完 prompt 的 KV，generation 实例接过 KV 逐 token 生成。TensorRT-LLM 的配置是 `cache_transceiver_config`，`backend: NIXL`，KV 走 RDMA 或 NVLink；`trtllm-serve disaggregated -c disagg_config.yaml` 启动编排器，context 与 generation 两边要配同一套 transceiver 配置。传输与计算可以重叠：context 一边算下一批 prefill，一边把上一批的 KV 发出去。文档里能看到 `max_tokens_in_buffer`、`kv_transfer_timeout_ms`、`kv_cache_bounce_size_mb` 等字段，以当前文档为准。
+
+拆不拆，先算传输账。Llama-3.1-8B 每 token 的 KV 是 128 KiB，4096 token 的 prompt 是 512 MiB。按 100 Gb/s（12.5 GB/s）的链路算，512 MiB ÷ 12.5 GB/s ≈ 43 ms；按 400 Gb/s（50 GB/s）算约 10.7 ms。同一条 prompt 的 prefill 若按 2000 token/s 算要 2.05 秒，传输占 2.1%（100 Gb/s）或 0.5%（400 Gb/s）。这笔账说明两件事：传输在 prefill 时间的百分之几时，解耦的收益主要来自两池独立扩缩容与 TPOT 隔离，不是省传输；prompt 短、输出长时，KV 传输占 TTFT 的比例会变大，解耦可能反而抬 TTFT。上面的带宽与 prefill 速度都是算例，真实值要测。
+
+解耦实测需要多卡或多节点；单卡上起两个实例，KV 走的是卡内路径，测出来的传输开销说明不了跨实例。没有条件就只做配置与机制，报告里注明“需多卡环境，待补测”。把单卡数字当跨节点结论，比留空更糟。
+
+三篇论文的结论放在这里，数字是论文宣称的，本章没有复现：
+
+| 论文 | 机制要点 | 论文宣称 | 在本章的位置 |
+|---|---|---|---|
+| Leviathan 等，2023 | draft-verify；接受概率 min(1, p_target/q_draft)，拒绝后从 norm(max(0, p−q)) 重采样；输出分布不变 | T5-XXL 上 2–3 倍 | 解释接受率与无损性 |
+| Chen 等，2023 | 独立提出 speculative sampling；Chinchilla 70B 分布式部署 | 2–2.5 倍 | 证明大模型上可行 |
+| Li 等，EAGLE-3，2025 | 直接预测 token，加 training-time test 与多层特征融合；可配树形起草 | 最高 6.5 倍，约比 EAGLE-2 快 1.4 倍 | TensorRT-LLM 的 EAGLE-3 配置来源 |
+
+EAGLE-3 的 6.5 倍不是“一轮接受 6.5 个 token”：它是高接受率、树形起草一次验证多个分支，以及特定 batch 与负载叠出来的端到端数字；α 一掉、batch 一大，加速比跟着掉。论文还给出“约 8 倍于 EAGLE 的训练数据、batch 1 时比 EAGLE-2 快 1.4 倍”这类条件数，引用时把条件一起带上。
 
 #### 第 5 节 · 三引擎对比报告：同一基准下的选型指南
 
-**目标**：同一硬件、同一模型、同一 prompt 与输出长度、同一并发扫描，把 vLLM、SGLang、TensorRT-LLM 放进一张表（TTFT p50/p95、ITL p50/p95、吞吐），写选型指南与适用边界。
+三引擎对比表成立的前提是四个“同一”。同一硬件：同一张卡、同一台机器、同一驱动与 CUDA；换卡等于换 Roofline 的天花板。同一模型：同一权重文件、同一精度、同一 tokenizer 与 chat template；FP16 的 vLLM 对 FP8 的 TensorRT-LLM，比的是量化不是引擎。同一负载：同一 prompt token 数（不是同一段话的字数）、同一输出上限、同一并发扫描、同一采样参数。同一分位数：TTFT 与 ITL 都报 p50 与 p95，样本量写清；拿一家的 p50 对另一家的 p95，比的是分位数不是引擎。
 
-先把“同一基准”这四个词的账算清楚，它是整张对比表成立的前提。同一硬件：同一张卡、同一台机器，换卡等于换了 Roofline 的天花板，数字不可比。同一模型：同一权重文件、同一精度，FP16 的 vLLM 对 FP8 的 TensorRT-LLM，比的是量化不是引擎。同一 prompt 与输出长度：prompt 的 token 数决定 TTFT 的 prefill 部分，输出长度决定总耗时，两个一变，所有延迟数字跟着变。同一并发扫描：M0 脚本，`--concurrency 1 8 32`，三个点都要跑——并发 1 看的是单请求的延迟底线，并发 8 看的是中等负载，并发 32 看的是高负载下的排队与吞吐。只跑并发 1 就下结论，等于只测了引擎最舒服的那个点；只跑并发 32 也一样，只看到了最挤的那个点。三个点连起来，才能看出每个引擎的曲线形状：谁在低并发下快、谁在高并发下扛得住。
+先把条件写成表，再填结果：
 
-表里放六列数：TTFT p50/p95、ITL p50/p95、吞吐。p50（中位数，一半请求比它快、一半比它慢）说的是典型体验，p95（95 分位数，95% 的请求比它快）说的是尾部体验——p50 好看、p95 难看，说明引擎平时快、偶尔卡，线上最怕的就是这种“偶尔”。吞吐的算法是总输出 token 数除以总耗时。拿一个算例走一遍：并发 8，每条请求输出 200 个 token，ITL 是 20 毫秒，decode 部分每条要 200 × 0.02 = 4 秒；设 TTFT 是 0.5 秒，单条总耗时 4.5 秒，8 条共 1600 个 token，总耗时约 4.5 秒（并发执行，重叠进行），吞吐约 1600 ÷ 4.5 ≈ 356 token/s。这只是“给定 ITL 与 TTFT 时吞吐怎么算”的演示，真正的吞吐数字来自实测——TTFT 与 ITL 本身就是要量的东西，不能拿假设的数去算另一组假设的数。vLLM 的数据取第 2/5 周的，SGLang 取第 4 周的，TensorRT-LLM 取本周的：三组数据必须来自同一硬件、同一模型、同一负载，任何一组是在另一台卡上跑的，表里那一行就要标出来，否则对比表在比较三台不同的机器。
+| 条件 | 必须写清 | 本章示例（未测） |
+|---|---|---|
+| 硬件 | GPU 型号、卡数、驱动、CUDA | 1×H100 80GB；驱动与 CUDA 版本待填 |
+| 模型 | 权重、精度、tokenizer 与 chat template | Llama-3.1-8B-Instruct，FP16 |
+| 负载 | 输入与输出 token 数、并发扫描、采样参数 | 输入 1024、输出 256，并发 1/8/32，temperature 0 |
+| 指标 | TTFT 与 ITL 分位数、样本量、吞吐口径 | p50/p95，每档至少 200 个请求 |
+| 引擎 | 版本、镜像标签、启动命令 | vLLM、SGLang、TensorRT-LLM 版本待填 |
 
-选型指南按负载特征写，不按“谁更快”写。什么时候选 vLLM：生态、灵活、调参空间——模型支持最广、社区方案最多、启动参数改了当场生效，适合要快速试模型、频繁换配置的阶段。什么时候选 SGLang：前缀复用重的负载——大量请求共享 system prompt 或对话历史，RadixAttention（基数树注意力，按前缀树复用 KV 的机制）把共享部分的 prefill 省掉，TTFT 的优势在这种负载下才拉得开。什么时候选 TensorRT-LLM：NVIDIA 卡上压榨极限性能、愿意接受编译/加载成本与 NVIDIA 锁定——加载时定下来的执行计划换来的是每步更低的开销，代价是换配置要回到加载时重定、换硬件要回到官方支持列表里找。选型指南的写法是“如果你的负载是 X，选 Y，因为 Z”，每句话都要有负载特征、引擎、机制三段，缺了机制的那句就是偏好，不是选型。
+结果表按引擎与并发填，空格先留待补测：
 
-最后写一句适用边界：TensorRT-LLM 只支持[官方支持列表](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)里的 NVIDIA 架构，换国产芯片不在它的射程内，那是 M3 的事。这句话不是贬低，是划清射程：一个引擎的优化全是围绕 NVIDIA 的硬件特性做的，换一张没有对应算力路径、没有对应驱动栈的芯片，编译期定下来的执行计划无从谈起。M3 的六章讲的就是另一套射程——国产芯片的适配逻辑、算子移植与精度归因，问题域不同，工具箱也不同。
+| 引擎（版本） | 并发 | TTFT p50 (ms) | TTFT p95 (ms) | ITL p50 (ms) | ITL p95 (ms) | 吞吐 (token/s) | 备注 |
+|---|---|---|---|---|---|---|---|
+| vLLM（待填） | 1 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| vLLM（待填） | 8 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| vLLM（待填） | 32 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| SGLang（待填） | 1 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| SGLang（待填） | 8 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| SGLang（待填） | 32 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| TensorRT-LLM（待填） | 1 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| TensorRT-LLM（待填） | 8 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
+| TensorRT-LLM（待填） | 32 | 待补测 | 待补测 | 待补测 | 待补测 | 待补测 |  |
 
-没有卡的走纯读路径：第 1、4 天的读内容照常做，第 5 天只写选型分析框架，数字留空待补测。框架本身就是产出的一半：表结构、六列指标、三个并发点、选型指南的三段论证先写好，等有卡时把数字填进去，报告立刻就能用。数字留空不是未完成，是诚实——没测过的数字写上去，报告就从“待补测”变成了“编造”。
+三组数据分别来自第 8 章与第 11 章（vLLM）、第 10 章（SGLang）、18.2 到 18.4（TensorRT-LLM）。取旧数据前先核对条件：模型、精度、prompt 长度、并发、采样参数、引擎版本。任何一项对不上，要么重跑那一行，要么在备注里标出来；条件不明的旧数据比条件写全的旧数据更危险。
 
-读表之前，先把三个混淆变量排掉。第一个是冷启动与 KV 状态：每次换引擎前重启服务、清空 KV 状态，否则上一轮留下的复用块会把下一轮的 TTFT 拉低，TensorRT-LLM 的数字看起来比实际好，vLLM 的数字看起来比实际差——比较的就不是引擎，是残留的缓存。第二个是采样参数：temperature、top_p、top_k 三档一致，输出长度由 `--max-tokens` 封顶，但提前遇到 EOS（结束符）会让实际输出变短，吞吐的分子跟着变短；记录实际输出 token 数，别只记 `--max-tokens` 设了多少。第三个是预热：正式计时前先跑几条请求把权重与 KV 预热起来，冷启动的加载时间不属于 TTFT，也不属于 ITL，把它算进延迟里，三个引擎的数字会被各自不同的加载流程污染。
+吞吐 = 总输出 token 数 ÷ 墙钟时间，分子分母来自同一轮。拿一组假设数只演示算法：并发 8、每条输出 200 token、ITL 20 ms、TTFT 0.5 s，单条 decode 时间 200 × 0.02 = 4 s，单条总耗时 4.5 s；8 条并发、总 token 1600，若墙钟约 4.5 s，吞吐约 1600 ÷ 4.5 ≈ 356 token/s。这是算例，不是任何引擎的实测；真实吞吐要跑出来。
 
-一张表同时放延迟与吞吐，是因为两者经常反向走：batch 越大吞吐越高、单个请求的 TTFT 越长；并发 32 的吞吐数字好看，p95 可能已经翻倍。读表时把同一行的 TTFT p95 与吞吐放在一起看，别只挑好看的那一列引用——选型指南里“高并发要吞吐”的前提，是 p95 还在业务能接受的范围内，尾部先垮的吞吐不叫吞吐，叫排队。三个并发点的曲线画出来比表格更直观：横轴并发，纵轴 TTFT p50 与吞吐各一条线，三台引擎六条线，交叉点就是选型的分界线——交叉点左边的负载选这台，右边的选那台。
+读表前排掉四个混淆变量。冷启动：正式计时前预热，首次加载与 CUDA 图捕获不算 TTFT。KV 状态：换引擎前重启服务，或显式关闭块复用，否则上一轮的前缀块会把下一轮 TTFT 拉低。输出长度：`--max-tokens` 只是上限，提前遇到 EOS 会让实际输出变短，记录实际 completion tokens。chat template：三个引擎对同一段 messages 的模板可能不同，prompt token 数跟着变；要么用同一份原始 prompt 走 completions 接口，要么把模板固定成同一份。
 
-vLLM 与 SGLang 的数据取自第 2/5 周与第 4 周，取数据时先核对那两周的记录：模型、精度、prompt、并发是不是和本周一致；任何一项对不上，要么重跑那一行，要么在表里标出来。旧数据最大的风险不是数字旧了，是当时的条件没写全——条件写全的旧数据，比条件不明的“新测”更可信。
+选型按负载特征写，不按“谁第一”写。模型经常换、要覆盖多家芯片、需要快速试参数：选 vLLM，因为它的模型支持与后端最广、配置改了重启就生效。请求大量共享长 system prompt 或对话历史：选 SGLang，因为 RadixAttention 把共享前缀的 prefill 省掉，TTFT 的优势在这种负载下才拉得开。模型与形状稳定、只用 NVIDIA、QPS 高、p95 是硬指标、团队能锁版本：选 TensorRT-LLM，因为加载时定下的执行计划把每步开销压低，代价是变更要重新加载、新模型要等支持。每句判断都要落到表里的某一行或某个机制上，落不到就是偏好。
 
-报告分三部分：表、读表、选型。读表的方法是按行看曲线，不按格子比大小：先看并发 1 那一行，谁的 TTFT p50 最低，说明谁的单请求延迟底线最好；再看并发 32 那一行，谁的吞吐最高、谁的 p95 涨得最凶，说明谁在高负载下扛得住、谁的尾部先垮。打个比方（读法示例，不是数据）：如果并发 1 时 TensorRT-LLM 的 TTFT 最低、并发 32 时 vLLM 的吞吐反超，结论不是“谁赢了”：低并发要延迟选前者，高并发要吞吐选后者——选型指南的每一句判断，都应该能从表里的某一行找到依据，找不到依据的判断不要写。
+边界也要写进报告：TensorRT-LLM 只支持官方支持列表里的 NVIDIA 架构；换国产芯片不在它的射程内，那是第四部分的问题。这不是贬低，是划清问题域：编译期执行计划依赖 NVIDIA 的算力路径与驱动栈，换一套硬件，计划无从谈起。如果负载形状长尾极重、模型频繁更换，编译式引擎的重新加载成本会把收益吃掉，这时 vLLM 的运行时路线更合适。
 
-**产出**：一份三引擎对比报告（同一硬件、同一模型、同一 prompt 与输出长度、同一并发扫描，TTFT p50/p95、ITL p50/p95、吞吐六列）与一份选型指南，末尾写清适用边界。
+读表按行看曲线，不按格子比大小。先看并发 1：谁的单请求 TTFT p50 最低，谁的空载延迟底线最好。再看并发 8 与 32：谁的吞吐先到拐点、谁的 p95 先陡增。p50 好看、p95 难看，说明平时快、偶尔卡；线上最怕这种“偶尔”。选型的分界线在交叉点：交叉点左边看延迟，右边看吞吐，但右边的前提是 p95 还在业务能接受的范围内。
 
-**缓冲**：补做第 4 天的解耦配置实测（有多卡时），或重跑第 3 天的量化对比。缓冲是补课用的，不加新内容。
+没有 NVIDIA GPU 时，18.1 与 18.4 照常读，18.5 的条件表、结果表、选型三段论证照常写，数字留空标待补测。空表不是未完成：它把该测什么、该怎么归因固定下来，有卡时填数就能用；填一个借来的数，表就从“待补测”变成“不可信”。
 
-**论文深度总结（原文均为选读；下面的总结就是正文，不读原文也不影响做课）。**
+本章的判断可以收束为：编译式引擎用加载时的一次性决定换运行时的每步低开销，收益与模型、形状、硬件、版本的稳定程度成正比；选型先看变更频率与硬件边界，再看加速比。
 
-**1. Leviathan 等，Fast Inference from Transformers via Speculative Decoding（ICML 2023 Oral，[arXiv:2211.17192](https://arxiv.org/abs/2211.17192)，选读）**
+**延伸**：[TensorRT-LLM 文档](https://nvidia.github.io/TensorRT-LLM/)（[架构总览](https://nvidia.github.io/TensorRT-LLM/developer-guide/overview.html)、[分页注意力与 IFB](https://nvidia.github.io/TensorRT-LLM/features/paged-attention-ifb-scheduler.html)、[量化](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)、[投机解码](https://nvidia.github.io/TensorRT-LLM/features/speculative-decoding.html)、[KV 缓存](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)、[解耦式服务](https://nvidia.github.io/TensorRT-LLM/features/disagg-serving.html)）、[支持的硬件](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)、[支持的模型](https://nvidia.github.io/TensorRT-LLM/models/supported-models.html)、[NGC 容器与安装指南](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)。
 
-核心思想：用小模型"猜"、大模型"验"，把串行解码并行化，且不改动输出分布。核心逻辑分四步：解码 K 个 token 需要 K 次串行前向，这是慢的根源；难题里常有便宜模型能答对的简单子任务；一次并行前向验证多个候选的成本，约等于一次单 token 采样；于是用投机采样（speculative sampling）接受/拒绝候选，保证分布不变。关键机制：draft 模型先连猜 γ 个 token；target 模型一次前向算出这些位置的分布；从左到右逐个接受，接受概率是 min(1, p_target/q_draft)，被拒后从 norm(max(0, p−q)) 里重采样，再补一个 target 采样出的 token——每轮至少产出 1 个 token。关键结论与数字：T5-XXL 上 2–3 倍加速，输出与标准解码完全相同；还在 97M 参数的 GPT-like 模型和 137B 的 LaMDA 对话任务上验证过；无需重训、无需改架构。为什么重要：它是投机解码的源头，后面所有 draft-verify 方法（包括 EAGLE、TRT-LLM 里的实现）都是这条链的变体；"加速但不改分布"这个保证，是它能进生产的前提。
-
-**2. Chen 等，Accelerating Large Language Model Decoding with Speculative Sampling（[arXiv:2302.01318](https://arxiv.org/abs/2302.01318)，选读）**
-
-核心思想：与 Leviathan 各自独立提出的同一思想，形式化为 speculative sampling 算法。核心逻辑：同样是 draft-verify，重点在证明上——修改版拒绝采样在数值精度内无损恢复目标分布。关键机制：与上一篇相同（小模型起草、目标模型一次前向验证、从左到右接受子集），论文给出算法的完整描述（Algorithm 2）。关键结论与数字：Chinchilla 70B 分布式部署上 2–2.5 倍解码加速，采样质量无损，模型本身零修改。为什么重要：它把方法落到了 70B 大模型加分布式上，证明了这不是小模型的玩具；两篇论文互相印证，是只读一篇时的另一半。
-
-**3. Li 等，EAGLE-3: Scaling up Inference Acceleration of Large Language Models via Training-Time Test（NeurIPS 2025，[arXiv:2503.01840](https://arxiv.org/abs/2503.01840)，选读）**
-
-核心思想：EAGLE 在特征层做自回归起草，复用目标模型的顶层特征；但加训练数据几乎不提速——瓶颈在特征预测约束：draft 模型的输出必须拟合目标模型的顶层特征（带特征预测损失），误差逐层累积，数据量一上去就撞天花板。EAGLE-3 扔掉特征预测，改成直接预测 token，并用"training-time test"（训练时模拟多步生成）融合多层特征。核心逻辑：约束越紧，draft 学到的东西越被顶层特征的误差天花板卡住；放松约束、直接预测 token，训练数据量重新变成有效的 scaling 轴。关键机制：多层特征融合 + 训练时模拟多步生成；兼容 EAGLE-2 的 drafting tree。关键结论与数字：最高 6.5 倍加速，约比 EAGLE-2 快 1.4 倍；用约 8 倍于 EAGLE 的数据训练，batch 1 时比 EAGLE-2 快 1.4 倍延迟；SGLang 里 batch 64 时吞吐提升约 1.38 倍。为什么重要：它是 TRT-LLM 里 EAGLE-3 配置的直接来源——第 4 天用的 `yuhuili/EAGLE3-LLaMA3.1-Instruct-8B` 就是这篇的权重；还第一次给出"推理加速的 scaling law"：draft 模型数据越多，加速比越高。
-
----
+**延伸**：Leviathan 等，[Fast Inference from Transformers via Speculative Decoding](https://arxiv.org/abs/2211.17192)（ICML 2023）；Chen 等，[Accelerating Large Language Model Decoding with Speculative Sampling](https://arxiv.org/abs/2302.01318)；Li 等，[EAGLE-3: Scaling up Inference Acceleration of Large Language Models via Training-Time Test](https://arxiv.org/abs/2503.01840)（NeurIPS 2025）。三篇均为选读，正文只引用论文宣称的数字，未复现。
 
 ## 跟踪进度
 
