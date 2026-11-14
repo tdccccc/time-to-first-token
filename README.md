@@ -18,7 +18,7 @@
 > - **全书结构**：本书扩展为 5 部分、31 章，见 [docs/MODULES.md](docs/MODULES.md)。第二部分是推理框架；第一部分是基础与度量，第三部分是算子优化，第四部分是国产芯片适配，第五部分是跨芯片综合项目。
 > - **算子与国产芯片**：新增第三部分算子优化与第四部分国产芯片适配（各 6 章），补上原路线图没有的两条线：自己写 kernel 并接进推理引擎、国产品牌芯片上跑通同一模型。
 > - **第 15 章加深**：新增第 15 章：大规模集群 PD 优化——Mooncake 的 KV 中心架构、跨节点 KV 池、KV 传输账、池配比与容错。论文一律作选读，核心内容写进正文。
-> - **TensorRT-LLM 一章**：第 18 章是可选的一章，讲编译式推理引擎 TensorRT-LLM 的架构、部署、量化、投机解码与解耦式服务，最后产出一份三引擎（vLLM / SGLang / TensorRT-LLM）对比报告。这一章引用的论文一律标为选读，正文直接给出深度总结。
+> - **TensorRT-LLM 一章**：第 18 章是可选的一章，讲编译式推理引擎 TensorRT-LLM 的架构、部署、量化、投机解码与解耦式服务，最后产出一份三引擎（vLLM / SGLang / TensorRT-LLM）对比报告。这一章引用的论文要点已压缩进正文表格，原文是选读。
 > - **论文变选读**：每篇论文的核心思想、核心逻辑、关键机制和关键数字都已在正文对应章节写成详细总结，读完全文是可选的加深步骤；第 17 章养成阅读习惯的部分仍按原设计直接读论文。
 > - **原项目授权与出处不变**：本仓库沿用上游的 CC BY 4.0 协议，原作者与原仓库链接见文末。
 
@@ -83,7 +83,7 @@
 | [Lambda](https://lambda.ai) / [vast.ai](https://vast.ai) | 按需和市场价 GPU，便宜 |
 | [Colab](https://colab.research.google.com) | 纯 Python 的练习，不用部署服务 |
 
-第 1–5 章、第 9 章大部分、第 12 章的讲座、第 16 章全部阅读都不需要 GPU。把租卡集中在动手的那几章。只有两类实验必须用 H100：第 11 章的 1000 并发测试，以及第 14 章如果你真的要跑解耦式部署。第 15 章的多节点实测需要多卡集群，租不到就只做部署验证、性能对比待补测。
+第 1–5 章、第 9 章大部分、第 12 章的综述阅读、第 16 章全部阅读都不需要 GPU。把租卡集中在动手的那几章。只有两类实验必须用 H100：第 11 章的 1000 并发测试，以及第 14 章如果你真的要跑解耦式部署。第 15 章的多节点实测需要多卡集群，租不到就只做部署验证、性能对比待补测。
 
 ### 需要安装的工具
 
@@ -95,7 +95,7 @@ pip install sglang
 
 另外还需要 Docker（跑 Prometheus 和 Grafana），以及第 14 章用的 `kind` 或一个小的托管集群。
 
-第 18 章另外需要 TensorRT-LLM：优先用 [NGC 预编译容器](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)（`nvcr.io/nvidia/tensorrt-llm/release:<版本>`，以安装指南里的版本标签为准），或按同一指南用 pip 安装。装之前先核对[支持的硬件](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)：文档列出的最老架构是 Ampere A100，FP8 权重需要 Hopper 或更新。
+第 18 章另外需要 TensorRT-LLM：优先用 [NGC 预编译容器](https://nvidia.github.io/TensorRT-LLM/installation/installation-guide.html)（`nvcr.io/nvidia/tensorrt-llm/release:<版本>`，以安装指南里的版本标签为准），或按同一指南用 pip 安装。装之前先核对[支持的硬件](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)：文档列出的最老架构是 Ampere A100；FP8 权重通常需要 Hopper 或更新，部分 per-tensor 格式在 Ada 上也支持，以文档的硬件矩阵为准。
 
 ---
 
