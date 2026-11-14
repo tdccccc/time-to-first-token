@@ -120,8 +120,8 @@ CHAPTER_SUMMARIES = {
     14: "先算干扰与 KV 传输账，再在 Kubernetes 上按排队深度扩缩容。",
     15: "大规模 PD 的难点在 KV 池、传输和容错，不在把两个服务拆开。",
     16: "单位经济学最终都落到每百万 token 成本；利用率比单价更影响成本。",
-    17: "发表 benchmark 是把条件、命令、分位数写全；阅读习惯是让输入持续更新。",
-    18: "TensorRT-LLM 用编译换极限性能，也换来了架构锁定；选型看边界条件。",
+    17: "把 benchmark 的条件、命令与分位数写全，让读者能复现；用固定流程读论文，把结论写回项目。",
+    18: "编译把执行计划提前，收益与变更频率成反比；选型先看负载与硬件边界，再看加速比。",
     19: "一个 GEMM 的四次提速：分块、向量化、占用率，最后都回到 Roofline 验证。",
     20: "Triton 够用时写 Triton，需要精确控制 warp 与流水线时回 CUDA/CUTLASS。",
     21: "Fused attention 的核心是 online softmax 与 SRAM 容量约束，不是把公式抄一遍。",
@@ -150,6 +150,7 @@ CHAPTER_FIGURES = {
     13: ("spec.svg", "投机解码：draft 模型先猜多个 token，target 模型一次验证并接受前缀", "先看 draft 猜了几个，再看 target 验证后接受几个、在哪里截断。结论：收益由接受率和额外计算成本共同决定，低 QPS 的加速比不能外推。"),
     14: ("pd.svg", "解耦式服务：请求经 router 进入 prefill 池，产出的 KV 经传输层或共享池进入 decode 池，两池各自扩缩容", "先看 router 如何把请求分到 prefill 池，再沿 KV 箭头看传输与共享池两条路径。结论：拆分的收益是消掉的干扰与硬件错配，成本是 KV 传输、两池空闲与运维；两池卡数与扩缩容信号要一起设计。"),
     15: ("pd.svg", "大规模 PD 的抽象示意：prefill 池、decode 池与 KV 传输；未展开跨节点拓扑", "这张图只抽象两池与 KV 传输，不代表跨节点拓扑。先看 KV 路径，再回到正文核对跨机带宽、池配比和容错；结论必须落在你自己的传输账上。"),
+    18: ("trtllm-pipeline.svg", "编译式引擎的两段：加载时把权重与模型配置、图优化、kernel 选择、执行图捕获与 KV 布局定成执行计划；运行时循环按计划取请求、调度（三预算）、准备 KV、执行、采样。模型、形状、GPU 或引擎版本一变，计划失效，回到加载时重做", "先看上半部分加载时的五个方框如何汇成执行计划，再看下半部分运行时循环的五个步骤与回环；底部箭头说明变更会触发重新加载。结论：编译的收益在每步更少的决定，代价是变更要把计划重做。"),
     19: ("cuda-ladder.svg", "CUDA 优化阶梯：朴素版、shared memory 分块、向量化访存、占用率调优", "先看横轴四个版本，再看每一步只改哪个变量；柱高是示意，不是实测。结论：每一步都要由 ncu 读数和 Roofline 点验证，不能只看总时间。"),
     22: ("quant.svg", "量化 matmul 的 scale 粒度、反量化与矩阵乘融合示意", "先看权重与 scale 的粒度，再看 dequant 是否融进 matmul。结论：量化省的是权重搬运，精度损失与反量化开销决定净收益。"),
     25: ("chip-stack.svg", "国产芯片软件栈：驱动与固件、SDK/运行时、算子库、框架插件、推理引擎", "从下往上看五层软件栈，再检查同一模型经过哪些层。结论：跑通和性能问题都要按层定位，不能只归因到芯片本身。"),
@@ -235,6 +236,7 @@ CHAPTER_FIGURE_PLACEMENT = {
     13: (2, 1),   # 13.2 proposer/scorer/verifier pipeline
     14: (1, 1),   # 14.1 prefill/decode separation
     15: (2, 1),   # 15.2 Mooncake request path
+    18: (1, 6),   # 18.1 after the compile-time section
     19: (2, 1),   # 19.2 measurement bench and optimization ladder
     22: (3, 1),   # 22.3 fused dequant+matmul
     25: (2, 1),   # 25.2 software stack layers
