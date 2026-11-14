@@ -6,7 +6,7 @@
 
 # 边做边学 LLM 推理服务：交付一个真实的推理服务
 
-> **章节版已上线**：站点把内容重排为 **5 部分、31 章**，去掉了周/天/分钟的时间框：[在线阅读](https://tdccccc.github.io/time-to-first-token/)。本 README 保留为单页源稿；下面的周次是旧版组织方式，章节版以网站为准。
+> **在线阅读**：[tdccccc.github.io/time-to-first-token](https://tdccccc.github.io/time-to-first-token/)。本 README 是站点内容的单页源稿，章节编号与站点一致；站点构建时按章切分，并补上目录、笔记与进度。
 
 一本按 5 部分、31 章组织的书，给想真正跑起 LLM 推理、而不只是读一读的工程师。全书围绕同一个产物：一个 OpenAI 兼容的推理服务——部署到租来的 GPU 上，做埋点、压测到 1000+ 并发，用量化和投机解码优化，在前面放一个成本感知的路由器，最后把它作为一份可复现的 benchmark 发表出来。
 
@@ -81,7 +81,7 @@
 | [RunPod](https://www.runpod.io) | 按秒计费，开机器快 |
 | [Modal](https://modal.com) | Serverless，最适合跑 benchmark 扫描脚本 |
 | [Lambda](https://lambda.ai) / [vast.ai](https://vast.ai) | 按需和市场价 GPU，便宜 |
-| [Colab](https://colab.research.google.com) | 纯 Python 的课，不用部署服务 |
+| [Colab](https://colab.research.google.com) | 纯 Python 的练习，不用部署服务 |
 
 第 1–5 章、第 9 章大部分、第 12 章的讲座、第 16 章全部阅读都不需要 GPU。把租卡集中在动手的那几章。只有两类实验必须用 H100：第 11 章的 1000 并发测试，以及第 14 章如果你真的要跑解耦式部署。第 15 章的多节点实测需要多卡集群，租不到就只做部署验证、性能对比待补测。
 
@@ -99,15 +99,15 @@ pip install sglang
 
 ---
 
-## 章节源稿（旧版周次）
+## 章节正文
 
-> 下面是旧版按周组织的单页源稿；站点构建时会把它重排成章节。保留在这里方便对照原始内容，章节版以网站为准。
+> 下面是 31 章的正文源稿；站点构建时按章切分。
 
-图例：**读**表示这节课是输入背景知识，**做**表示这节课要产出东西。**略读**表示相关概念你可能已经知道，价值在动手部分。论文标记为**选读**：正文对应章节已有详细总结，读原文是可选的加深步骤。
+图例：**读**表示背景输入，**做**表示要动手产出，**略读**表示可快速过。论文标记为**选读**：正文已有详细总结，读原文是可选的加深步骤。
 
 ---
 
-### 第 1 周：心智模型
+### 第 6 章：心智模型
 
 **重点。** 把第 1 章的 Roofline 上限变成可执行的判断流程：一个 kernel 在等计算、显存还是启动，以及对应哪一种优化动作。
 
@@ -119,7 +119,7 @@ pip install sglang
 
 两章的分工是：第 1 章给上限和方向，本章给判断流程。6.1 先补第三种区间——启动开销；6.2 用算子融合说明“省搬运”和“省计算”为什么是两套动作；6.3 落到 GPU 的执行与存储层级；6.4 把算术强度用在一个完整请求上；6.5 换目标模型手算一遍。读完后，你应当能对任意一次变慢先说出“在等什么”，再决定改哪里。
 
-#### 周一 · 三种区间：一个 kernel 慢，先问它在等什么（60 分钟）
+#### 第 1 节 · 三种区间：一个 kernel 慢，先问它在等什么
 
 **目标**：读完 Horace He 这篇讲义的前半部分，能对任意一个 kernel 说出它落在三个区间里的哪一个，并算出判断依据。
 
@@ -147,7 +147,7 @@ pip install sglang
 
 **阅读锚点**：[Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html)（Horace He），前半部分：计算、显存带宽、开销三种区间。
 
-#### 周二 · 算子融合：给带宽受限的 kernel 加 FLOPs，为什么没用（60 分钟）
+#### 第 2 节 · 算子融合：给带宽受限的 kernel 加 FLOPs，为什么没用
 
 **目标**：读完 Horace He 这篇文章的后半部分，能算清算子融合省的是什么，并解释为什么给带宽受限的 kernel 加 FLOPs 没有用。
 
@@ -175,7 +175,7 @@ pip install sglang
 
 **阅读锚点**：[Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html)（Horace He），后半部分：算子融合、开销，以及为什么给一个受显存带宽限制的 kernel 加 FLOPs 没有用。
 
-#### 周三 · GPU 是怎么执行的：线程、block 与显存层级（60 分钟）
+#### 第 3 节 · GPU 是怎么执行的：线程、block 与显存层级
 
 **目标**：看完 CS336 第 5 讲的前 30 分钟，能画出一次 kernel 启动的数据流向，并说清数据在显存层级里走了哪几层。
 
@@ -210,7 +210,7 @@ pip install sglang
 **阅读锚点**：[Stanford CS336 第 5 讲：GPUs](https://www.youtube.com/watch?v=6OBtO9niT00)（Percy Liang、Tatsunori Hashimoto），前 30 分钟：执行模型与显存层级。[讲义](https://github.com/stanford-cs336/spring2025-lectures)。
 
 
-#### 周四 · 数据搬运为什么占主导：算术强度与 Roofline 的应用（60 分钟）
+#### 第 4 节 · 数据搬运为什么占主导：算术强度与 Roofline 的应用
 
 **目标**：看完 CS336 第 5 讲的后 30 分钟，能用算术强度解释“为什么数据搬运占主导”，并把 prefill 与 decode 各自落到 Roofline 的哪一边。
 
@@ -238,7 +238,7 @@ pip install sglang
 
 **阅读锚点**：[Stanford CS336 第 5 讲：GPUs](https://www.youtube.com/watch?v=6OBtO9niT00)（Percy Liang、Tatsunori Hashimoto），后 30 分钟：算术强度、Roofline、为什么数据搬运占主导。文字版：[Transformer Inference Arithmetic](https://kipp.ly/transformer-inference-arithmetic/)（kipply）。
 
-#### 周五 · 手算目标模型：prefill 与 decode 各落在哪（60 分钟）
+#### 第 5 节 · 手算目标模型：prefill 与 decode 各落在哪
 
 **目标**：亲手算出你要服务的那个模型的算术强度，写出一页纸的结论：哪个阶段受带宽限制、哪个阶段受计算限制、为什么。
 
@@ -264,7 +264,7 @@ pip install sglang
 
 **延伸**：有余力可以看 [CS336 第 10 讲：Inference](https://www.youtube.com/watch?v=fcgPYo3OtV0)，然后读 [Databricks 那篇](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)开头 prefill 与 decode 的部分。
 
-### 第 1 周（续）· 模型架构
+### 第 7 章：模型架构
 
 **重点。** 把 M1 第 1 周的 prefill/decode 不对称从心智模型变成逐项算出来的账，并补上模型架构这块覆盖缺口：MLA、MoE、混合注意力。没有这一章，M2/M3 的很多优化（MLA 的 KV 压缩、MoE 的专家放置）都没有模型侧的来龙去脉。
 
@@ -272,7 +272,7 @@ pip install sglang
 
 **产出。** 一份五模型对照表与全章一句话：架构选择如何改写 M2/M3 的优化清单。M2/M3 做到相关优化时，按模型查这张表。
 
-#### 周一 · 从一个 token 到一层前向：M、F、R 从哪来（60 分钟）
+#### 第 1 节 · 从一个 token 到一层前向：M、F、R 从哪来
 
 **目标**：沿着书 §2.1/§2.2 的推导，从一个 token 的数值表示出发，走完 Qwen3-8B 一层完整前向，并算出 M（存储量）、F（运算量）、R（读写量）三个量从哪来。
 
@@ -302,7 +302,7 @@ F 的两项各有各的增长方式：线性跟 m 走，注意力跟 N_pair 走�
 
 **阅读锚点**：书仓库 [bojieli/ai-infra-book](https://github.com/bojieli/ai-infra-book)；中文第 2 章 [manuscripts/02-模型架构.md](https://github.com/bojieli/ai-infra-book/blob/main/manuscripts/02-模型架构.md)（书 §2.1/§2.2）；英文第 2 章（次要）[chapter02.html](https://bojieli.github.io/ai-infra-book/en/chapter02.html)。
 
-#### 周二 · MHA/GQA 的 KV 共享与 MLA：每个 token 的 KV 到底存多少（60 分钟）
+#### 第 2 节 · MHA/GQA 的 KV 共享与 MLA：每个 token 的 KV 到底存多少
 
 **目标**：能算出一个模型每个 token 的 KV 存多少、KV 头数减半时容量、投影参数与交互运算量各变多少，并能讲清 MLA 的紧凑路径为什么省、省的是什么。
 
@@ -332,7 +332,7 @@ GQA、MQA 靠减少 KV 组数省空间，MLA（多头潜变量注意力）靠降
 
 **阅读锚点**：李博杰《深入理解 AI Infra》第 2 章中文原版 §2.3.1（多头注意力与 KV 共享）+ §2.3.2（潜变量压缩与 MLA 执行路径），书仓库 https://github.com/bojieli/ai-infra-book ，中文第 2 章 https://github.com/bojieli/ai-infra-book/blob/main/manuscripts/02-模型架构.md ，英文第 2 章（次要）https://bojieli.github.io/ai-infra-book/en/chapter02.html 。
 
-#### 周三 · MoE：每个 token 只用一小撮参数，权重账却照单全收（60 分钟）
+#### 第 3 节 · MoE：每个 token 只用一小撮参数，权重账却照单全收
 
 **目标**：讲清 MoE（混合专家，把前馈网络拆成多个子网络、每个 token 只走其中几个）的路由、共享专家与每 token 实际激活参数，把例题 2-4 的均匀与集中分派亲手算一遍，再说清专家放在不同卡上为什么会改变推理的成本结构。
 
@@ -362,7 +362,7 @@ GQA、MQA 靠减少 KV 组数省空间，MLA（多头潜变量注意力）靠降
 
 **阅读锚点**：书 §2.4（条件计算与专家权重复用），见[书仓库](https://github.com/bojieli/ai-infra-book)与[中文第 2 章](https://github.com/bojieli/ai-infra-book/blob/main/manuscripts/02-模型架构.md)；英文版（次要）见[英文第 2 章](https://bojieli.github.io/ai-infra-book/en/chapter02.html)。正文数字均按中文原版验算，例题 2-4 与练习 2-6 出自同一节。
 
-#### 周四 · 窗口、压缩、索引、递推：其余省 KV 路线的取舍（60 分钟）
+#### 第 4 节 · 窗口、压缩、索引、递推：其余省 KV 路线的取舍
 
 **目标**：周二讲了 GQA（分组查询注意力，把查询头分组共享 KV）与 MLA（多头潜变量注意力，把上下文压成低维潜变量再存）这两种省法，周四把其余路线一次讲清：窗口、压缩、索引、递推、混合。读完能对任意一个模型说清它省的是存量还是读量，省的代价由谁来付，并亲手算出 V4-Flash 与 KDA（Kimi Delta Attention，门控递推注意力）的两笔关键账。
 
@@ -406,7 +406,7 @@ DeepSeek V4.1 Flash 把省 KV 的思路再推一步：不只压缩，还让多�
 
 **阅读锚点**：李博杰《深入理解 AI Infra》第 2 章中文原版 §2.3.3–§2.3.6，书仓库 [bojieli/ai-infra-book](https://github.com/bojieli/ai-infra-book)，中文第 2 章 [manuscripts/02-模型架构.md](https://github.com/bojieli/ai-infra-book/blob/main/manuscripts/02-模型架构.md)，英文第 2 章（次要）[chapter02](https://bojieli.github.io/ai-infra-book/en/chapter02.html)。
 
-#### 周五 · 五模型同条件对照：架构选择如何改写优化清单（60 分钟）
+#### 第 5 节 · 五模型同条件对照：架构选择如何改写优化清单
 
 **目标**：把周一到周四的四笔账汇成一张五模型对照表，再把它翻成 M2/M3 的优化清单。讲完你能看着一个新模型的三行配置就说出它哪项优化最值钱、哪项可以先放一放，并且每一句都有本周算过的数字撑着。
 
@@ -464,7 +464,7 @@ DeepSeek V4.1 Flash 把省 KV 的思路再推一步：不只压缩，还让多�
 
 **阅读锚点**：书仓库 [bojieli/ai-infra-book](https://github.com/bojieli/ai-infra-book)；中文第 2 章 [02-模型架构.md](https://github.com/bojieli/ai-infra-book/blob/main/manuscripts/02-模型架构.md)（书 §2.5/§2.6，本节数字的出处）；英文第 2 章（次要）[chapter02.html](https://bojieli.github.io/ai-infra-book/en/chapter02.html)。
 
-### 第 2 周：vLLM——先部署，再读内部实现
+### 第 8 章：vLLM——先部署，再读内部实现
 
 **重点。** 先跑通 OpenAI 兼容服务，再用 block table 和调度器每步的输入、输出讲清 PagedAttention 为什么省显存、连续批处理为什么能提高 GPU 占用率。
 
@@ -476,7 +476,7 @@ DeepSeek V4.1 Flash 把省 KV 的思路再推一步：不只压缩，还让多�
 
 读法分两层。第一层只回答“显存为什么省、批为什么能做大”，这是 8.1 的算术。第二层回答“调度器每步怎样决定谁进来、给多少 token”，这是 8.3–8.5 的机制。中间 8.2 先把 OpenAI 兼容服务跑起来，后面的代码与参数才有可验证的上下文。
 
-#### 周一 · PagedAttention：浪费为什么只剩最后一个 block
+#### 第 1 节 · PagedAttention：浪费为什么只剩最后一个 block
 
 **目标**：把 60–80% 这个数算出来，把“不到 4%”这个数算出来，并且说清两个数之间的机制差在哪。
 
@@ -506,7 +506,7 @@ PagedAttention 借的是操作系统的虚拟内存与分页：block 是页、to
 
 **产出**：一份手算笔记：LLaMA-13B 单序列 1.7GB 的推导、旧系统 60–80% 的推导、分页后 2.34% 的推导、32 个请求与 131 个请求的批层面算账，四笔账都写下来。
 
-#### 周二 · 把服务跑起来：一个命令，十周复用
+#### 第 2 节 · 把服务跑起来：一个命令，十周复用
 
 **目标**：让 OpenAI 兼容接口在你自己的机器上跑起来，并且把启动命令存成十周都能复用的样子。
 
@@ -552,7 +552,7 @@ Llama-3.1-8B-Instruct 还有一个前置条件容易踩：它是受限（gated�
 
 **产出**：一个跑着 7–8B 模型的 OpenAI 兼容接口，一次成功的 curl 返回，以及存下来的启动命令。
 
-#### 周三 · vLLM V1：调度器为什么能重写
+#### 第 3 节 · vLLM V1：调度器为什么能重写
 
 **目标**：说清 vLLM V1 到底重写了什么，以及为什么 V0 的结构撑不住了。
 
@@ -584,7 +584,7 @@ V1 的两个默认项对第 3 周的压测还有一层方法论影响，值得�
 
 **产出**：一份笔记，讲清 V1 的三件套——统一调度器、KV 管理器、chunked prefill——以及每件套解决的是哪个阻塞。
 
-#### 周四 · Inside vLLM：调度器与 block manager 是怎么配合的
+#### 第 4 节 · Inside vLLM：调度器与 block manager 是怎么配合的
 
 **目标**：把调度器与 block manager 的配合讲透，并且回答本周最核心的问题：paging 与连续批处理是什么关系。
 
@@ -614,7 +614,7 @@ Decode 阶段的 block 分配是细水长流的，这一点很关键。一个正
 
 **产出**：一份笔记，画出一步调度的流程：调度器问什么、block manager 答什么、谁决定新请求进不进；以及一句话回答“paging 与连续批处理是什么关系”。
 
-#### 周五 · 跟着 block table 走一遍：一个请求的 block 怎么被查到
+#### 第 5 节 · 跟着 block table 走一遍：一个请求的 block 怎么被查到
 
 **目标**：跟着代码走一遍 block table，写出三句话，讲清一个请求的 block 是怎么被查到的。
 
@@ -642,11 +642,11 @@ Block table 不只服务调度，它还改了 attention kernel 的访存方式�
 
 **延伸**：对照代码重读 V1 博客的调度器部分，记下博客做了哪些简化。
 
-#### 论文精读（原文均为选读）
+#### 第 6 节 · 论文选读
 
 **PagedAttention / vLLM（SOSP 2023）**——问题：解码时每个请求的 KV 缓存又大（LLaMA-13B 单个序列可达 1.7GB）又随序列长度动态伸缩，旧系统因碎片和过度预留浪费 60–80% 的显存，批大小上不去。核心思想：借用操作系统的虚拟内存与分页——block 是页、token 是字节、序列是进程；每个序列的 KV 缓存切成固定大小的 block，逻辑 block 通过 block table 映射到不连续的物理 block，并按需分配。关键机制：浪费只发生在序列的最后一个 block，实测浪费不到 4%；block table 加引用计数与写时复制（copy-on-write）让不同序列共享物理 block，并行采样、beam search 这类多输出采样的显存开销最多降 55%、吞吐最多升 2.2 倍。关键数字：论文称同等延迟下 vLLM 比 FasterTransformer 和 Orca 吞吐高 2–4 倍，序列越长、模型越大、解码算法越复杂优势越明显；发布文章称比 HF Transformers 高 24 倍、比 TGI 高 3.5 倍。为什么重要：它是整本书的地基——KV 缓存分页加连续批处理是 vLLM 与 SGLang 的默认配置，读懂 block table 才能理解调度器为什么能把批做大。原文选读：[arXiv:2309.06180](https://arxiv.org/abs/2309.06180)。
 
-### 第 3 周：度量基础设施
+### 第 9 章：度量基础设施
 
 **重点。** 先造出“看”的工具，再做优化。这一周之后的所有内容，都是因为这一周才看得清楚。
 
@@ -656,7 +656,7 @@ Block table 不只服务调度，它还改了 attention kernel 的访存方式�
 
 本周的中心思想只有一句话：度量先于优化。没有这一周，后面的一切都无法验证——第 4 周换一个调度策略、第 5 周压到 1000 并发、第 6 周调一个参数，变好还是变坏，全凭感觉。感觉在推理优化里是最不可靠的裁判：同一个改动，TTFT 变好、TPOT 变差是常事，只看一个数的人会得出相反的结论。本周造的不是一个看板，是一套裁判规则：量什么、怎么量、哪个数说了算。规则立住了，后面的每一周都有法可依；规则没立住，后面的每一周都是在凭印象调参。
 
-#### 周一 · 读 vLLM 指标设计：Gauge、直方图与“到底在量什么”
+#### 第 1 节 · 读 vLLM 指标设计：Gauge、直方图与“到底在量什么”
 
 **目标**：读完 [vLLM 指标设计文档](https://docs.vllm.ai/en/latest/design/v1/metrics/)之后，能说出 `num_requests_running`、`num_requests_waiting` 和延迟直方图各自在量什么，并能解释为什么平均延迟一个人说了不算。
 
@@ -684,7 +684,7 @@ ITL 与 TPOT 是一对容易混淆的兄弟，设计文档特意把它们的区�
 
 **阅读锚点**：[vLLM 指标设计文档](https://docs.vllm.ai/en/latest/design/v1/metrics/)（本周正文已包含它的核心定义，文档是更深的来源；注意文档里指标名带 `vllm:` 前缀，`vllm:num_requests_running` 与正文里的 `num_requests_running` 是同一个指标）。
 
-#### 周二 · 把监控搭在服务上：Prometheus 抓取与 Grafana
+#### 第 2 节 · 把监控搭在服务上：Prometheus 抓取与 Grafana
 
 **目标**：按 [Prometheus 和 Grafana 监控文档](https://docs.vllm.ai/en/latest/design/metrics/)，让 Prometheus 抓到你自己的 vLLM 服务的 `/metrics`，并在 Grafana 里对它提第一个问题。
 
@@ -706,7 +706,7 @@ PromQL 是这条链上真正要学的东西，Grafana 的点击界面只是它�
 
 **阅读锚点**：[Prometheus 和 Grafana 监控文档](https://docs.vllm.ai/en/latest/design/metrics/)（vLLM 官方的监控搭建说明，本周正文已把它的链条与查询讲透，文档是搭建时的对照来源）。
 
-#### 周三 · 导入看板并验证它真的在动
+#### 第 3 节 · 导入看板并验证它真的在动
 
 **目标**：导入看板 JSON，确认在少量负载下面板真的在动；抓取配置的问题现在就修好，别等第 5 周 1000 并发的时候再修。
 
@@ -730,7 +730,7 @@ PromQL 是这条链上真正要学的东西，Grafana 的点击界面只是它�
 
 **阅读锚点**：本周没有新增的阅读链接——看板 JSON 的导入与验证，用的就是周一的指标定义与周二的监控文档；验证实验里用到的每个指标名，都能在周一的笔记里找到定义。
 
-#### 周四 · 用两篇文章的定义给每个面板补上定义
+#### 第 4 节 · 用两篇文章的定义给每个面板补上定义
 
 **目标**：读 [Databricks 性能工程](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)与 [NVIDIA benchmarking 基础](https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/)，把它们定义的每个指标对应到看板上的一个面板；没有定义的面板，删掉。
 
@@ -754,7 +754,7 @@ PromQL 是这条链上真正要学的东西，Grafana 的点击界面只是它�
 
 **阅读锚点**：[Databricks 性能工程](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)与 [NVIDIA benchmarking 基础](https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/)（两篇文章的指标定义是本周映射表的来源；正文已把映射的方法与删除的标准讲透，文章是定义的出处）。
 
-#### 周五 · 扫请求速率：为什么一个点不够，饱和点为什么要丢
+#### 第 5 节 · 扫请求速率：为什么一个点不够，饱和点为什么要丢
 
 **目标**：读 [How to Benchmark LLM Engines](https://modal.com/llm-almanac/how-to-benchmark)（Modal），讲透为什么要扫请求速率而不是只测一个点、为什么饱和点要丢掉，并定出下周压测的扫点方案。
 
@@ -784,7 +784,7 @@ Modal 的文章还给了一个实用的估算经验，值得在这里验算一�
 
 **缓冲**：可选：[vLLM Office Hours 21：Production Stack Deep Dive](https://www.youtube.com/watch?v=0ZVu0A4wWQg)，看已部署场景下的可观测性。补课用，不加新内容。
 
-### 第 4 周：SGLang、RadixAttention 与批处理内部
+### 第 10 章：SGLang、RadixAttention 与批处理内部
 
 **重点。** 通过对比学设计空间：固定 block 分页 vs 树形前缀复用。
 
@@ -792,7 +792,7 @@ Modal 的文章还给了一个实用的估算经验，值得在这里验算一�
 
 **产出。** 同一个服务的 SGLang 版本，以及第一份与 vLLM 的前缀复用对比。
 
-#### 周一 · RadixAttention：前缀复用做成一棵树
+#### 第 1 节 · RadixAttention：前缀复用做成一棵树
 
 **目标**：讲清 RadixAttention（基数注意力，一种把 KV 缓存组织成基数树的注意力实现）是怎么复用前缀的，以及它赢在哪些负载上。讲完你能用一笔手算说明：同一个共享 system prompt（系统提示词，固定放在每条请求前面的指令）的负载下，树形复用比固定 block（块）分页省多少 KV，又比完全不共享省多少。
 
@@ -819,7 +819,7 @@ RadixAttention 的做法，是把所有请求与生成结果的 KV 缓存保留�
 **阅读锚点**：[RadixAttention and SGLang](https://lmsys.org/blog/2024-01-17-sglang/)。博客里的 5 倍与论文的 6.4 倍是同一结论在两个来源的表述，本节的数字与下方论文精读块一致。
 
 
-#### 周二 · 同一个服务，换一个引擎
+#### 第 2 节 · 同一个服务，换一个引擎
 
 **目标**：把第 2 周跑起来的同一个模型用 SGLang 再部署一遍，并做一次控制变量的对照：唯一变量是引擎。讲完你能说清一次站得住脚的引擎对比要控制哪些变量、测哪两个指标、以及为什么只跑一次请求什么也证明不了。
 
@@ -855,7 +855,7 @@ python -m sglang.launch_server --model-path <第 8 章同一个模型> --host 0.
 
 **阅读锚点**：[SGLang](https://docs.sglang.io)。部署细节以官方文档为准，本节的命令形式与文档一致；参数调优留到第 6 周，本周只求“同一模型、同一 prompt、唯一变量是引擎”。
 
-#### 周三 · 听负责人讲 SGLang：语言与运行时协同设计
+#### 第 3 节 · 听负责人讲 SGLang：语言与运行时协同设计
 
 **目标**：理解 SGLang 的设计为什么是“前端语言与后端运行时协同设计”：它不只把推理引擎做快一点，还给复杂 LLM 程序配了一门语言。讲完你能说清前端那门内嵌于 Python 的 DSL（领域专用语言）解决什么问题，以及 RadixAttention 在后端里处在哪个位置。
 
@@ -881,7 +881,7 @@ RadixAttention 在后端里的位置，也值得用周一的账再说一遍。�
 
 **阅读锚点**：[Efficient LLM Inference with SGLang](https://www.youtube.com/watch?v=Ny4xxErgFgQ)（Lianmin Zheng，SGLang 负责人）。论文（选读）：[SGLang，NeurIPS 2024](https://arxiv.org/abs/2312.07104)，核心内容见下方论文精读块——正文已包含它的核心机制，论文是更深的阅读。
 
-#### 周四 · 连续批处理与 Orca：批不再是固定的请求集合
+#### 第 4 节 · 连续批处理与 Orca：批不再是固定的请求集合
 
 **目标**：讲透迭代级调度（iteration-level scheduling，以一次模型迭代为调度粒度），以及为什么“批”不再是固定的请求集合。讲完你能用一笔手算说明：请求级批处理下，一个短请求会被一个长请求拖慢多少倍。
 
@@ -905,7 +905,7 @@ RadixAttention 在后端里的位置，也值得用周一的账再说一遍。�
 
 **阅读锚点**：[Continuous batching](https://www.anyscale.com/blog/continuous-batching-llm-inference)（Anyscale），然后（选读）[Orca，OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu)，核心内容见下方论文精读块。重点是迭代级调度和重尾长度假设——正是它让那些数字成立。
 
-#### 周五 · Sarathi-Serve：分块 prefill 与无停顿调度
+#### 第 5 节 · Sarathi-Serve：分块 prefill 与无停顿调度
 
 **目标**：讲透分块 prefill（chunked prefill，把一个 prefill 请求切成等大的 chunk）与无停顿调度（stall-free scheduling，加新请求进 batch 时不暂停正在进行的 decode），以及为什么分块 prefill 成了 vLLM 与 SGLang 两个引擎的默认策略。
 
@@ -935,7 +935,7 @@ chunk 大小的取舍，拿 2048 个 token 的 prefill 再算一组对照就清�
 
 **缓冲**（补课用，不加新内容）：[SGLang v0.4 零开销调度器](https://lmsys.org/blog/2024-12-04-sglang-v0-4/)，然后用一个共享 system prompt 的负载在两个引擎上各跑一遍，看 TTFT 的差距。
 
-#### 论文精读（原文均为选读）
+#### 第 6 节 · 论文选读
 
 **SGLang（NeurIPS 2024）**——问题：复杂 LLM 程序（多轮调用、控制流、结构化输入输出）缺少高效的编程与执行系统。核心思想：前端语言与后端运行时协同设计。前端是内嵌于 Python 的 DSL（fork 并行分支、gen 生成、choices 约束、run 执行，可解释执行或编译成数据流图）；后端是 RadixAttention 与压缩有限状态机（结构化输出解码加速）。关键机制：RadixAttention 把 prompt 与生成结果的 KV 缓存保留在一棵基数树里（token 序列为键、KV 张量为值，GPU 上按页存放、每页一个 token），自动做前缀匹配与复用；LRU 淘汰（递归淘汰叶子节点）加缓存感知的调度提升命中率；树结构存在 CPU 上，维护开销小；无缓存命中时也没有明显开销，所以默认开启；与连续批处理、PagedAttention 兼容。关键数字：论文称在 agent、推理、few-shot、JSON 解码、RAG、多轮对话等任务上比当时最先进的推理系统吞吐最高高 6.4 倍；博客在 Llama-7B 与 Mixtral-8x7B 上称比 Guidance 和 vLLM 最高高 5 倍。为什么重要：前缀复用是本周与 vLLM 对比的核心维度；它说明 KV 缓存复用不只是省显存，在前缀很重的负载上直接决定吞吐。原文选读：[arXiv:2312.07104](https://arxiv.org/abs/2312.07104)。
 
@@ -945,7 +945,7 @@ chunk 大小的取舍，拿 2048 个 token 的 prefill 再算一组对照就清�
 
 **Sarathi-Serve（OSDI 2024）**——问题：把 prefill 与 decode 混批能提吞吐，但会互相拖累延迟——吞吐与延迟的权衡。核心思想：在 SARATHI 的分块 prefill 之上做无停顿调度（stall-free scheduling）：加新请求进 batch 时不暂停正在进行的 decode；batch 保持均匀计算量，减少流水线气泡。逻辑链：chunk 切得近似等大 → 每个 iteration 的计算量可预测 → 调度器能在不暂停 decode 的前提下塞入新请求 → 大 batch 提吞吐的同时不恶化尾延迟。关键数字：在尾延迟约束下，Mistral-7B 单 A100 上比 vLLM 服务容量高 2.6 倍；Yi-34B 双 A100 上最高 3.7 倍；Falcon-180B 流水线并行下端到端服务容量最高 5.6 倍。为什么重要：本周五的落点——分块 prefill 成为两个引擎默认策略的原因；也是第 5 周压测时理解“拐点”的背景。原文选读：[arXiv:2403.02310](https://arxiv.org/abs/2403.02310)。
 
-### 第 5 周：压测到 1000 并发
+### 第 11 章：压测到 1000 并发
 
 **重点。** 设计并执行一份可复现的并发扫描，找出吞吐—延迟曲线的拐点，并判断硬件允许时 1000 并发附近的抢占边界。
 
@@ -957,7 +957,7 @@ chunk 大小的取舍，拿 2048 个 token 的 prefill 再算一组对照就清�
 
 为此要做四件事：固定负载、扫出曲线、用两个工具核对关键数字、在曲线拐点附近下结论。1000 并发附近的测量放在最后，因为它最贵，也最容易把抢占误当成服务能力。
 
-#### 周一 · 一份 benchmark 长什么样：从同步基线扫到饱和
+#### 第 1 节 · 一份 benchmark 长什么样：从同步基线扫到饱和
 
 **目标**：讲清“站得住脚的 benchmark”由哪几条构成，并装好本周的第一个压测工具。讲完你能说出只测一个并发级别为什么不算 benchmark，以及一份报告里必须有哪些数字。
 
@@ -983,7 +983,7 @@ TTFT 与 token 间延迟分开报，道理也一样：它们量的是流水线�
 
 **产出**：GuideLLM 装好，读完介绍，能用一句话说出同步基线与饱和各自在曲线上的位置，并写下本周四条报告标准。
 
-#### 周二 · 固定长度：输入输出定下来，KV 缓存才定下来
+#### 第 2 节 · 固定长度：输入输出定下来，KV 缓存才定下来
 
 **目标**：讲清为什么压测要把输入与输出 token 长度固定，以及固定长度是怎样通过 KV 缓存决定整个结果的。讲完你能算出一个请求占多少 KV 缓存，并能说出长度一变、结果为什么就没法比了。
 
@@ -1009,7 +1009,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 **产出**：一次 GuideLLM 扫描（输入输出长度固定），附一张手算表：每 token KV 价码、单请求占用、32 与 128 并发下的总需求。
 
-#### 周三 · 交叉验证：两个工具不一致，是信息，不是问题
+#### 第 3 节 · 交叉验证：两个工具不一致，是信息，不是问题
 
 **目标**：讲清为什么一份站得住脚的 benchmark 需要两个独立工具，以及结果不一致时该怎么查。讲完你能列出两个工具结果对不上的常见原因，并能按顺序逐个排除。
 
@@ -1037,7 +1037,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 **产出**：同一负载下两份压测结果（GuideLLM 与 `vllm bench serve`），附一张差异记录：p50/p95/p99 各差多少、已排除的原因、未核实的原因。
 
-#### 周四 · 拐点：整条曲线上唯一有意思的点
+#### 第 4 节 · 拐点：整条曲线上唯一有意思的点
 
 **目标**：讲清吞吐饱和、延迟恶化的拐点是什么、为什么会出现、为什么它是整条曲线上唯一值得下结论的点。讲完你能从一张扫描表里指认拐点，并能用 Little 定律验算表里数字的自洽性。
 
@@ -1076,7 +1076,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 **产出**：一张 genai-perf 并发扫描表（1、2、4 直到 128），标出拐点位置、拐点处吞吐与 p95，并用 Little 定律验算表中数字的自洽性。
 
-#### 周五 · 冲到 1000 并发以上：只在这节租一台 H100
+#### 第 5 节 · 冲到 1000 并发以上：只在这节租一台 H100
 
 **目标**：讲清 1000 并发以上会发生什么、盯哪两个信号判断有没有抢占，以及为什么这台卡只租这一节。讲完你能算出给定 KV 预算下装得下多少请求，并能说出抢占发生时延迟数字为什么不能用。
 
@@ -1106,7 +1106,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 > **延伸**：把没跑完的档位和缺口写进报告，标清是“未测”还是“测了但不可用”；不要用其它条件的数字补齐。
 
-### 第 6 周：量化取舍
+### 第 12 章：量化取舍
 
 **重点。** 第一个调优旋钮，也是你的压测工具第一次真正派上用场的周。
 
@@ -1114,7 +1114,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 **产出。** FP8 和 INT4/AWQ 变体，在吞吐和质量代理指标上都与 FP16 基线做了对比。
 
-#### 周一 · 量化到底在量什么：从 FP16 到一张离散的格子（60 分钟）
+#### 第 1 节 · 量化到底在量什么：从 FP16 到一张离散的格子
 
 **目标**：说清量化的定义——把连续的 FP16 数值映射到一张离散的格子上——并手算一次对称量化和一次非对称量化，算出舍入误差长什么样。
 
@@ -1142,7 +1142,7 @@ KV 缓存的增长方式也值得再看一眼：它不是一次到位的。Prefi
 
 **产出**：一份手算笔记，写出 7B 与 8B 模型在 FP16、FP8、INT4 下的权重字节数与比例，写出解码批量为 1 时的算术强度，并用上面那组数算出一次对称 INT8 与一次非对称 INT4 的缩放因子和舍入误差。
 
-#### 周二 · AWQ、GPTQ、SmoothQuant：三种对付离群值与误差的办法（60 分钟）
+#### 第 2 节 · AWQ、GPTQ、SmoothQuant：三种对付离群值与误差的办法
 
 **目标**：讲清 AWQ、GPTQ、SmoothQuant 各自保护的是什么、付出的代价是什么，并说清为什么它们都出自同一个实验室也不是巧合。
 
@@ -1172,7 +1172,7 @@ SmoothQuant 对付的是激活的离群值。它的观察是：激活里个别�
 
 **产出**：一张三方法对照表，每行写清方法名、保护的对象、核心手法、付出的代价、适用的阶段（解码为主还是 prefill 也受益），并写一句话说明你手头的服务更可能先用哪一个、为什么。
 
-#### 周三 · 读 Lilian Weng 的综述：把你跑的引擎放进量化方法的地图里（60 分钟）
+#### 第 3 节 · 读 Lilian Weng 的综述：把你跑的引擎放进量化方法的地图里
 
 **目标**：用一篇综述的量化部分搭一张方法地图，再把你实际跑过的每个引擎放进地图里，写清它实现的到底是哪种方法。
 
@@ -1202,7 +1202,7 @@ SmoothQuant 对付的是激活的离群值。它的观察是：激活里个别�
 
 **产出**：一张映射表，列出你跑的每个引擎实际实现的量化方法（引擎、检查点或格式、方法名、权重与激活精度），外加一句话说明 PTQ 与 QAT 的边界，以及 KV 缓存量化的适用条件。
 
-#### 周四 · 跑起来：一个 AWQ 或 GPTQ 检查点，加一个 FP8 变体（60 分钟）
+#### 第 4 节 · 跑起来：一个 AWQ 或 GPTQ 检查点，加一个 FP8 变体
 
 **目标**：在与第 5 周完全相同的扫描下，跑一个 AWQ 或 GPTQ 检查点和一个 FP8 变体，记录吞吐和显存，得到一组能和 FP16 基线直接对比的数。
 
@@ -1234,7 +1234,7 @@ FP8 变体本身还有一个选择要做：权重与激活都量到 FP8，还是
 
 **产出**：一张对比表，至少包含 FP16 基线、一个 AWQ 或 GPTQ 检查点、一个 FP8 变体三行，每行记录吞吐与显存，扫描条件与第 5 周相同，并写一句话说明实测与理论上限的差额可能来自哪里。
 
-#### 周五 · 质量表才是决策依据：FP16、FP8、INT4 的同一张固定评测
+#### 第 5 节 · 质量表才是决策依据：FP16、FP8、INT4 的同一张固定评测
 
 **目标**：在 FP16、FP8、INT4 上跑同一组固定评测集或困惑度代理指标，产出一张质量对比表，并用它回答“量化到底值不值”。
 
@@ -1266,13 +1266,13 @@ FP8 变体本身还有一个选择要做：权重与激活都量到 FP8，还是
 
 **缓冲**：补课用，不加新内容。[QLoRA 讲座](https://www.youtube.com/watch?v=fQirE9N5q_Y)（Tim Dettmers，LLM.int8() 和 QLoRA 的作者），然后 [LLM Compressor office hours](https://www.youtube.com/watch?v=WVenRmF4dPY)。
 
-### 第 7 周：投机解码与 KV 淘汰
+### 第 13 章：投机解码与 KV 淘汰
 
 **重点。** 两个概念上广为人知、实现细节上少有人知的旋钮。
 
 **形式。** 投机解码以视频为主，由写了 vLLM 实现的人来讲；KV 淘汰以文字为主。
 
-#### 周一 · 接受率决定一切：先看方法选择表，再看交叉点（60 分钟）
+#### 第 1 节 · 接受率决定一切：先看方法选择表，再看交叉点
 
 **目标**：读懂 vLLM 投机解码文档里的方法选择表，理解为什么同一套方法在低 QPS（每秒查询数）下最高快 2.8 倍、高 QPS 下反而慢 1.4–1.8 倍，并能用接受率算出任意配置的加速比。
 
@@ -1314,7 +1314,7 @@ E = 1 + α + α² + … + α^γ = (1 − α^(γ+1)) / (1 − α)
 
 **产出**：一页笔记——你选的方法、它在选择表里的两档评价、以及用上面公式算出的、你的草稿在 α=0.5 与 α=0.8 两档下的预期加速比（注明“草稿免费”的假设与计入草稿成本后的数）。
 
-#### 周二 · 四个角色，一条流水线：GPU MODE 第 22 讲前半部分（60 分钟）
+#### 第 2 节 · 四个角色，一条流水线：GPU MODE 第 22 讲前半部分
 
 **目标**：看懂投机解码在 vLLM 里是怎么分工的——提议器、打分器、验证器、草稿模型 worker 各干什么，一轮验证里数据怎么走，并能说出为什么验证可以一次前向算完。
 
@@ -1340,7 +1340,7 @@ E = 1 + α + α² + … + α^γ = (1 − α^(γ+1)) / (1 − α)
 
 **产出**：一张一轮验证的数据流向图（或等价的一段文字）：每轮 γ 次草稿前向、1 次目标前向、E 个产出 token，并用一句话回答“为什么验证可以一次前向算完”。
 
-#### 周三 · 找到你自己的交叉点（60 分钟）
+#### 第 3 节 · 找到你自己的交叉点
 
 **目标**：打开投机解码，在低 QPS 和高 QPS 下分别测 token 间延迟（TPOT，每 token 平均时间），找到你自己的交叉点，并用第 1 周的带宽/计算之分解释它为什么会出现。
 
@@ -1376,7 +1376,7 @@ n-gram 这条线还有一个流量依赖要记下来：它的草稿来自 prompt
 
 **产出**：一张 TPOT–QPS 对照表（基线 vs 投机解码，至少覆盖 QPS=1 与一个高 QPS 点），标出交叉点所在的 QPS 区间，并用一句话写出机制解释（低 QPS 时花的计算是闲置的，高 QPS 时开始抢资源）。
 
-#### 周四 · 注意力汇：淘汰什么不是随便丢（60 分钟）
+#### 第 4 节 · 注意力汇：淘汰什么不是随便丢
 
 **目标**：读 StreamingLLM，讲透注意力汇（attention sink）这个现象——它为什么出现、为什么丢掉它窗口注意力会崩、留住它又为什么能稳住，并用 KV 显存算术量出淘汰省下的空间。
 
@@ -1402,7 +1402,7 @@ n-gram 这条线还有一个流量依赖要记下来：它的草稿来自 prompt
 
 **产出**：一段机制说明（汇是什么、为什么丢不得）加一张 KV 显存对照表（32K 与 128K 上下文下，全量 KV vs 汇 4 + 窗口 2048 的 KV），并写下你的淘汰验收标准：汇先留，再谈窗口。
 
-#### 周五 · 长上下文负载与淘汰配置：测显存和 TTFT（60 分钟）
+#### 第 5 节 · 长上下文负载与淘汰配置：测显存和 TTFT
 
 **目标**：配一个长上下文负载和一套淘汰策略，测显存与 TTFT（首 token 延迟），并能说出为什么淘汰省下的主要是显存与 TPOT、TTFT 大概率不动。
 
@@ -1428,13 +1428,13 @@ TPOT 的预期可以算出来，因为 decode 阶段每步要读的 KV 变了。
 
 **缓冲**：读完 GPU MODE 第 22 讲的后半部分，然后略读 [speculators](https://github.com/vllm-project/speculators) 和[它的 office hours](https://www.youtube.com/watch?v=2ISAr_JVGLs)。补课用，不加新内容。
 
-#### 论文精读（原文均为选读）
+#### 第 6 节 · 论文选读
 
 **StreamingLLM（ICLR 2024）**——问题：流式场景（多轮对话）要缓存历史 token 的 KV，显存吃不消；窗口注意力（只留最近的 KV）看似自然，但文本长度超过缓存时性能会崩。核心思想：注意力汇（attention sink）——模型对开头的几个 token 有很强的注意力分数，哪怕它们语义上不重要；只要保留开头 token 的 KV，窗口注意力就能基本恢复性能。逻辑链：发现 attention sink 现象 → 保留开头 token 加最近窗口的 KV → 无需微调，训练时有限窗口的模型能泛化到无限长度；预训练时加一个占位 token 作为专用的 sink，还能进一步提升。关键数字：Llama-2、MPT、Falcon、Pythia 在 400 万 token 以上仍能稳定高效建模；流式场景下比滑动窗口重算基线最高快 22.2 倍。为什么重要：它是本周 KV 淘汰的理论依据——“淘汰什么”不是随便丢，丢了不该丢的会崩、留住 sink 就能稳住。原文选读：[arXiv:2309.17453](https://arxiv.org/abs/2309.17453)。
 
 **EAGLE（arXiv 2024，投机采样的代表性方法）**——问题：自回归解码慢；投机采样能加速，但草稿模型在 token 层面做自回归预测有瓶颈。核心思想：两个观察——（1）在特征层面（倒数第二层）做自回归比在 token 层面更直接；（2）特征层自回归固有的不确定性限制了性能。EAGLE 用“提前一个时间步的 token 序列”消除这种不确定性，让特征预测变精确，且开销很小。逻辑链：草稿模型预测下一特征 → 目标模型一次验证多个 token → 接受的 token 直接采用；特征预测准了，接受率就高，加速比就上去；同时保持生成文本的分布不变。关键数字：LLaMA2-Chat 70B 上延迟加速 2.7–3.5 倍、吞吐翻倍；在 Vicuna、LLaMA2-Chat 全系、Mixtral 8x7B 上验证过。为什么重要：本周投机解码的代表性方法；理解它就理解了“投机解码的加速比取决于草稿预测的接受率”这个关键。本周正文未单独安排 EAGLE 的阅读节，放在这里作为投机解码方法的补充。原文选读：[arXiv:2401.15077](https://arxiv.org/abs/2401.15077)。
 
-### 第 8 周：解耦式服务与 Kubernetes
+### 第 14 章：解耦式服务与 Kubernetes
 
 **重点。** 第 1 周的 prefill/decode 不对称变成一种架构，再加上运行它的运维层。
 
@@ -1442,7 +1442,7 @@ TPOT 的预期可以算出来，因为 decode 阶段每步要读的 KV 变了。
 
 **产出。** 你的服务跑在 Kubernetes 上，用排队深度而不是 CPU 驱动自动扩缩容。
 
-#### 周一 · 从 Roofline 到解耦：为什么 prefill 与 decode 要拆开
+#### 第 1 节 · 从 Roofline 到解耦：为什么 prefill 与 decode 要拆开
 
 **目标**：用第 1 周的 Roofline（屋顶线模型）把 prefill/decode 的不对称算出来，讲清“互相干扰”在数字上长什么样；读完 DistServe 的报告，能说出 goodput（有效吞吐，在延迟约束内能服务的最大请求速率）为什么要代替裸吞吐做优化目标。
 
@@ -1472,7 +1472,7 @@ DistServe 的回答分三层：拆开消除干扰；按应用的 TTFT（time to 
 
 **产出**：一页推导笔记，写下拐点 295、prefill 算术强度 992、decode 算术强度 0.99、一次完整 prefill 对 decode 的干扰 16–33 ms，以及分块 256 token 时 prefill 跌破拐点的计算，并用一句话回答“为什么 prefill 与 decode 要拆开”。
 
-#### 周二 · Splitwise：decode 为什么不需要 H100
+#### 第 2 节 · Splitwise：decode 为什么不需要 H100
 
 **目标**：讲清“按阶段拆硬件”的逻辑：decode 用便宜卡不是降级，是纠正硬件错配；读完 vLLM 解耦式 prefill 的文档，知道引擎层面怎么把两个阶段拆成两个实例。
 
@@ -1498,7 +1498,7 @@ vLLM 把同样的拆法做进了引擎。解耦式 prefill（disaggregated prefi
 
 **产出**：一段话讲清“为什么 decode 用 A100 不亏”（用 0.64% 与 1.68 倍这两个数），加一张文字版的最小拓扑图：请求 → prefill 实例 → KV 传输 → decode 实例 → token 流，并标出两个实例各自独立扩缩容。
 
-#### 周三 · Mooncake 与 SGLang：KV 传输的三种方式
+#### 第 3 节 · Mooncake 与 SGLang：KV 传输的三种方式
 
 **目标**：比较 DistServe、vLLM、SGLang、Mooncake 各自怎么拆分 prefill 与 decode；把 KV 传输这笔税算清楚，知道它什么时候可以忽略、什么时候会反超。
 
@@ -1527,7 +1527,7 @@ Mooncake 换了一个出发点：KV 不是一次性货物，是集群共享的�
 
 **产出**：一张四方案拆分方式对照表（KV 当什么、传输方式、调度围着什么转），加一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的速算表（用传输占比公式，至少覆盖 NVLink 与 InfiniBand 两档带宽）。
 
-#### 周四 · 用 Helm 把服务装进 Kubernetes（60 分钟）
+#### 第 4 节 · 用 Helm 把服务装进 Kubernetes
 
 **目标**：用 vLLM production-stack 的 Helm chart 把解耦服务部署到 Kubernetes 上；分清在 kind（本地轻量集群）上能验证什么、不能验证什么。
 
@@ -1553,7 +1553,7 @@ kind 的边界要诚实地说清楚。kind（Kubernetes in Docker，把整个集
 
 **产出**：跑在 Kubernetes 上的服务（kind 上是控制面验证、托管集群上是完整验证），加一份清单写清“kind 上验证了什么、没验证什么”，以及单副本的 GPU 配额与 KV 上限速算。
 
-#### 周五 · 用排队深度扩缩容：为什么 CPU 是错的信号（60 分钟）
+#### 第 5 节 · 用排队深度扩缩容：为什么 CPU 是错的信号
 
 **目标**：讲透 `num_requests_waiting`（等待中的请求数）这个指标；算清在 GPU 服务上按 CPU 扩缩容错在哪；配出按排队深度驱动的自动扩缩容。
 
@@ -1583,13 +1583,13 @@ kind 的边界要诚实地说清楚。kind（Kubernetes in Docker，把整个集
 
 **缓冲**（补课用，不加新内容）：把生态图谱补上：[PyTorch 解耦式推理](https://pytorch.org/blog/disaggregated-inference-at-scale-with-pytorch-vllm/)、[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo)、[llm-d](https://llm-d.ai)。
 
-#### 论文精读（原文均为选读）
+#### 第 6 节 · 论文选读
 
 **DistServe（OSDI 2024）**——问题：prefill 与 decode 拼在同一批 GPU 上会互相干扰（prefill 的大计算拖慢 decode 的逐 token 生成），且两者的资源分配与并行策略被绑在一起；应用对两阶段的延迟要求不同（TTFT 与 TPOT），旧系统只能顾一头或过度配资源。核心思想：把 prefill 与 decode 拆到不同 GPU 上，消除干扰；按应用的 TTFT 与 TPOT 要求，分别为两阶段协同优化资源分配与并行策略；按集群带宽放置两阶段，最小化拆分带来的通信。关键指标：goodput——在 TTFT 与 TPOT 约束内能服务的最大请求速率，而不是裸吞吐。关键数字：同等条件下比当时最先进的系统多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍，同时 90% 以上请求满足延迟约束。为什么重要：第 8 周解耦架构的起点；它把“第 1 周的 prefill/decode 不对称”变成了一套可部署的架构，也是后边 Mooncake、vLLM 与 SGLang 解耦功能的对照。原文选读：[OSDI 2024](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)。
 
 Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周论文精读”里（那里的版本更深，含 Conductor 的 TTFT 估算式、256 token 的 KV 块、热块复制与传输引擎细节），这里不再重复。
 
-### 第 8 周（续）：大规模集群 PD 优化
+### 第 15 章：大规模集群 PD 优化
 
 **重点。** 第 8 周把 prefill 和 decode 拆开了，这一续周回答拆开之后在真实集群上要解决的问题：KV 怎么跨节点走、池子怎么共享、两池配比怎么定、节点挂了怎么办。
 
@@ -1597,7 +1597,7 @@ Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周
 
 **产出。** 一张 Mooncake 架构图、一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的表、一张“信号→动作→验证方法”的扩缩容与容错策略表，以及一份注明实际跑了多大集群的解耦 vs 同机部署对比。
 
-#### 本周论文精读（正文；论文原文选读）
+#### 第 1 节 · 论文选读
 
 **Mooncake：以 KVCache 为中心的解耦架构。** 出处：[Mooncake 论文（选读）](https://arxiv.org/abs/2407.00079)，FAST 2025 最佳论文；Kimi 的服务平台。开源实现见 [Mooncake 仓库](https://github.com/kvcache-ai/Mooncake)，文档见 [Mooncake 文档](https://kvcache-ai.github.io/Mooncake/)。
 
@@ -1615,7 +1615,7 @@ Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周
 - **关键结论与数字（论文宣称）。** 吞吐 1.4 倍、成本低 20%；或者相同成本和功耗下吞吐 2.35 倍。
 - **为什么重要。** 最早把“按阶段拆硬件”做成完整集群设计的工作，第 8 周解耦思路的源头之一；它证明了解耦的收益首先来自硬件错配的纠正，不只是调度。
 
-#### 周一 · Conductor 与一张图看懂 Mooncake
+#### 第 2 节 · Conductor 与一张图看懂 Mooncake
 
 **目标**：把 Mooncake 的调度逻辑讲透——Conductor 凭什么说一个请求“放得下”，凭什么说“接不了”，以及请求和 KV 在架构图里各走哪条路。讲完你能照着图说出一次请求从到达、选节点、算增量 prefill 到进入 decode 的完整路径。
 
@@ -1663,7 +1663,7 @@ Transfer Engine（统一批量搬运：多传输协议、拓扑感知路由、
 
 > **阅读锚点**：[Mooncake 论文（选读）](https://arxiv.org/abs/2407.00079)。正文已包含它的核心思想、TTFT 估算式与早期拒绝机制，原文是想核对实验设计与数字口径时的材料。
 
-#### 周二 · 传输账：解耦划不划算，先算这一笔
+#### 第 3 节 · 传输账：解耦划不划算，先算这一笔
 
 **目标**：亲手算出 KV 跨节点搬运的账：一个 token 的 KV 多大、一个 prompt 的 KV 多大、在不同带宽下搬运要多久、这笔时间占 TTFT 多大比例。讲完你能对着任意 prompt 长度和带宽，先报出传输时间，再判断解耦的代价是否可接受。
 
@@ -1705,7 +1705,7 @@ Transfer Engine（统一批量搬运：多传输协议、拓扑感知路由、
 
 > **阅读锚点**：Transfer Engine 的机制见 [Mooncake 仓库](https://github.com/kvcache-ai/Mooncake) 的 mooncake-transfer-engine。正文已包含传输账的完整推导，仓库是想看搬运层具体实现时的材料。
 
-#### 周三 · 跨节点 KV 池：让 KV 从“算完就扔”变成“可复用的资产”
+#### 第 4 节 · 跨节点 KV 池：让 KV 从“算完就扔”变成“可复用的资产”
 
 **目标**：把 Mooncake Store 的三件事讲透——KV 按什么寻址、热块为什么要复制、冷块按什么淘汰——再对照 vLLM 的 connector 分工，画出 GPU→CPU→远端三级层级。讲完你能说出一次前缀命中在每一级上分别意味着什么、分别省了什么。
 
@@ -1737,7 +1737,7 @@ vLLM 的解耦式 prefill 把同样的思路落到了 connector（连接器）�
 
 > **阅读锚点**：[vLLM 解耦式 prefill 文档](https://docs.vllm.ai/en/latest/features/disagg_prefill/)（9 种 connector 的分工），正文已包含 Mooncake Store 的寻址、复制与淘汰机制，文档是核对 connector 选型时的材料。
 
-#### 周四 · 多节点解耦部署：两套 release，一次可复现的对比
+#### 第 5 节 · 多节点解耦部署：两套 release，一次可复现的对比
 
 **目标**：在真实多节点环境里把 prefill 与 decode 拆成两套独立部署跑起来，并用同一负载量出解耦与同机部署的 TTFT 和吞吐差别。讲完你能说出两套部署之间靠什么配置连起来，以及 kind 上能验证什么、不能验证什么。
 
@@ -1761,7 +1761,7 @@ kind（Kubernetes in Docker，用容器模拟的多节点 Kubernetes 集群）�
 
 > **阅读锚点**：[vLLM production-stack](https://github.com/vllm-project/production-stack)（Helm chart 与两套 release 的做法），[vLLM 解耦式 prefill 文档](https://docs.vllm.ai/en/latest/features/disagg_prefill/)（`--kv-transfer-config` 的示例写法）。压测用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py`。
 
-#### 周五 · 池配比、扩缩容与容错：两池的卡数如何确定
+#### 第 6 节 · 池配比、扩缩容与容错：两池的卡数如何确定
 
 **目标**：把两池配比、扩缩容信号与容错机制串成一套可执行的策略：什么时候扩 prefill、什么时候扩 decode、节点挂了多久能发现、KV 丢了怎么办。讲完你能对着一张信号表，说出每个信号对应的动作与验证方法。
 
@@ -1795,7 +1795,7 @@ kind（Kubernetes in Docker，用容器模拟的多节点 Kubernetes 集群）�
 
 **缓冲**：对照 [Mooncake 文档](https://kvcache-ai.github.io/Mooncake/)和 vLLM 解耦文档把周四的配置再走一遍；或在 [llm-d 文档](https://llm-d.ai)里找 Mooncake PD 部署指南（llm-d 2026 年 8 月新增）。本周不加新内容，缓冲只用来补本周没走完的那一步。
 
-### 第 9 周：单位经济学与路由器
+### 第 16 章：单位经济学与路由器
 
 **重点。** 把成本的阅读变成代码。路线图从这里开始不只是关于延迟，也关于利润。
 
@@ -1803,7 +1803,7 @@ kind（Kubernetes in Docker，用容器模拟的多节点 Kubernetes 集群）�
 
 **产出。** 一个按成本、延迟、质量选后端的路由器，加上按请求计 token 预算、把成本打到看板上的中间件。
 
-#### 周一 · 从 GPU 小时到 token：利用率才是成本
+#### 第 1 节 · 从 GPU 小时到 token：利用率才是成本
 
 **目标**：读懂 GPU 小时价到每百万 token 成本的换算，并算出利用率翻倍时成本的变化。讲完你能看着一张云厂商报价单说出它真正贵在哪里。
 
@@ -1833,7 +1833,7 @@ kind（Kubernetes in Docker，用容器模拟的多节点 Kubernetes 集群）�
 
 **产出**：一张自己的换算表：填上你的小时价（示例或真实报价，注明来源与日期）、峰值吞吐（注明测自哪次压测）、利用率 10%、50%、80% 三档下的每百万 token 成本，并写一句话回答“我的成本主要由哪个量决定”。
 
-#### 周二 · 用自己的压测数，算自己的每百万 token 成本
+#### 第 2 节 · 用自己的压测数，算自己的每百万 token 成本
 
 **目标**：把周一的公式落到你自己的卡上，用第 5 周的吞吐重新算一遍每百万 token 的成本。讲完你能说出公式里每个量的来源，以及哪个量的误差对结果影响最大。
 
@@ -1861,7 +1861,7 @@ kind（Kubernetes in Docker，用容器模拟的多节点 Kubernetes 集群）�
 
 **产出**：一张自己的成本表：每小时价格（注明按需价还是 Spot 价与日期）、峰值吞吐（注明测自第 5 周哪次扫描、什么输入输出长度）、利用率（注明统计窗口），以及利用率 0.6 与 0.9 两档下的每百万 token 成本；再写一句敏感度判断：哪个输入量的误差对你的结果影响最大。
 
-#### 周三 · Character.AI 的 33 倍：收益来自哪些优化
+#### 第 3 节 · Character.AI 的 33 倍：收益来自哪些优化
 
 **目标**：读懂 Character.AI 把服务成本降 33 倍的几根杠杆，并把每一根对回第 6、7 周学过的概念。讲完你能说出 33 倍里哪些部分来自量化、哪些来自 KV 瘦身，以及哪部分不能从文章里拆出来。
 
@@ -1891,7 +1891,7 @@ KV 的 int8 量化还有一个长上下文的放大效应。第 7 周讲过，KV
 
 **产出**：一张杠杆对照表：四根杠杆各一行，写清它动的是 KV 公式或显存公式里的哪个量、缩放关系是多少（带手算）、对应第 6 或第 7 周的哪一节，并写一句诚实声明：每根杠杆的实际贡献占比未核实，33 倍是总倍数。
 
-#### 周四 · 路由器：把“多少钱”和“延迟预算”写进代码
+#### 第 4 节 · 路由器：把“多少钱”和“延迟预算”写进代码
 
 **目标**：搭一个瘦的路由服务，按成本、延迟、质量策略在便宜的小模型和贵的大模型之间选后端，并把每次选择与成本记到 Prometheus。讲完你能说出路由器与负载均衡器的区别，以及路由决策需要哪些输入。
 
@@ -1938,7 +1938,7 @@ def route(task: str, prompt_tokens: int, budget_left: float) -> dict:
 
 **产出**：一个能跑的瘦路由服务：三条分流规则写成配置，两条后端（小模型与大模型）可切换，每次决策记三组 Prometheus 指标；再写一句话回答“我的路由策略最多能省多少钱（示例倍数），以及什么情况下不省”。
 
-#### 周五 · Token 预算中间件：按请求封顶，按请求记账
+#### 第 5 节 · Token 预算中间件：按请求封顶，按请求记账
 
 **目标**：写一个 Token 预算中间件，按请求封顶并记账，把每次请求的成本放到看板上，和延迟并排。讲完你能说出预算与限流的区别，以及成本看板上至少要有哪几块面板。
 
@@ -1970,7 +1970,7 @@ def route(task: str, prompt_tokens: int, budget_left: float) -> dict:
 
 **缓冲**：读 [Mastering LLM Techniques: Inference Optimization](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/)（NVIDIA），把第 1–9 周做一次整合：每一周的产出（压测、量化变体、投机解码、KV 淘汰、解耦部署、路由器、预算中间件）在同一张成本与延迟表上对一次账。
 
-### 第 10 周：发表，然后养成阅读习惯
+### 第 17 章：发表，然后养成阅读习惯
 
 **重点。** 把产物发出去，并建立让它保持新鲜的输入渠道。
 
@@ -1978,7 +1978,7 @@ def route(task: str, prompt_tokens: int, budget_left: float) -> dict:
 
 **产出。** 一份发表出来的仓库和写作，版本固定、命令可复现，外加日历上每周一次的研究时间。
 
-#### 周一 · 起草写作：先把数字写全，再写句子
+#### 第 1 节 · 起草写作：先把数字写全，再写句子
 
 **目标**：写出一份别人能复现、能挑错的 benchmark 写作草稿。讲完你能说出草稿里每一项数字的来源，以及缺了哪一项会被怎样拆台。
 
@@ -2002,7 +2002,7 @@ p50、p95、p99 为什么不能只报平均值？拿一组 20 个请求的 TTFT 
 
 **产出**：一份写作草稿，含硬件、模型、精确的输入输出 token 长度、并发扫描、TTFT 与 ITL 的 p50/p95/p99、吞吐六项，逐条对照“发表 benchmark 之前”检查清单，缺口标待补测。
 
-#### 周二 · 三个变体，三张标签：发表
+#### 第 2 节 · 三个变体，三张标签：发表
 
 **目标**：把量化、投机解码、KV 淘汰作为有标签的变体加进写作，附可复现的命令和固定版本，然后发表。讲完你能说出每个变体改了什么、没改什么，以及读者按你的命令能不能跑出同一张表。
 
@@ -2032,7 +2032,7 @@ python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://lo
 
 **产出**：公开发表的仓库与写作：基线一张表，量化、投机解码、KV 淘汰三个有标签的变体各一张表，每张表附可复现的压测命令，`requirements.txt`（`pip freeze` 实测输出）固定版本。
 
-#### 周三 · 建立每周的阅读习惯：先排三篇
+#### 第 3 节 · 建立每周的阅读习惯：先排三篇
 
 **目标**：建立一个能自己转起来的每周阅读习惯：固定的时间、固定的来源、一个永远不空的待读队列。讲完你能在日历上指着一个时间段说“这就是每周读论文的时间”，并拿出一份排好的三篇待读清单。
 
@@ -2060,7 +2060,7 @@ python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://lo
 
 **产出**：日历上每周一次 60 分钟的重复研究时间，四个固定来源（arXiv cs.DC、MLSys、OSDI、NeurIPS 效率方向），一份按漏斗选出的三篇待读清单（cs.DC、MLSys、OSDI/NeurIPS 各一篇）。
 
-#### 周四 · 第一次完整练习：读一篇论文
+#### 第 4 节 · 第一次完整练习：读一篇论文
 
 **目标**：按“只读摘要、方法图和实验，不读全文”的方法，在 30 分钟里读完一篇论文，并留下一段读后记录。讲完你能说出这 30 分钟里先看什么、后看什么、什么可以跳过、读完要留下什么。
 
@@ -2092,7 +2092,7 @@ python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://lo
 
 **产出**：一篇论文的 30 分钟速读（摘要 5 分钟、方法图 10 分钟、实验 10 分钟、一句话总结 5 分钟）加一段四行读后记录；60 分钟里剩余的 30 分钟用于选篇（15 分钟）与写记录（15 分钟）。
 
-#### 周五 · 可选：端侧采样
+#### 第 5 节 · 可选：端侧采样
 
 **目标**：在 ONNX Runtime 与 WebLLM 上各跑一个小模型采样，摸清端侧运行时的边界。讲完你能说出端侧与你前九周建的东西有什么不同，以及为什么 TensorRT-LLM 不属于这一节。
 
@@ -2120,7 +2120,7 @@ ONNX Runtime 与 WebLLM 的分工也值得说清：ONNX Runtime 是跨平台的�
 
 **缓冲**：把 benchmark 拿去征求反馈。能回答的批评，证明你的压测工具是真的；答不上来的，记下来回去补测，再更新写作。
 
-### 第 11 周：TensorRT-LLM——编译式推理引擎（可选）
+### 第 18 章：TensorRT-LLM——编译式推理引擎（可选）
 
 **重点。** 第三台引擎，走编译式路线。学完要能讲清：同样的模型，为什么 TensorRT-LLM 要在加载时多做一步“编译”，这一步换来了什么，又锁死了什么。
 
@@ -2130,7 +2130,7 @@ ONNX Runtime 与 WebLLM 的分工也值得说清：ONNX Runtime 是跨平台的�
 
 **硬件门槛。** 需 NVIDIA GPU：[官方支持列表](https://nvidia.github.io/TensorRT-LLM/supported-hardware.html)里最老的架构是 Ampere A100；FP8 权重需要 Hopper 或更新。没有卡的走纯读路径：第 1、4 天的读内容照常做，第 5 天只写选型分析框架，数字留空待补测。
 
-#### 周一 · 架构：后台循环与三本预算账（60 分钟）
+#### 第 1 节 · 架构：后台循环与三本预算账
 
 **目标**：讲清 PyExecutor 后台循环每步在干什么，Scheduler、KVCacheManager、ModelEngine、Sampler 各自管什么，以及 max_batch_size、max_seq_len、max_num_tokens 三个预算怎么卡住调度和吞吐；最后对照第 2 周的 vLLM 写三句话。
 
@@ -2152,7 +2152,7 @@ PyExecutor（PyTorch 后端的执行器，引擎真正干活的后台循环）�
 
 **产出**：三句话，对照第 2 周的 vLLM 写清分页 KV 的相同点和不同点。相同点：两者都用分页 KV，把 KV 按块分配，块是分配与复用的单位，碎片与复用逻辑同源。不同点之一：vLLM 的分页 KV 是它从第一天起的核心抽象，调度与显存管理围绕它长出来；TensorRT-LLM 的分页 KV 嵌在 PyExecutor 的后台循环里，与算子融合、CUDA 图捕获这些编译期决定共用一套加载流程。不同点之二：vLLM 换配置多半是改启动参数、当场生效，TensorRT-LLM 换执行计划相关的配置要回到加载时重定，调参的反馈环更长。
 
-#### 周二 · 部署同一模型：容器、服务与一条存下来的启动命令（60 分钟）
+#### 第 2 节 · 部署同一模型：容器、服务与一条存下来的启动命令
 
 **目标**：用 NGC 预编译容器把同一模型跑起来，确认 8000 端口的 `/v1/chat/completions` 通了，并把启动命令存下来；模型与硬件和第 2/4 周对齐。
 
@@ -2174,7 +2174,7 @@ curl 那条请求本身也值得说一句。请求体和第 2 周用的一样，
 
 **产出**：一个跑着同一模型的 TensorRT-LLM 服务（8000 端口、`/v1/chat/completions` 已用 curl 验证），以及一条存下来的启动命令，模型与硬件和第 2/4 周对齐。
 
-#### 周三 · 量化与测量：FP16 与 FP8 的两档对比（60 分钟）
+#### 第 3 节 · 量化与测量：FP16 与 FP8 的两档对比
 
 **目标**：拿到 ModelOpt 的 FP8 权重，用 M0 的 `docs/modules/M0-foundations/scripts/bench_openai.py` 在同一 prompt、同一 `--max-tokens`、同一并发下测 FP16 与 FP8 两档，产出一张对比表；对比前先确认两档的数字是实测还是估算。
 
@@ -2196,7 +2196,7 @@ curl 那条请求本身也值得说一句。请求体和第 2 周用的一样，
 
 **产出**：一张 FP16/FP8 对比表（同一 prompt、同一 `--max-tokens`、同一并发，TTFT/ITL/吞吐三列），并在表下标明两档数字是实测还是估算；只有 A100 时，表里跑的是 W4A16 AWQ/GPTQ 档，并注明硬件原因。
 
-#### 周四 · 投机解码、KV 复用与解耦式服务（60 分钟）
+#### 第 4 节 · 投机解码、KV 复用与解耦式服务
 
 **目标**：先读三篇论文总结弄清 draft-verify 机制和接受率为什么决定一切；再动手开 EAGLE-3，低并发下测接受率与延迟变化，验证“只在低 batch 下加速”；用同一 system prompt 的两批请求对比 TTFT，验证跨请求 KV block 复用；最后读解耦式服务文档，写出 `cache_transceiver_config`（`backend: NIXL`）的配置。
 
@@ -2212,7 +2212,7 @@ KV 复用是另一笔账，算的是 prefill。跨请求 KV block 复用（默�
 
 **产出**：EAGLE-3 的接受率与延迟实测记录（低并发，验证“只在低 batch 下加速”）、同一 system prompt 两批请求的 TTFT 对比、一份写好的 `cache_transceiver_config`（`backend: NIXL`）配置，解耦实测注明“需多卡环境，待补测”。
 
-#### 周五 · 三引擎对比报告：同一基准下的选型指南（60 分钟）
+#### 第 5 节 · 三引擎对比报告：同一基准下的选型指南
 
 **目标**：同一硬件、同一模型、同一 prompt 与输出长度、同一并发扫描，把 vLLM、SGLang、TensorRT-LLM 放进一张表（TTFT p50/p95、ITL p50/p95、吞吐），写选型指南与适用边界。
 

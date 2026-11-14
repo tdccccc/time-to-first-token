@@ -1,14 +1,14 @@
 # M0 · 基础与度量
 
-M1 的 10 周路线图默认你已经会“看”系统：知道什么受显存带宽限制、什么受计算限制，知道 TTFT、token 间延迟、吞吐各自在量什么，并有一套能复现的压测方法。本模块就是把这些前置能力补上，**一周，5 节，每节 60 分钟**，模块总时长 5 小时，做完之后再进 M1。
+第二部分假定读者已经会“看”系统：知道什么受显存带宽限制、什么受计算限制，知道 TTFT、token 间延迟、吞吐各自在量什么，并有一套能复现的压测方法。本部分把这五项前置能力补齐，共 5 章。
 
-这 60 分钟用来干什么？概念在正文里讲透，推导过程一步不跳，数字例子全程手算。读完一节，你应当能不看笔记、拿一张纸把这一节的核心算式重新推一遍——推不出来，等于这一节还没读完。M1 里每一次“先定位瓶颈再动手”的判断，用的都是这里的工具：Roofline 告诉你瓶颈在算还是在搬运，四个度量告诉你“快”到底快在哪，profiling 告诉你时间具体花在了哪个算子上。第 4 节的压测脚本和第 5 节的基线报告，则是把这三样东西变成以后每个模块都能复用的测量习惯。
+概念在正文里讲透，推导一步不跳，数字例子全程手算。读完一章，你应当能不看笔记、拿一张纸把这一章的核心算式重新推一遍。第二部分里每一次“先定位瓶颈再动手”的判断，用的都是这里的工具：Roofline 判断瓶颈在算还是在搬运，四个度量说明“快”快在哪，profiling 定位时间花在哪个算子上。第 4 章的压测脚本与第 5 章的基线报告，把这三样东西变成后面每一部分都能复用的测量习惯。
 
-> 硬件门槛：本模块**不需要 GPU**。第 1–3 节是纸面推导与概念，第 4 节写压测脚本（纯 Python），第 5 节跑基线时才需要一台跑着推理服务的机器——可以用 M1 第 2 周搭起来的 vLLM 服务，也可以先用模块自带的 mock 思路验证脚本本身（见第 5 节）。
+> 硬件门槛：本部分不需要 GPU。第 1–3 章是纸面推导与概念，第 4 章写压测脚本（纯 Python），第 5 章跑基线时才需要一台跑着推理服务的机器——可以用第二部分第 8 章搭起来的 vLLM 服务，也可以先用 mock 路径验证脚本本身（见第 5 章）。
 
-**产出**：一份手算的 Roofline 图、一张度量指标对照表、一套 profiling 读数方法，以及 `scripts/bench_openai.py` 这套后续所有模块共用的压测脚本和一份基线报告。
+**本部分产出**：一份手算的 Roofline 图、一张度量指标对照表、一套 profiling 读数方法，以及 `scripts/bench_openai.py` 与一份基线报告。
 
-## 第 1 节 · Roofline：先算，再优化
+## 第 1 章 · Roofline：先算，再优化
 
 **本章目标。** 给定模型和硬件，不运行推理服务也能判断瓶颈更可能在算力、显存带宽还是启动开销。
 
@@ -113,7 +113,7 @@ Roofline 模型就是把这类判断变成算术。它用两个量描述一个 k
 
 **延伸**：[Stanford CS336 第 5 讲](https://www.youtube.com/watch?v=6OBtO9niT00)（GPU 与显存层级）、文字版 [Transformer Inference Arithmetic](https://kipp.ly/transformer-inference-arithmetic/)、[Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html)（Horace He）。
 
-## 第 2 节 · 推理度量：四个数，一个分布
+## 第 2 章 · 推理度量：四个数，一个分布
 
 **目标**：把“快”拆成四个不会互相掩盖的数，并知道分布比均值重要。
 
@@ -152,7 +152,7 @@ Token 间延迟（ITL，inter-token latency，也叫 TPOT，time per output toke
 
 **延伸**：[NVIDIA：LLM 推理 benchmark 基础概念](https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/)、[Modal：How to Benchmark LLM Engines](https://modal.com/llm-almanac/how-to-benchmark)。
 
-## 第 3 节 · Profiling：看时间花在哪
+## 第 3 章 · Profiling：看时间花在哪
 
 **目标**：拿到一个推理请求的 timeline，能指出来瓶颈在哪个 kernel、哪次访存、哪段等待上。
 
@@ -185,7 +185,7 @@ Token 间延迟（ITL，inter-token latency，也叫 TPOT，time per output toke
 **产出**：一份一页纸的 profiling 笔记——工具、命令、你看到的最耗时算子、以及你判断的瓶颈类型。
 
 **延伸**：PyTorch 官方 Profiler 文档、[GPU MODE 讲座](https://github.com/gpu-mode/lectures)中 profiling 相关章节。
-## 第 4 节 · 写压测脚本：`bench_openai.py`
+## 第 4 章 · 写压测脚本：`bench_openai.py`
 
 **目标**：有一套自己的、可复现的压测工具，后续所有模块都用它，数字之间才能比较。
 
@@ -207,7 +207,7 @@ mock 验证能证明什么、不能证明什么，要分得清清楚楚。能证
 
 **产出**：在你自己的机器上跑通 `python3 scripts/bench_openai.py --help`，并理解输出表格里每一列的含义。
 
-## 第 5 节 · 跑出第一份基线
+## 第 5 章 · 跑出第一份基线
 
 **目标**：给后面的所有优化一个"优化前"的数字。没有基线，任何加速比都是空话。
 

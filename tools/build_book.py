@@ -1072,11 +1072,11 @@ def load_source(module: str) -> Source:
 def source_chapter_blocks(src: Source) -> list[list[str]]:
     blocks: list[list[str]] = []
     if src.module == "m0":
-        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*节", h.title)]
+        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)]
     elif src.module == "m1":
-        picks = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*周", h.title)]
+        picks = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
     elif src.module in ("m2", "m3"):
-        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*周", h.title)]
+        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
     else:
         chunks = [src.lines[src.h1.line:]]
         return chunks
@@ -1091,12 +1091,12 @@ def source_pre(src: Source) -> list[str]:
     if src.module == "m4":
         return []
     if src.module == "m0":
-        first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*节", h.title))
+        first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title))
         return src.lines[src.h1.line + 1:first.line]
     if src.module == "m1":
-        first = next(h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*周", h.title))
+        first = next(h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
         return src.lines[src.h1.line + 1:first.line]
-    first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*周", h.title))
+    first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
     return src.lines[src.h1.line + 1:first.line]
 
 
@@ -1104,11 +1104,11 @@ def source_post(src: Source) -> list[str]:
     if src.module == "m4":
         return []
     if src.module == "m0":
-        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*节", h.title)][-1]
+        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)][-1]
     elif src.module == "m1":
-        last = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*周", h.title)][-1]
+        last = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
     else:
-        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*周", h.title)][-1]
+        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
     end = section_end(src.hs, src.hs.index(last), len(src.lines))
     return src.lines[end:]
 
