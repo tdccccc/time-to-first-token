@@ -487,10 +487,10 @@ __global__ void add_kernel(const float* x, const float* y, float* out, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) out[i] = x[i] + y[i];
 }
-// 启动：add_kernel<<<(n + 255) / 256, 256>>>(x, y, out, n);
+// 启动：add_kernel<<<(n + 127) / 128, 128>>>(x, y, out, n);
 ```
 
-两版逐项对上：Triton 的 `mask` 就是这里的 `if (i < n)`，`tl.load` 与 `tl.store` 的谓词来自同一个 mask；`grid` 是 `<<<...>>>` 的第一个参数，`num_warps` 换成了 `blockDim = 256`。逐元素 kernel 两边差不多长——Triton 省下的不是行数，是“哪个线程算哪个元素”这个决定：CUDA 版由你写出 `i`，Triton 版由编译器把 BLOCK 个元素分给 32 × num_warps 个 lane。
+两版逐项对上：Triton 的 `mask` 就是这里的 `if (i < n)`，`tl.load` 与 `tl.store` 的谓词来自同一个 mask；`grid` 是 `<<<...>>>` 的第一个参数，`num_warps` 换成了 `blockDim = 128`（默认 4 个 warp）。逐元素 kernel 两边差不多长——Triton 省下的不是行数，是“哪个线程算哪个元素”这个决定：CUDA 版由你写出 `i`，Triton 版由编译器把 BLOCK 个元素分给 32 × num_warps 个 lane。
 
 分块矩阵乘就差得多了。Triton 的 K 循环是 `for k in range(0, tl.cdiv(K, BLOCK_K))`，每轮两次 `tl.load`、一次 `acc += tl.dot(a, b)`；同样的循环用 CUDA 写，要自己声明 shared memory、自己把 tile 搬进去、在每轮首尾插 `__syncthreads()`、自己处理 K 不是 BLOCK_K 整数倍的尾巴。Triton 把 shared memory 暂存与 MMA 指令的排布交给编译器，这是它在矩阵乘上省下一个量级代码量的地方。
 
