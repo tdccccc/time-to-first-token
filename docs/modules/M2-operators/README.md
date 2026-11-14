@@ -1546,49 +1546,52 @@ using CutlassGemm = cutlass::gemm::device::Gemm<
 
 ## 第 24 章 · 收口：把自写 kernel 接入推理引擎
 
-> 注意：vLLM 的 attention 走 Attention 后端，不走 CustomOp（CustomOp 的可替换面是激活、归一化这类算子），所以接入引擎的载体是 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程）；fused attention 仍在第 3 周做 standalone 验证。
+> 边界：vLLM 的 attention 走 attention 后端，不走 CustomOp——后端选择、KV 布局、显存分配都在那一层，一个 forward 函数装不下。CustomOp 的可替换面是激活、归一化这类单 forward 的逐元素算子，所以本章接入引擎的载体是 Triton 版 SiluAndMul；fused attention 留在第 21 章做 standalone 验证。
 
-> 硬件：本周需要 GPU（租卡）。无卡时先完成第 1–3 节的机制学习与代码编写，端到端验证标注“待有卡后补测”。
->
-> 本周是收口：前面五周的东西（写 kernel、验证、测速）要在这周接进一个真实引擎，跑出端到端的数据。
+一个在 standalone 里比 PyTorch 快 2 倍的 kernel，接进 vLLM 之后端到端数字没变，服务也不报错，这是这条路上最常见的结果。难解释的不是“没变快”，而是不知道它到底跑没跑。中间隔着三道门：引擎启动时插件有没有被 import，模型代码拿到的类有没有被换成你的类，这一层在当前编译配置下走的是 CUDA 实现还是 PyTorch 后备。三道门任何一道没开，模型照常出 token，日志照常干净，只有 profiler 的 kernel 名单能证明你写的那段代码真的在 GPU 上执行过。
 
-本周主线只有一句话：让第 2 节写出来的 kernel 在真实引擎里跑起来，再用同一套数字回答它到底快了多少。
+**本章目标。** 把 Triton 版 SiluAndMul 包成 vLLM 的 CustomOp 插件，用同一模型、同一负载测出接入前后的 TTFT、ITL 与吞吐，并用 profiler 证明 Triton kernel 真的被调用；端到端没变快时，说清是算子份额太小、引擎基线本来就是融合实现，还是替换根本没生效。
+
 ### 第 1 节 · vLLM 的 CustomOp 机制：注册、分发、启用三件事，及它的边界
 
-**目标**：能讲清插件算子的注册与调用路径，并讲清它的边界（attention 不走这条路）。
+注册、分发、启用是三件不同的事，发生在三个不同的时间点：注册在 import 时，启用在引擎启动读配置时，分发在每次前向时——准确说，分发方法在层对象构造时就被定下来，前向只是调用它。把三件混成一件，后面每一节的坑都在这里埋下。本节的事实都以写书时的 vLLM 主线为准（`vllm/model_executor/custom_op.py` 与 [CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)），**API 名称与签名以当前版本为准**：这套接口改过几轮，抄博客之前先打开自己装的那份源码对一遍。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+**注册**说的是名字怎么进表。`vllm/model_executor/custom_op.py` 里有两个文件级字典：`op_registry` 装树内算子（由 `CustomOp.register("名字")` 写入），`op_registry_oot` 装树外替换（由 `register_oot` 写入）。写插件用的是 `@SiluAndMul.register_oot`，不带参数时注册名就是被替换类的类名 `SiluAndMul`。这个名字不是随手取的：`CustomOp.__new__` 拿 `cls.__name__` 去 `op_registry_oot` 里查，命中才把实例换成你的类。所以注册名必须等于要替换的类的类名，写成 `silu_and_mul` 就查不到，替换静默失效。同一个名字在 `op_registry_oot` 里注册两次会断言失败（`Duplicate op name`）——这条防线在自测里很有用，见第 3 节。
 
-读 [vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)，再对照源码 `vllm/model_executor/custom_op.py`，搞清三件事。先把数摆出来：三件事、一个边界、一个只加载一次的 guard。注册、分发、启用是三件不同的事，发生在三个不同的时间点：注册在 import 时，分发在每次前向时，启用在启动配置里。把三件混成一件，是这一节最常见的糊涂——后面每一节的坑，都是在这里埋下的。
+**启用**说的是开关怎么打开。编译配置里用 `--compilation_config.custom_ops '["+名字"]'` 打开，`+` 是“在默认集合之外再加这一个”，不是替换整个集合；`-名字` 是关掉。名字取的是层实例的 `name` 属性，不是你想当然的那个字符串：树内的 `SiluAndMul` 注册名是小写 `silu_and_mul`，被 `register_oot` 换掉之后，注册装饰器会把子类的 `name` 改写成注册名（类名），两者的键不一样。**以当前版本为准**：在引擎进程里打印 `SiluAndMul().name`，拿打印出来的值去配 `+名字`，不要凭记忆填。
 
-注册说的是名字怎么进表。`CustomOp` 的子类通过 `register_oot` 做 out-of-tree 注册（out-of-tree，树外注册：实现不放在 vLLM 自己的代码树里，放在你的插件包里），按类名替换；无参数时注册名就是类名，如 `"SiluAndMul"`。为什么按类名？因为模型代码里调用的就是这个类名，分发时按名字查表，名字就是查表的键。`CustomOp.register` 会断言不重名——同一个名字不能注册两次。这条断言不是刁难：同一个名字对应两个实现，分发时该用哪一个就含糊了，所以注册表一个名字只允许占一个位置。打个比方：注册表像点名册，一个名字只能对应一个人，重名就没法点名。第 3 节要避的坑就是这个：不要在同一个进程里把同一个名字注册两次。
+默认值取决于编译后端：`CustomOp.default_on()` 读 `compilation_config.custom_ops` 里的 `all` / `none` 基底，用 inductor 时默认是 `none`（关闭），此时 custom op 得显式 `+` 才进图。为什么 inductor 默认要关？inductor 要把计算图抓下来融合重写，custom op 对它是黑盒子，看不懂里面是什么。关掉不等于不跑：`dispatch_forward` 在“未启用”分支返回的是 `forward_native`，语义正确、数值一样，只是慢一点——这正是静默失败的根。
 
-分发说的是运行时怎么找到你的实现。模型代码里调用的是 `SiluAndMul()` 这个类，运行时分发到注册的实现上；`forward_cuda` 走 GPU 实现（你的 Triton kernel），`forward_native` 是 PyTorch 后备实现（CPU / 非 CUDA 路径走它）。后备为什么存在？同一份模型代码要在有卡和没卡的机器上都跑得起来，后备保证语义正确，代价是速度慢一点。这一句值得停一下：后备在语义上是对的，数值一样，只是慢一点。不报错、不警告——这正是第 3 节静默失败的根。替换没生效，模型照样跑，只是悄悄用回默认实现，分发检查或 profiler 之外没有任何东西会告诉你。
+**分发**说的是运行时怎么找到你的实现。`CustomOp.__new__` 负责替换，`__init__` 里的 `dispatch_forward` 负责选方法，选完存进 `_forward_method`，之后每次 `forward()` 都调它。选择顺序按平台：ROCM 走 `forward_hip`，CPU 走 `forward_cpu`，TPU 走 `forward_tpu`，XPU 走 `forward_xpu`，**自报 OOT 的平台**走 `forward_oot`，其余（含 NVIDIA CUDA）走 `forward_cuda`。`forward_oot` 这个名字容易误解：它只在平台把自己标记为 out-of-tree 时被选中，在 CUDA 上写了也不会被调用——那一层留给第 27 章的 vllm-ascend。在 CUDA 上替换一个算子，重写的方法是 `forward_cuda`。
 
-启用说的是开关怎么打开。编译配置里用 `--compilation_config.custom_ops '["+SiluAndMul"]'` 打开，`+` 表示“在默认集合之外再加这一个”，不是把整个集合换掉。注意 inductor 后端默认会禁用 custom ops，启用时要确认这条配置真的生效了。为什么 inductor 要禁？inductor 要把计算图抓下来融合重写，custom op 对它来说是个黑盒子，图优化器看不懂里面是什么，所以默认不让它进图。确认配置生效的办法，不在这一节空想：第 3 节的进程内检查就是确认的办法，注册上了、分发到了，才算启用真的生效了。
+| 环节 | 发生时间 | 失效时的表现 | 怎么查 |
+|---|---|---|---|
+| 注册 | 插件包被 import 时 | 表里没有你的类，什么都不发生 | `op_registry_oot["SiluAndMul"]` 是不是你的类 |
+| 启用 | 引擎启动、层对象构造时 | 走 `forward_native`，数值对、速度慢 | 打印 `层实例.name` 与 `_forward_method.__name__` |
+| 分发 | 每次前向 | 方法选错（如只写了 `forward_oot`），抛错或走父类 | profiler 的 kernel 名单里有没有你的 kernel |
 
-分发里还有一层意思值得注意：模型代码根本不知道 TritonSiluAndMul 存在。它只认 SiluAndMul 这个名字，查表才找到你的实现。注册表就是模型代码和你的 kernel 之间的解耦层：同一份模型代码，装了插件走 Triton 实现，没装插件走默认实现，模型代码一个字都不用改。配置里的名字也是同一张表里的键：`'["+SiluAndMul"]'` 里的 SiluAndMul 必须和注册名对上号，写错名字就对不上，分发还是走默认实现——名字对不上和插件没装，在输出上同样安静。
+**边界**划在“单 forward、无状态”上。激活算子输入进来、输出出去，没有跨层状态，没有 KV 布局，没有后端要选；attention 这三样都有，所以它有自己的后端机制和 KV 集成，CustomOp 接不上。选 SiluAndMul 做载体正是因为它在边界内：形状规整，语义只有一行，容易验证到底对不对。
 
-再讲清边界：attention 不走 CustomOp。vLLM 的 attention 走 Attention 后端（backend 选择发生在 attention 层，不是 CustomOp 分发）。CustomOp 的可替换面是激活、归一化这类“逐元素 / 小规约”算子。为什么边界划在这里？attention 有自己的后端选择机制（flash-attn、SDPA 等）和 KV cache 的集成：KV 的布局、显存分配、跨步长的复用，这些事一个 forward 函数装不下；激活算子就是一个 forward 函数，输入进来、输出出去，没有跨层的状态，没有后端要选，没别的。打个比方：CustomOp 是单个插座，只接得上单个电器；attention 是一间配电房，有自己的开关柜和线路，接不到单个插座上。选 SiluAndMul 做载体正是因为它在边界内：它是 MLP 里的激活算子，形状规整、易于验证——第 2 节会拿它当载体。
+**插件怎么被加载**：vLLM 启动时按 `vllm.general_plugins` 这个 entry point 发现插件包，`load_general_plugins` 在进程内只加载一次（有防重复加载的 guard）。关键时序是：插件包被 import 时装饰器执行，替换进表；没被 import 就什么都不会发生。一个“写好了但没被加载”的插件，和一个不存在的插件，从模型输出上看没有任何区别。
 
-再读插件加载机制：vLLM 启动时通过 `vllm.general_plugins` entry point 加载插件包（源码见 `vllm/plugins/__init__.py`，`load_general_plugins` 在进程内只加载一次，有防重复加载的 guard）。关键时序是：插件模块被 import 时，`register_oot` 装饰器执行，替换即完成——注册发生在 import 时。反过来说：插件没被 import，什么替换都不会发生，模型照样跑，只是跑的是默认实现——这是第 3 节要防的静默失败。设问：如果注册发生在 import 时，那么一个插件“写好了但没被加载”和“根本不存在”，从模型输出上看有什么区别？没有区别。输出一样、速度一样、日志里一样安静。这就是为什么同一个问题（“我的 kernel 真的跑了吗？”）要问三遍：第 1 节问 import 了没有，第 3 节问分发到了没有，第 4 节问 profiler 里有没有——每一遍都有不同的东西可能掉链子。
+和 monkey patch 比，`register_oot` 走的是引擎自己的表：不改 `vllm.model_executor.layers.activation` 文件里的类属性，升级 vLLM 后不会因为函数签名变了而错得莫名其妙；它还保留了“按开关退回 `forward_native`”这条后备路径。monkey patch 更直接，对所有实例生效，也能改表里没有的算子，代价是绕过了引擎的启用与平台判断，出问题时没有任何一层会替你把关。和 `CustomOp.register` 比，区别是适用场景：`register` 是在树内**新增**一个算子名字，模型代码得调用它才有用；`register_oot` 是**替换**一个已有类名，调用点已经在模型代码里了，你只是换了实现。
 
-两个常见的误解，单拎出来。“注册了就等于启用了”：错。注册是把名字写进表，启用是启动时把开关打开，缺一个都不行。“CustomOp 能包一切算子”：错。边界划在激活、归一化这类单 forward 算子，attention 在界外。结论：这一节的目标不是写代码，是拿到一张地图——注册、分发、启用三件事各在何时发生，边界划在哪里，静默失败长什么样。后三节就是沿着这张地图走一遍：写 kernel、包成插件、端到端验证，每一步都有对应的检查。
+两个容易混的判断：“注册了就等于启用了”——错，注册进表、启动时打开开关，缺一个都走后备；“CustomOp 能包一切算子”——错，边界就是单 forward、无状态。本节拿到的是一张地图：三件事各在何时发生，边界在哪，静默失败长什么样。后三节沿着地图走一遍：写 kernel、包成插件、端到端验证。
 
-**产出**：能讲清插件算子的注册与调用路径 + 边界（attention 为什么不走这条路），并说出注册、分发、启用三个环节各自发生的时间点和各自失效时的表现。
 ### 第 2 节 · 动手：写 Triton 版 SiluAndMul，standalone 正确性 + 微基准
 
-**目标**：写出可独立验证的 Triton 版 SiluAndMul，并算清融合到底省了多少访存。
+先钉死语义。vLLM 树内的 `SiluAndMul`（`vllm/model_executor/layers/activation.py`）在文档字符串里写得很清楚：`x -> silu(x[:d]) * x[d:]`，其中 `d = x.shape[-1] // 2`。落到我要写的 kernel 上，约束有四条：
 
-**怎么做**（60 分钟，需 GPU 做正确性验证；无卡先写代码）：
+- **形状**：输入 `(num_tokens, 2d)`，最后一维必须是偶数；输出 `(num_tokens, d)`。vLLM 的 CUDA 实现按 2D 传参，`forward_native` 支持任意前置维；按 2D 写 kernel、进来先 `reshape(-1, 2d)` 最省事。
+- **语义**：前一半逐元素过 SiLU 再乘后一半；顺序不能反，`mul_and_silu` 是另一个算子（`x[:d] * silu(x[d:])`），两者不等价。
+- **dtype**：vLLM 实际跑的是 fp16 / bf16。SiLU 在 fp32 里算完再 cast 回输入精度，再和另一半相乘——cast 的位置是 load-bearing 的。
+- **连续性**：kernel 按行跨步寻址，要求最后一维连续、行跨步等于 `2d`；不满足就先 `contiguous()`，或者在 kernel 里把行跨步当参数传进去。vLLM 树内的 Triton 激活 kernel（`_swiglustep_and_mul_kernel`）就是把行跨步当参数传的。
 
-先看 vLLM 自带的对照：`vllm/model_executor/layers/activation.py` 里的 `SiluAndMul` 类——`forward_native` 是 `F.silu(x[..., :d]) * x[..., d:]`，文件里还含有一个 Triton 版实现可对照写法。你的 kernel 要与这个语义完全一致：输入 `[M, 2D]`，前一半过 SiLU，再乘以后一半，得 `[M, D]`。SiLU（Sigmoid Linear Unit，`silu(x) = x · sigmoid(x)`）先对前一半逐元素作用，再和后一半逐元素相乘。为什么先读对照再写？对照就是正确性标准：这一节末尾的检查，就是拿你的 kernel 和它逐元素比，比的就是这一个语义。
+融合省的是遍数，不是计算量。拿 fp16（每元素 2 字节）算一遍：融合版读输入 `[M, 2D]` 共 `4MD` 字节，写输出 `[M, D]` 共 `2MD` 字节，合计 `6MD`；eager 版是两个 kernel，silu 读 `2MD` 写 `2MD`，乘法读中间结果 `2MD`、读后一半 `2MD`、写 `2MD`，合计 `10MD`。省 `4MD`，占 eager 版访存的 40%。代入 `M = 128`、`D = 128`：输入 64 KiB、输出 32 KiB，融合版 96 KiB，eager 版 160 KiB，省 64 KiB。exp 和 sigmoid 的 FLOPs 一个没少，省掉的是中间结果写回 HBM 再读回来的一次往返，和第 21 章 fused attention 省掉 S、P 落 HBM 是同一笔账。
 
-先把融合的账算清楚。融合省的是遍数，不是计算量。拿 fp16（每个元素 2 字节）算一笔总账：融合版读输入 `[M, 2D]` 共 `4MD` 字节，写输出 `[M, D]` 共 `2MD` 字节，合计 `6MD` 字节。eager 版是两个 kernel：silu 读前一半 `2MD` 字节、写中间结果 `2MD` 字节；乘法读中间结果 `2MD` 字节、再读后一半 `2MD` 字节、写输出 `2MD` 字节，合计 `10MD` 字节。省掉的是 `4MD` 字节，占 eager 版访存的 40%。拿正文的算例走一遍：`M = 128`、`D = 128`，输入 `128 × 256` 个 fp16 元素共 64 KiB，输出 `128 × 128` 共 32 KiB，融合版一共 96 KiB；eager 版 160 KiB；省 64 KiB，正好 40%。exp 和 sigmoid 的 FLOPs 一点没少，省掉的是中间结果写回 HBM 再读回来的一次往返——和第 3 周 fused attention 省掉 S、P 落 HBM 是同一笔账，换了个算子而已。
+这笔 40% 只对 eager 成立。vLLM 引擎里跑的 `SiluAndMul.forward_cuda` 调的是 `torch.ops._C.silu_and_mul`——一个已经在 C++ 里融合好的 kernel，它的访存本来就是 `6MD`。所以引擎基线和新 kernel 之间能争的不是遍数，是常数项：向量化宽度、grid 形状、启动开销、边界处理。这个区别决定了第 4 节的预期，也决定了微基准必须测三个基线，而不是两个。
 
-再看这个算子快不快得起来。每个输出元素，融合版读 4 字节（`x1`、`x2` 各一个 fp16）、写 2 字节，一共 6 字节；每个输出元素只做几次 FLOPs。按正文给出的约 1 FLOP/字节，时间由带宽定，不由算力定。结论先摆出来：别指望数量级提速，融合的全部收益就是上面那 40% 的访存。先测再判断——这一节末尾的微基准就是量这个的。
-
-写 kernel（二维 grid：行 × 列块；SiLU 在 fp32 里算，再 cast 回输入精度——cast 回去再乘是 load-bearing 的，直接拿 fp32 的 SiLU 结果乘 fp16 的另一半会丢精度；这个写法与 TritonAscendBench 的 `L2_04_silu_and_mul` 参考 kernel 一致，M3 第 5 周移植它时会再遇到）：
+kernel 如下（示意，按当前 Triton 版本调整）：
 
 ```python
 import torch
@@ -1596,58 +1599,70 @@ import triton
 import triton.language as tl
 
 @triton.jit
-def _silu_and_mul_kernel(x_ptr, y_ptr, D,
+def _silu_and_mul_kernel(x_ptr, y_ptr, x_row_stride, y_row_stride, d,
                          BLOCK: tl.constexpr):
     row = tl.program_id(0)
-    col = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
-    mask = col < D
-    x1 = tl.load(x_ptr + row * 2 * D + col, mask=mask, other=0.0)
-    x2 = tl.load(x_ptr + row * 2 * D + D + col, mask=mask, other=0.0)
+    cols = tl.program_id(1) * BLOCK + tl.arange(0, BLOCK)
+    mask = cols < d
+    x1 = tl.load(x_ptr + row * x_row_stride + cols, mask=mask, other=0.0)
+    x2 = tl.load(x_ptr + row * x_row_stride + d + cols, mask=mask, other=0.0)
     x1_f32 = x1.to(tl.float32)
-    s = (x1_f32 * tl.sigmoid(x1_f32)).to(x1.dtype)
-    y = s * x2
-    tl.store(y_ptr + row * D + col, y, mask=mask)
+    s = (x1_f32 * tl.sigmoid(x1_f32)).to(x1.dtype)   # 先算 fp32，再 cast 回输入精度
+    tl.store(y_ptr + row * y_row_stride + cols, s * x2, mask=mask)
 
-def silu_and_mul_triton(x, BLOCK=1024):
-    # x: [M, 2*D] fp16；y: [M, D] fp16
-    M, D2 = x.shape
-    D = D2 // 2
-    y = torch.empty((M, D), dtype=x.dtype, device=x.device)
-    grid = (M, triton.cdiv(D, BLOCK))
-    _silu_and_mul_kernel[grid](x, y, D, BLOCK=BLOCK)
+def silu_and_mul_triton(x: torch.Tensor, BLOCK: int = 1024) -> torch.Tensor:
+    if x.dim() != 2:
+        x = x.reshape(-1, x.shape[-1])
+    assert x.shape[-1] % 2 == 0 and x.is_contiguous()
+    m, n = x.shape
+    d = n // 2
+    y = torch.empty((m, d), dtype=x.dtype, device=x.device)
+    grid = (m, triton.cdiv(d, BLOCK))
+    _silu_and_mul_kernel[grid](x, y, x.stride(0), y.stride(0), d, BLOCK=BLOCK)
     return y
 ```
 
-注意 `.to(x1.dtype)` 的位置：SiLU 在 fp32 里算完，先 cast 回输入精度再乘。这个顺序是 load-bearing 的——改了顺序，max abs err 就会变，下一段的正确性检查就是量这个的。为什么这个顺序关键？sigmoid 里有 exp，第 2 周算过，fp32 下 exp 的输入超过约 89 就会溢出成 inf；先在 fp32 里把 SiLU 算完，中间结果的精度余量大得多，再 cast 回去，误差只来自最后一次舍入。如果拿 fp32 的 SiLU 结果直接乘 fp16 的另一半，乘法在混合精度下做，误差的来源就变了，max abs err 就会变。这个写法与 TritonAscendBench 的 `L2_04_silu_and_mul` 参考 kernel 一致，M3 第 5 周移植它时会再遇到。grid 是二维的（行 × 列块），每个程序负责一行里的一块列，这和第 2 周的向量加法是一维 grid 的推广：程序的组织方式跟着数据的形状走。
+逐行看地址算术，这是最容易写错的地方。`x1` 在 `row * 2d + col`，`x2` 在 `row * 2d + d + col`，输出在 `row * d + col`；行跨度是整行 `2d`，写成 `row * d` 读到的就是错行的数。`mask = col < d` 配 `other=0.0`：被 mask 的位置读进来是 0，`silu(0) = 0`，store 时又被同一个 mask 拦住，既不越界读也不越界写。grid 是二维的（行 × 列块），每个程序负责一行里的一块列。
 
-逐行看地址算术，这是最容易写错的地方。行内偏移：`x1` 在 `row * 2 * D + col`，`x2` 在 `row * 2 * D + D + col`，输出在 `row * D + col`。行跨度是整行 `2D`，不是 `D`——写成 `row * D`，读到的就是错行的数。`mask = col < D` 配 `other=0.0`：mask 掉的位置读进来是 0，`silu(0) = 0`，store 时又被同一个 mask 拦住，写不进去。mask 在这里既防越界读，也防越界写。再看 grid 的数：正文算例 `M = 128`、`D = 128`、`BLOCK = 1024`，列块数 `cdiv(128, 1024) = 1`，grid 是 `(128, 1)`，一共 128 个程序。每个程序手里有 1024 条 lane，真正干活的只有前 128 条，剩下的 896 条被 mask 掉，占 87.5%。这说明什么？这个算例是正确性算例，不是性能算例：`BLOCK = 1024` 配 `D = 128`，大部分 lane 在空转。换一组数算算（纯算例，不对应某个模型）：`D = 2048` 时列块数是 2，`D = 4096` 时是 4。BLOCK 该取多大，要跟着 D 走，答案在微基准里扫出来，不在纸上定。
+拿正文的算例看 grid 的数：`M = 128`、`D = 128`、`BLOCK = 1024`，列块数 `cdiv(128, 1024) = 1`，grid 是 `(128, 1)`，128 个程序，每个程序 1024 条 lane 里只有前 128 条干活，其余 87.5% 被 mask 掉。这是正确性算例，不是性能算例。真实模型的 `d` 是 11008、13824 这种量级，`BLOCK` 该取多少要跟着 `d` 扫出来，答案在微基准里，不在纸上。
 
-正确性检查（与 `F.silu` 参考对比）与微基准（`triton.testing.do_bench`，对比 PyTorch 版）：
+正确性检查拿树内实现当标准，别拿 `F.silu` 手拼一个参考——标准要和应用里真正跑的那份语义一致：
 
 ```python
-def ref_silu_and_mul(x):
-    d = x.shape[-1] // 2
-    return torch.nn.functional.silu(x[..., :d]) * x[..., d:]
+from vllm.model_executor.layers.activation import SiluAndMul
 
 torch.manual_seed(0)
-x = torch.randn(128, 256, dtype=torch.float16, device='cuda')
+x = torch.randn(128, 256, dtype=torch.float16, device="cuda")
 y = silu_and_mul_triton(x)
-ref = ref_silu_and_mul(x)
-print('max abs err:', (y.float() - ref.float()).abs().max().item())
+ref = SiluAndMul.forward_native(x)          # 当前版本里它是 staticmethod，可直接调
+print("max abs err:", (y.float() - ref.float()).abs().max().item())
+print("allclose:", torch.allclose(y, ref, atol=1e-2, rtol=1e-2))
 ```
 
-先管理预期：这个算子是访存受限的，别指望数量级提速。逐元素算子每个输出元素只做几次 FLOPs，却要读两个、写一个，算术强度约 1 FLOP/字节，远低于机器的平衡点——时间由带宽定，不由算力定。融合能省的是遍数：eager 模式下 silu 和乘法是两个 kernel，中间结果要过一次 HBM；融合版是一个 kernel，中间结果在寄存器里。省一遍 HBM 就是这一节的全部收益，先测再判断。
+误差不该是 0：求值顺序不同、fp16 舍入路径不同，全等本来就不该出现。要看的是量级：和 fp16 舍入同量级就是对齐了，和输出值本身同量级就是写法错了。三个典型错误各有特征：两半切反，误差立刻变大；行跨度写成 `row * d`，读错行，误差立刻变大；cast 顺序颠倒（拿 fp32 的 SiLU 结果直接乘 fp16 的另一半），误差变大但不一定一眼看得出来——所以逐行核对地址算术这一步不能省。
 
-检查要怎么读结果？`torch.manual_seed(0)` 固定随机数，`x = torch.randn(128, 256)`，max abs err 量的就是你的 kernel 和 PyTorch 参考逐元素差多少。预期：误差不是 0——求值顺序不同，fp16 舍入路径不同，全等本来就不该出现；要看的是误差的数量级。误差小到和 fp16 舍入一个量级，就是对齐了；误差大到和输出值本身差不多，就是写法错了。三个典型错误示范：两半切反了（silu 加在后一半上），误差立刻变大；行跨度写成 `row * D`，读错行，误差立刻变大；cast 顺序颠倒，误差变大但不一定大到一眼看出来——所以这个检查要和逐行对照一起做，不要只看一个数就下结论。微基准用 `triton.testing.do_bench`，对比 PyTorch 版，同一形状、同一精度；第 2 周讲过 do_bench 取中位数的道理，测出来的数要按那个读法读。怎么读结果：如果时间省下来的比例接近访存省下来的 40%，说明访存确实是瓶颈；如果时间没怎么动，先看是不是形状太小、kernel 启动开销占了大头——这是个待验证的假设，数字要测出来再写，不要先下结论。
+微基准要测三个基线，缺一个结论就会错：
 
-**产出**：可独立验证的 Triton kernel（数值对齐 + 一份微基准），附一笔融合省访存的字节账。
+```python
+def eager(t):                      # 引擎的 PyTorch 后备
+    return SiluAndMul.forward_native(t)
+
+def cpp_fused(t):                  # 引擎默认实现；签名以当前版本的 csrc 注册为准（这一版是 out 在前）
+    out = torch.empty(t.shape[:-1] + (t.shape[-1] // 2,), dtype=t.dtype, device=t.device)
+    torch.ops._C.silu_and_mul(out, t)
+    return out
+
+x = torch.randn(4096, 2 * 11008, dtype=torch.float16, device="cuda")
+for name, fn in (("eager", eager), ("vllm-cpp", cpp_fused), ("triton", silu_and_mul_triton)):
+    ms = triton.testing.do_bench(lambda: fn(x))   # 默认返回中位数，以当前 Triton 版本为准
+    print(name, f"{ms:.4f} ms")
+```
+
+读法：eager 和另外两个之间应该看到接近 40% 的访存差（形状够大时）；vllm-cpp 和 triton 之间的差别，才是这次接入能兑现的部分。三行都包含输出分配的时间，口径一致。如果 triton 比 vllm-cpp 慢，先看 `BLOCK` 与 `d` 的匹配（`d = 11008` 时 `BLOCK = 1024` 要 11 个列块，最后一块只有 768 条有效 lane），再看是不是形状太小、启动开销盖过了收益。这些数字要测出来再写，不要先下结论。
+
 ### 第 3 节 · 包成 CustomOp 子类并注册：`register_oot` 按类名替换，进程内验证替换真的发生了
 
-**目标**：做出可加载的插件包，并验证替换真的发生了。
-
-**怎么做**（60 分钟，需 GPU 做加载验证；无卡先写插件包骨架）：
-
-写插件包。先把骨架的三部分说清楚：子类、注册、入口。子类是实现，分发时按类名找的就是它；注册是把名字写进表；入口是让 vLLM 启动时找到你的包。三部分缺一个，链条就是断的。骨架如下（类名、注册方式与签名以你所装 vLLM 版本的 `vllm/model_executor/custom_op.py` 与 [CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)为准，版本变了先核对再抄）：
+插件包三部分：子类、注册、入口。子类是实现，注册是把类名写进 `op_registry_oot`，入口是让 vLLM 启动时 import 到你的包。缺一个，链条就断。
 
 ```python
 # my_plugin/silu_and_mul_plugin.py
@@ -1655,58 +1670,111 @@ import torch
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.activation import SiluAndMul
 
-@SiluAndMul.register_oot
+from .kernel import silu_and_mul_triton
+
+@SiluAndMul.register_oot          # 不带参数 → 注册名 = 被替换类的类名 "SiluAndMul"
 class TritonSiluAndMul(SiluAndMul):
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
         return silu_and_mul_triton(x)
-    # forward_native 从父类继承（PyTorch 实现），CPU / 非 CUDA 路径走它
+    # forward_native 从父类继承：CPU / 未启用时走它，语义与数值都和原来一致
 ```
 
-子类只重写 `forward_cuda`，里面调第 2 节的 `silu_and_mul_triton`。`forward_native` 从父类继承（PyTorch 实现），CPU / 非 CUDA 路径走它。为什么留着后备？同一份插件要在没卡的机器上也能 import、也能跑——跑的是 PyTorch 实现，调试和验证都不依赖 GPU。后备是安全网，也是第 1 节讲过的静默失败的来源：它让“替换没生效”看起来一切正常。注册用 `@SiluAndMul.register_oot` 装饰器，按类名注册；装饰器在模块被 import 时执行，执行完替换即完成。注册发生在 import 时，不是调用时——第 1 节的时序在这里落地。类名、注册方式与签名以所装版本为准：不要从记忆或博客里抄一份旧签名，旧签名在新版本上可能悄悄对不上，核对的成本是一分钟，排错的成本是一下午。
+三个细节决定这段代码生不生效。第一，装饰器写在**被替换的类**上（`@SiluAndMul.register_oot`），不是写在 `CustomOp` 上、也不是写在自己的类上；写成 `@CustomOp.register_oot` 会把名字注册成 `CustomOp`，谁也查不到。第二，重写的方法是 `forward_cuda`——CUDA 平台上 `dispatch_forward` 选的就是它；只写 `forward_oot` 在 CUDA 上永远不会被选中，服务照常跑。第三，子类要继承 `SiluAndMul` 而不是 `CustomOp`：父类的 `__init__` 会处理 `compile_native` 参数，模型代码构造它时传的参数得接得住。
 
-打包：插件通过 `vllm.general_plugins` entry point 被 vLLM 启动时加载（加载逻辑见 `vllm/plugins/__init__.py`）。entry point 的具体写法（模块路径的格式）以你所装版本的 `vllm/plugins/__init__.py` 为准，写完先在本地 `pip install -e .` 装上，再确认 `vllm` 启动日志里出现了你的插件。entry point 写错了，插件根本不会被加载——vLLM 是按 entry point 发现插件的，不会去扫描你的代码。打个比方：entry point 是插件在 vLLM 门口的登记表，没登记，门卫不知道你来过，包写得再好也进不了门。
+打包靠 entry point。`pyproject.toml` 里登记一个 `vllm.general_plugins` 入口，值指向一个可调用对象，vLLM 加载到这个入口时会调用它：
 
-验证分两层做，先便宜后贵。第一层在裸 Python 进程里：import 插件模块，装饰器执行，注册即完成，再检查 `SiluAndMul` 解析到的是不是 `TritonSiluAndMul`——这一步不用 GPU、不用启动 vLLM，注册本身的问题在这里就能抓住。第二层再进 vLLM 进程里验：启动时插件被 entry point 加载，跑一次前向，看 `forward_cuda` 里的打印出现没有。两层查的是同一张表：第一层查注册写进去了没有，第二层查 vLLM 启动时是不是真的加载了这张表。无卡时第一层照样能做：`forward_native` 从父类继承，CPU 路径走 PyTorch 实现，import、注册、解析检查都不依赖 GPU，骨架的正确性先在 CPU 上验完，有卡再验 `forward_cuda`。
+```toml
+[project.entry-points."vllm.general_plugins"]
+my_plugin = "my_plugin:register"
+```
 
-验证替换真的发生了（不要只看“没报错”）：在进程内检查 `SiluAndMul` 解析到的是你的 `TritonSiluAndMul`；或者在 `forward_cuda` 里临时加一行打印，跑一次前向看它是否出现。两种办法至少做一种——“替换没生效但模型照样跑”是这个环节最常见的静默失败（模型会悄悄用回默认实现，你的对比表就全是假的）。静默的原因是后备实现在语义上是对的：数值一样，只是慢一点，不报错、不警告，只有分发检查或 profiler 能发现它。打个比方：替补和首发穿同一件球衣，比分牌（输出数值）看不出谁在场上，只有名单（分发检查）或录像（profiler）能看出来。下一节的 profiler 检查，就是同一个问题再问一遍：我的 kernel 真的跑了吗？
+```python
+# my_plugin/__init__.py
+def register() -> None:
+    from . import silu_and_mul_plugin  # noqa: F401  import 时装饰器执行，替换即完成
+```
 
-避坑：`register_oot` 按类名注册，同一个名字注册两次会断言失败。不要在同一个进程里既 import 插件又手动再注册一次；也不要在 `vllm` 启动后重复加载插件（`load_general_plugins` 有防重复加载的 guard，但你自己的代码里也要避免）。一个错误示范：调试时在 REPL 里 import 两次插件模块、又手动调一次 `register_oot`，断言失败，报错看起来像是插件写错了，其实是注册了两次。`load_general_plugins` 的 guard 防的是 vLLM 自己重复加载，不是防你手滑：你在自己代码里手动再调一次 `register_oot`，guard 拦不住，断言会拦住——报错就是防线起作用的样子，不要把它当成插件写坏了。区分“注册失败”和“注册了两次”：前者是插件没生效，后者是插件生效了两次——报错信息要读全，不要只看最后一行就下结论。
+入口点的值是可调用对象还是包路径、函数签名要不要参数，**以当前版本的 `vllm/plugins/__init__.py` 为准**。写完 `pip install -e .` 装上，再看 vLLM 启动日志里有没有出现你的插件；entry point 写错，插件根本不会被加载，vLLM 不会去扫描你的代码。
 
-**产出**：可加载的插件包 + 一份“替换已验证”的证据（解析检查或打印日志）。
+验证分两层，先便宜后贵。第一层在裸 Python 进程里查表，不需要 GPU、不需要起引擎：
+
+```python
+import my_plugin                                   # 触发 import，装饰器执行
+from vllm.model_executor.custom_op import op_registry_oot
+from vllm.model_executor.layers.activation import SiluAndMul
+
+assert op_registry_oot.get("SiluAndMul") is my_plugin.silu_and_mul_plugin.TritonSiluAndMul
+print(SiluAndMul().name)                           # 启用开关要用的名字，别凭记忆填
+```
+
+第二层在引擎进程里查分发。构造 `SiluAndMul()` 时 `__new__` 会按类名替换，`__init__` 里的 `dispatch_forward` 会定下 `_forward_method`；两个都能直接读：
+
+```python
+op = SiluAndMul()
+assert type(op) is TritonSiluAndMul, type(op)
+print(op._forward_method.__name__)   # 期望 "forward_cuda"；若是 native 或编译包装，说明没启用
+```
+
+第二行是本节的关键检查，它把“注册了”和“启用了”分开：类型对但方法名是 `forward_native`，说明开关没打开，替换白做。构造对象会读全局编译配置（`dispatch_forward` 里调 `get_cached_compilation_config`），裸进程里最稳的做法是在引擎启动之后再跑这段，或者按当前版本先初始化好配置——这一条以当前版本为准。
+
+第三层证据在 profiler 里，留到第 4 节。三层问的是同一个问题的三个侧面：表里有没有、分发到没到、GPU 上跑没跑。
+
+避坑：同一个名字注册两次会断言失败。`load_general_plugins` 的 guard 防的是 vLLM 自己重复加载，防不住你在代码里手动再调一次 `register_oot`；REPL 里 import 两次插件包、又手动注册一次，报错看起来像插件写坏了，其实是注册了两遍。读报错要读全：`Duplicate op name` 是注册了两次，`ImportError` 才是插件没进来。
+
 ### 第 4 节 · 端到端验证：同一模型、同一评测集，接入前后的 TTFT / ITL / 吞吐 + profiler 确认 Triton kernel 真的跑了
 
-**目标**：出一份接入前后对比表。
+端到端对比只有一条规矩：两次测量之间只改“是否启用这个替换”，其他条件全部钉死。钉不住的条件里，任何一个动了，表里的数就没法归因。
 
-**怎么做**（60 分钟，需 GPU；无卡时标注“待有卡后补测”）：
+| 控制项 | 怎么钉 | 动了会怎样 |
+|---|---|---|
+| 模型与权重 | 同一个 checkpoint、同一份量化配置 | 权重变了，算子占比和总时间一起变 |
+| 引擎与 CUDA / Triton 版本 | 同一个镜像、同一条启动命令 | 版本升级带来别的优化，功劳算不清 |
+| 输入与输出长度 | 第 4 章的 `scripts/bench_openai.py`，固定 prompt、固定 `--max-tokens` | 输出变长，ITL 与吞吐一起动 |
+| 并发与每档请求数 | 同一个并发档位、同一请求数 | 并发一改，TTFT 与吞吐同时变，分不清是谁的功劳 |
+| 采样参数 | `temperature = 0`、固定 `seed`、固定 `top_p` | 采样一变，输出长度分布变，ITL 跟着变 |
+| 预热 | 先跑若干请求把 Triton 的编译与 autotune 热掉，再开始计时 | 首次调用的 JIT 编译会算进 TTFT |
 
-用 M0 的 `scripts/bench_openai.py` 跑基线：不加载插件，同一模型、同一评测集，记 TTFT / ITL / 吞吐。TTFT（Time to First Token，首 token 延迟）量的是第一个 token 多久出来，ITL（Inter-Token Latency，每 token 间隔）量的是之后每个 token 之间隔多久，吞吐量的是单位时间一共出多少 token。三个数看的是三件事：TTFT 看 prefill 与首 token，ITL 看 decode 的稳定程度，吞吐看整机的产出。为什么用 M0 的脚本？M0 的基线章节已经把它调通过了，同一把尺子量前后，尺子本身不引入误差。
+流程按 A/B/A 走：基线（不装插件）→ 接入（装插件 + `--compilation_config.custom_ops '["+名字"]'`）→ 再跑一次基线。第三次的作用是看漂移：如果两次基线的差和 A/B 的差同量级，说明这台机器上的差异小于噪声，不能下结论。每一档并发至少重复三次，先看同一配置内 run-to-run 的离散度，再看 A/B 的差。
 
-加载插件并用 `--compilation_config.custom_ops '["+SiluAndMul"]'` 启用，再跑同一评测集，记同一组数。两次之间只改这一个变量（模型、评测集、并发、采样参数全都不变），否则对比无效——这是第 5 周“一次只改一个参数”的同一条规矩，搬到了端到端。设问：并发改了会怎样？并发一改，TTFT 和吞吐一起变，分不清是插件的功劳还是并发的功劳，对比表就作废了。采样参数也一样：温度一改，输出长度变了，ITL 和吞吐跟着变，表里的数就没法归因。控制变量不是洁癖，是对比表成立的前提。
+profiler 单独跑一遍，不要和计时混在一起：挂上 profiler 会改变时间。用 vLLM 的 profiler 或 torch profiler 抓一次前向，在 kernel 名单里找 `_silu_and_mul_kernel`，同时看它的调用次数对不对得上（每层 MLP 一次 × 层数 × 步数）。名单里有、次数对，才算“Triton kernel 真的跑了”；只有 TTFT 变好、名单里没有你的 kernel，那个变化不是你的。
 
-用 profiler 确认 Triton kernel 真的跑了（vLLM 的 profiler 或 torch profiler，看 kernel 名单里有没有你的 `_silu_and_mul_kernel`）。没有它，第 3 节的验证就不完整：分发检查说的是“模型调了你的类”，profiler 说的是“GPU 上跑了你的 kernel”，两句话说的不是同一件事，都要拿到。反过来，如果 profiler 名单里没有你的 kernel 名，但 TTFT 变好了，好的是什么？要么是别的变量动了，要么是测量噪声——不管是哪一种，表都不能直接用。
+预期要先摆出来，再测。Amdahl 定律：总提速 `= 1 / ((1 − p) + p / s)`，`p` 是这个算子占端到端时间的份额，`s` 是它自身的提速倍数。`p = 1%` 时，哪怕 `s` 无穷大，总提速也只有 `1 / 0.99 ≈ 1.0101`，省 1%；`s = 2` 时是 `1 / (0.99 + 0.005) ≈ 1.0050`，省 0.5%。`p = 5%` 的上限是 `1 / 0.95 ≈ 1.0526`，`p = 10%` 是 `1 / 0.9 ≈ 1.1111`。天花板是份额，不是 kernel 的质量。
 
-先管理预期：SiluAndMul 是个小算子，端到端提速很可能接近 0——这本身就是结论。把“没变快”写下来并分析原因（算子占比太小？Triton kernel 的启动开销盖过了收益？），不要为了好看去调评测集。道理是 Amdahl 定律：总提速 = 1 / ((1 − p) + p / s)，p 是算子占端到端时间的份额，s 是算子自身的提速倍数。SiluAndMul 占端到端时间的 1%，把它优化到无限快（s 趋向无穷大）最多也只省 1% 的时间，总提速 1 / 0.99 ≈ 1.0101，也就是 1.01%。如果你的 Triton 版只比 PyTorch 版快 2 倍（s = 2），同样 1% 的份额，总提速 1 / (0.99 + 0.005) = 1 / 0.995 ≈ 1.0050，时间只省 0.5%。换个份额算算：占比 5% 时无限优化最多省 5% 的时间（提速约 1.0526）；占比 10% 时最多省 10%（提速约 1.1111）。天花板是份额本身，不是 kernel 的速度。结论：端到端数字量的是算子的占比，不是 kernel 的质量——kernel 的质量第 2 节的微基准已经量过了。这是两个问题、两个数字，别拿一个回答另一个。
+这个算子的份额可以先手算一个量级。以 32 层、intermediate 11008、hidden 4096 的 7B 模型为例，每 token 每层 SiluAndMul 的访存是 `3 × 11008 × 2 B ≈ 64.5 KiB`，32 层约 `2.0 MiB`；decode 时每 token 还要把约 14 GB 权重搬一遍（第 1 章算过），SiluAndMul 的访存占比是 `2.0 MiB / 14 GiB` 量级，约万分之一点五。这是访存占比，不是时间占比，但足以说明 decode 阶段的份额远低于 1%。prefill 时激活随 token 数线性涨，`N = 4096` 时这部分到 8.6 GB 量级，占比明显上去了，可 prefill 的时间由 matmul 的算力决定，它的时间份额仍然小。真要报份额，从 profiler 的 kernel 时间占比里取，别拿字节数顶替。
 
-启动开销的假设怎么验？看第 2 节的微基准：如果单个 kernel 的时间本身就和启动开销一个量级，端到端省不下来就是意料之中——但这个判断要拿实测数说话，没测出来之前写“待补测”，不要写成结论。同样，评测集、并发、采样参数一旦动过，对比表要重跑，不要在旧表上改数字。一份诚实的对比表，数字可以不好看，但每一行都要能说清是怎么测出来的。
+于是端到端的结果大概落在五种里，每一种对应不同动作：
 
-**产出**：一份接入前后对比表（TTFT / ITL / 吞吐 + profiler 证据）。
+| 结果 | 归因 | 下一步 |
+|---|---|---|
+| 没变快（差异在噪声内） | 份额太小，Amdahl 上限本来就这么低 | 保留数字，写清份额与上限，不调评测集 |
+| 变慢了 | Triton 版常数项不如树内 C++ 实现；或 JIT 开销没热掉 | 看微基准与预热，再决定换 BLOCK 还是放弃 |
+| 变快了 | 要先排除别的变量：版本、并发、输出长度 | 用 A/B/A 与 profiler 双证据确认 |
+| 完全没变化 | 替换没生效，走的是 `forward_native` 或树内实现 | 回第 3 节查表、查 `name`、查 `_forward_method` |
+| 测不出来 | 机器噪声大于效应 | 提高重复次数、固定时钟、换更大 batch 的负载 |
+
+“完全没变化”和“没变快”是两件事：前者是没接上，后者是接上了但份额太小。分不清这两个，报告里的每个数字都不可信。
+
 ### 第 5 节 · 小结：一份“自写 kernel 端到端加速报告”（含负面结果分析）
 
-**目标**：写出 M2 的可交付物。
+报告要能让人不看你的机器、只看纸面，就判断这些数字是怎么来的、能推广到哪。按下面六节写，每节都要有证据，没有证据的写“待补测”。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+1. **环境**：GPU 型号与显存、驱动、CUDA、Triton、vLLM 版本与 commit、模型 checkpoint、量化配置、启动命令原文。
+2. **算子**：语义（`silu(x[:d]) * x[d:]`，`d` 的定义）、形状与 dtype 约束、代码位置、与树内实现的差别。
+3. **standalone 证据**：正确性（max abs err、allclose 的阈值与理由）、微基准（eager / 树内 C++ / Triton 三行，形状、`BLOCK`、`do_bench` 口径）。
+4. **接入证据**：注册表检查、`name` 与 `_forward_method` 的打印、entry point、启用的命令行参数。
+5. **端到端**：控制变量表（第 4 节那张）、A/B/A 三组数、每档并发的 TTFT / ITL / 吞吐（至少 p50 与 p95）、profiler 里 kernel 的名字与调用次数。数字全部标“预期/待补测”，测过才改成实测。
+6. **负面结果与归因**：哪些尝试没变快、哪些更慢、分别归到哪一类原因。
 
-先算一笔总账：6 周 × 5 节 × 60 分钟 = 1800 分钟 = 30 小时。本周 5 节是 300 分钟、5 小时。报告就是这 30 小时的收口。把第 1–6 周的东西收进一份报告：GEMM 优化阶梯总表（第 1 周）、fused attention 的推导与实测（第 3 周）、量化方案与误差账本（第 4 周）、FA 演进与 CUTLASS 改配置记录（第 5 周）、CustomOp 接入前后对比（第 4 节）。五份材料，一份都不能少：少一份，链条上就少一个环节，报告就讲不全“从写 kernel 到接进引擎”这件事。
+第 6 节是这份报告里信息量最大的一节，也是最容易写空的一节。合格的负面结果长这样：条件写全 → 现象 → 归因 → 证伪或补测办法。三类常见归因各配一个例子：
 
-这份报告是 M2 的可交付物：它证明的是“你会写 kernel、验证它、测出它快在哪、再把它接进引擎”——四件事缺一件，链条就是断的。打个比方：四条腿的桌子，缺一条腿站不住。写 kernel 是第 1–3 周，验证是第 2–3 节讲的方法（数值对齐、分发检查、profiler 三遍问），测速是第 1 周的 Roofline + ncu 和第 2 节的微基准，接进引擎是本周。报告的写法：每份材料都要有数字和证据（推导、实测、profiler 里的 kernel 名单），没有证据的说法写“待补测/未核实”，不要补编。数字和证据对不上的地方，就是下一轮要补做的功课。
+- **份额太小**：decode 阶段 SiluAndMul 的访存占比约万分之一点五，`p < 1%`，Amdahl 上限 `1.01×`；实测差异落在噪声内。补测办法是换 prefill 为主、batch 更大的负载再量一次，看份额上去之后有没有变化。
+- **基线本来就是融合实现**：树内的 `torch.ops._C.silu_and_mul` 访存已经是 `6MD`，Triton 版省不出遍数，只能争常数项；微基准显示 Triton 慢 10%，端到端因此更慢。结论是这条替换在当前版本上不划算，不是“Triton 不行”。
+- **没生效**：profiler 名单里没有 `_silu_and_mul_kernel`，`_forward_method` 是 `forward_native`，原因是启用的名字写成了树内注册名而不是替换后的 `name`。补测办法是改名字后重跑，并把两次的打印都留在报告里。
 
-报告里必须有一节“负面结果分析”：哪些尝试没变快、为什么（至少写一条真实的：比如 SiluAndMul 接入后端到端无变化的原因）。一份只报喜的报告在推理优化里是不可信的——做过这行的人都知道，大多数优化动不了端到端数字；写得出“为什么没变快”，才说明你真的量过、真的想过。第 4 节的 Amdahl 算账就是现成的分析工具：占比 1% 的算子，无限优化也只省 1%，“没变快”不是失败，是份额太小这个事实的测量结果。负面结果的素材平时就要攒：第 4 周讲过，预测是可证伪的，测出来不对也是结果，藏起来才是浪费——那句话在这里同样适用。
+写不出的归因不要编。“不知道”加一条补测计划，比一个编出来的解释有用；报告的价值在于每个说法都有对应的证据位置，而不在于结论好看。第三部分到这里结束：五章的东西合起来证明的是一件事——你会写 kernel、验证它、测出它快在哪、再把它接进引擎。第 29 章会把这个 SiluAndMul 原样搬到 Ascend 上，第 2 节的写法、第 3 节的注册、第 4 节的控制变量，到那边会再用一遍。
 
-对照本模块检查清单，逐项打勾；没打勾的项写清原因与补做计划（比如“第 4 节 CUTLASS 实测待有 nvcc 的机器后补测”）。打勾的标准是证据，不是印象：打勾意味着这一项有对应的实测数或验证记录，翻报告能找到；没打勾也不要紧，要紧的是写清为什么没做、什么时候补做。补做计划要写具体条件（“待有 nvcc 的机器后”就是条件），不要写“以后再说”。
+**延伸**：[vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)、[`vllm/model_executor/custom_op.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/custom_op.py)（注册表与分发逻辑）、[`vllm/model_executor/layers/activation.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/activation.py)（`SiluAndMul` 与树内 Triton 激活 kernel）、[Triton `do_bench` 文档](https://triton-lang.org/main/python-api/generated/triton.testing.do_bench.html)、[Amdahl 定律原文](https://dl.acm.org/doi/10.1145/1465482.1465560)（Amdahl，1967）。
 
-完成第三部分意味着什么？不是“所有 kernel 都变快了”，是“每个说法都有证据，每个没变快的尝试都有原因”。这份报告就是证据的合集。带着报告走：下一模块（M3，国内芯片移植）要移植的第一个 kernel 就是本周的 SiluAndMul——第 2 节的写法、第 3 节的注册、第 4 节的对比表，到 M3 第 5 周会再用一遍。本周收的口，是下一模块的起点。
-
-**产出**：**M2 的可交付物**——一份“自写 kernel 端到端加速报告”（含负面结果分析）。
 ## 本模块检查清单
 
 - [ ] 有一张 GEMM 优化阶梯总表：四个版本各自的算术强度、实测耗时、实测算力、ncu 读数与瓶颈判断
