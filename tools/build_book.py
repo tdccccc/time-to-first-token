@@ -123,7 +123,7 @@ CHAPTER_SUMMARIES = {
     17: "把 benchmark 的条件、命令与分位数写全，让读者能复现；用固定流程读论文，把结论写回项目。",
     18: "编译把执行计划提前，收益与变更频率成反比；选型先看负载与硬件边界，再看加速比。",
     19: "同一个 GEMM 写四版，每版只改一个变量；用 ncu 定位瓶颈，用 Roofline 验证收益。",
-    20: "Triton 够用时写 Triton，需要精确控制 warp 与流水线时回 CUDA/CUTLASS。",
+    20: "Triton 用 block 换掉线程管理；能用 block 说清的留在 Triton，说到 warp 与流水线时回 CUDA。",
     21: "Fused attention 的核心是 online softmax 与 SRAM 容量约束，不是把公式抄一遍。",
     22: "量化 matmul 的关键在 scale 粒度与 dequant 融合，省搬运而不是省 FLOPs。",
     23: "读工业实现先画骨架：主循环、tile 加载、rescale；特化分支是后面的事。",
