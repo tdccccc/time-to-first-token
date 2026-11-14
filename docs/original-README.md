@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="../assets/banner.png" alt="Learn LLM Inference Serving by Shipping One Service">
-</p>
+![Learn LLM Inference Serving by Shipping One Service](../assets/banner.png)
 
 # Learn LLM Inference Serving by Shipping One Service
 

@@ -1,3 +1,5 @@
 site/
 site-src/
 __pycache__/
+.venv-mkdocs/
+.uv-cache/

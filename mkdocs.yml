@@ -1,6 +1,10 @@
 # 学习计划的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
 # Markdown 仍是唯一事实来源：改内容请改 md，推送后 Actions 自动重新生成上线。
-# 本地预览：~/workspace/.venv-mkdocs/bin/mkdocs serve
+# 本地预览：
+#   python3 -m venv .venv-mkdocs
+#   .venv-mkdocs/bin/pip install -r requirements.txt
+#   bash site-build.sh serve
+# 推送到 main 后，.github/workflows/pages.yml 会自动构建并发布到 GitHub Pages。
 site_name: 边做边学 LLM 推理服务
 site_url: https://tdccccc.github.io/time-to-first-token/
 repo_url: https://github.com/tdccccc/time-to-first-token

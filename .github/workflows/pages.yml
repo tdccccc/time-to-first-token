@@ -1,0 +1,56 @@
+name: Deploy site
+
+# 把仓库里的 Markdown 用 MkDocs + Material 构建成静态站点，发布到 GitHub Pages。
+# 线上地址：https://tdccccc.github.io/time-to-first-token/
+# 仓库设置里 Pages 的 Source 必须是 "GitHub Actions"（只需设一次）。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个发布；新的推送排队，不取消正在进行的部署。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install MkDocs
+        run: pip install -r requirements.txt
+
+      - name: Build site
+        run: bash site-build.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

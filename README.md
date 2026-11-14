@@ -2,6 +2,8 @@
   <img src="assets/banner.png" alt="边做边学 LLM 推理服务：交付一个真实的推理服务">
 </p>
 
+[![Deploy site](https://github.com/tdccccc/time-to-first-token/actions/workflows/pages.yml/badge.svg)](https://github.com/tdccccc/time-to-first-token/actions/workflows/pages.yml) · [在线阅读（GitHub Pages）](https://tdccccc.github.io/time-to-first-token/)
+
 # 边做边学 LLM 推理服务：交付一个真实的推理服务
 
 一份 11 周、每天 60 分钟的路线图，给想真正跑起 LLM 推理、而不只是读一读的工程师。另有 2 处可选加深（第 8 周（续）大规模集群 PD 优化、第 11 周 TensorRT-LLM），不计入 11 周主线。

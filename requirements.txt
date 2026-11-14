@@ -1,0 +1,3 @@
+# GitHub Pages 构建依赖（.github/workflows/pages.yml 与本地预览共用）。
+mkdocs==1.6.1
+mkdocs-material==9.8.1
