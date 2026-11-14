@@ -29,7 +29,7 @@ PART_TITLES = {
     1: "用算术强度与脊点判断瓶颈在算力、带宽还是启动开销，再手算 batch、prefill 与 KV 如何改写上限。",
     2: "TTFT、ITL、吞吐、排队深度各量一件事；只报均值会藏住长尾，分位数还要配样本量。",
     3: "先分清 CPU 与 GPU 两条时间线：是 kernel 在跑、在等数据，还是在等 CPU 发下一步。",
-    4: "国产芯片适配",
+    4: "把首 token 延迟、token 间延迟与吞吐固化成脚本：条件固定，数字才可比。",
     5: "第一份基线要回答三件事：拐点在哪、长尾多长、瓶颈更像算力还是带宽。",
 }
 PART_CN = {1: "第一部分", 2: "第二部分", 3: "第三部分", 4: "第四部分", 5: "第五部分"}
@@ -138,7 +138,7 @@ CHAPTER_SUMMARIES = {
 }
 
 CHAPTER_FIGURES = {
-    1: ("roofline.svg", "Roofline 示意图：横轴为算术强度，纵轴为性能，斜线是带宽上限，横线是算力上限", "先看两条上限线和脊点，再找 decode 与 prefill 示例点。结论：decode 在带宽斜线一侧，增加算力不改第一瓶颈；prefill 越过脊点后更受算力限制。"),
+    1: ("roofline.svg", "Roofline 示意图：横轴为算术强度，纵轴为可达性能；斜线是带宽上限，横线是算力上限，交点是脊点；decode 点在斜线一侧，prefill 点越过脊点", "先看斜线、横线与交点（本算例的脊点是 156 FLOP/字节），再找 decode 与 prefill 示例点。结论：decode 在带宽斜线一侧，增加算力不改第一瓶颈；prefill 越过脊点后更受算力限制。"),
     2: ("timeline.svg", "一次流式请求的时间线：请求到达、排队、prefill、TTFT、逐 token decode 与 ITL", "先看 TTFT 在哪里结束，再看其后的 token 间隔如何组成 ITL。结论：排队和 prefill 都计入 TTFT，不能和 decode 的 step time 混成一个数。"),
     3: ("profiler-trace.svg", "CPU 与 GPU 双泳道 trace 示意：CPU 侧依次是 Python 调度、连续 kernel 启动与 synchronize，GPU 侧是若干短 kernel、一段空白、一个长 kernel 与更多短 kernel；空白与 CPU 的同步等待对齐", "先对齐 CPU 与 GPU 两条泳道，看 GPU 空白下方 CPU 在做什么；再区分发射跟不上、同步等待与拷贝。结论：GPU 时间线上的空白不是没有成本，它和 kernel 一样要归因。"),
     6: ("kernel-anatomy.svg", "kernel 时间账：计算、显存搬运、启动与同步三项取最大，并指向不同优化动作", "先看三项时间哪一项最大，再看底部对应的动作。结论：判断瓶颈在计算、带宽还是启动，优化清单才选得对。"),
@@ -222,7 +222,7 @@ TERM_GLOSSARY = [
 ]
 
 CHAPTER_FIGURE_PLACEMENT = {
-    1: (3, 1),    # 1.3 prefill/decode points on the Roofline
+    1: (3, 6),    # 1.3 after the ridge-point cross-over is solved
     2: (None, 1), # chapter opens with the metric question; figure before the table
     3: (2, 1),    # 3.2 CPU/GPU trace lanes
     6: (1, 1),    # 6.1 three bottleneck buckets
