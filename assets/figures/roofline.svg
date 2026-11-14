@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="Roofline 模型">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
-.label{font-size:16px;font-weight:600;fill:#1f2937}.small{font-size:13px;fill:#6b7280}
+.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
+.label{font-size:19px;font-weight:600;fill:#1f2937}.small{font-size:15px;fill:#6b7280}
 .axis{stroke:#94a3b8;stroke-width:1.5}.grid{stroke:#e2e8f0;stroke-width:1}
 .indigo{fill:#3f51b5}.sky{fill:#0ea5e9}.green{fill:#10b981}.amber{fill:#f59e0b}
 </style>
@@ -31,9 +31,9 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <text x="438" y="145" class="small">脊点 156 FLOP/B</text>
 <text x="205" y="235" class="label" fill="#0284c7">带宽受限</text>
 <text x="590" y="205" class="label" fill="#3f51b5">计算受限</text>
-<text x="465" y="395" class="small" text-anchor="middle">算术强度（FLOP / 字节）→</text>
+<text x="465" y="384" class="small" text-anchor="middle">算术强度（FLOP / 字节）→</text>
 <text x="34" y="220" class="small" transform="rotate(-90 34 220)" text-anchor="middle">可达性能 →</text>
 <rect x="600" y="285" width="18" height="8" fill="#0ea5e9"/><text x="626" y="294" class="small">带宽上限</text>
 <rect x="720" y="285" width="18" height="8" fill="#3f51b5"/><text x="746" y="294" class="small">算力上限</text>
-<text x="100" y="408" class="small">解码点远在斜线一侧：加算力几乎无用，省搬运、量化、增大 batch 才有用。</text>
+<text x="100" y="414" class="small">解码点远在斜线一侧：加算力几乎无用，省搬运、量化、增大 batch 才有用。</text>
 </svg>

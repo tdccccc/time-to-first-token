@@ -572,7 +572,7 @@
 
 .chapter-brief {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.65rem;
   margin: 0 0 1rem;
 }
@@ -684,15 +684,15 @@
   margin: 0.45rem 0 0 0;
   padding: 0 0.25rem;
   color: var(--md-default-fg-color--light);
-  font-size: 0.66rem;
-  line-height: 1.6;
+  font-size: 0.72rem;
+  line-height: 1.65;
   text-align: left !important;
 }
 
 .book-figure__label {
   color: var(--md-accent-fg-color);
   font-family: var(--md-code-font-family);
-  font-size: 0.58rem;
+  font-size: 0.64rem;
   letter-spacing: 0.08em;
   margin-right: 0.35rem;
 }
@@ -776,7 +776,7 @@
   width: 100%;
   margin: 0;
   border: 0;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
 }
 
 .md-typeset .md-typeset__table table th,
@@ -806,13 +806,13 @@
 
 .md-typeset .highlight pre {
   margin: 0;
-  padding: 0.8rem 0.9rem;
-  font-size: 0.68rem;
-  line-height: 1.7;
+  padding: 0.9rem 1rem;
+  font-size: 0.84rem;
+  line-height: 1.78;
 }
 
 .md-typeset code {
-  font-size: 0.78em;
+  font-size: 0.9em;
 }
 
 @media screen and (max-width: 44em) {

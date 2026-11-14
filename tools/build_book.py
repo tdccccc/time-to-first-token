@@ -154,6 +154,72 @@ CHAPTER_FIGURES = {
     27: ("chip-stack.svg", "vllm-ascend 插件在芯片软件栈中的位置：接入引擎与算子库之间", "先找插件层，再看它向上接 vLLM、向下接 CANN 与算子实现。结论：版本矩阵、插件 hook 和算子覆盖要分别验证，不能互相替代。"),
 }
 
+TERM_GLOSSARY = [
+    {"id": "roofline", "aliases": ("Roofline", "Roofline 模型"), "en": "Roofline model", "zh": "屋顶线模型", "desc": "用峰值算力、峰值显存带宽和算术强度估算 kernel 性能上限的模型"},
+    {"id": "arithmetic_intensity", "aliases": ("算术强度", "arithmetic intensity"), "en": "arithmetic intensity", "zh": "算术强度", "desc": "每搬运 1 字节数据所执行的浮点运算次数"},
+    {"id": "ridge_point", "aliases": ("脊点", "ridge point"), "en": "ridge point", "zh": "脊点", "desc": "硬件峰值算力与峰值显存带宽之比，用来判断计算受限还是带宽受限"},
+    {"id": "memory_bound", "aliases": ("显存带宽受限", "memory-bound", "memory bound"), "en": "memory-bound", "zh": "显存带宽受限", "desc": "运行时间主要受显存带宽而不是计算能力限制的状态"},
+    {"id": "compute_bound", "aliases": ("计算受限", "compute-bound", "compute bound"), "en": "compute-bound", "zh": "计算受限", "desc": "运行时间主要受计算能力而不是显存带宽限制的状态"},
+    {"id": "ttft", "aliases": ("TTFT",), "en": "Time to First Token", "zh": "首 token 延迟", "desc": "从请求发出到客户端收到第一个输出 token 的时间"},
+    {"id": "itl", "aliases": ("ITL",), "en": "Inter-Token Latency", "zh": "token 间延迟", "desc": "同一请求相邻输出 token 之间的平均时间"},
+    {"id": "tpot", "aliases": ("TPOT",), "en": "Time Per Output Token", "zh": "每输出 token 时间", "desc": "decode 阶段平均生成一个输出 token 所需的时间"},
+    {"id": "prefill", "aliases": ("prefill", "Prefill", "预填充"), "en": "prefill", "zh": "预填充", "desc": "在生成前一次性处理输入 prompt，并写入 KV 缓存的前向阶段"},
+    {"id": "decode", "aliases": ("decode", "Decode", "解码阶段", "解码请求"), "en": "autoregressive decoding", "zh": "解码", "desc": "逐 token 生成输出、并复用已有 KV 缓存的自回归阶段"},
+    {"id": "kv_cache", "aliases": ("KV 缓存", "KV Cache", "KV cache"), "en": "Key-Value Cache", "zh": "键值缓存", "desc": "保存历史 token 的注意力 K/V 向量、避免 decode 时重复计算的显存区域"},
+    {"id": "mha", "aliases": ("MHA",), "en": "Multi-Head Attention", "zh": "多头注意力", "desc": "每个 query 头拥有独立 K/V 头的标准注意力结构"},
+    {"id": "gqa", "aliases": ("GQA",), "en": "Grouped-Query Attention", "zh": "分组查询注意力", "desc": "多个 query 头共享一组 K/V 头，以降低 KV 缓存和访存开销"},
+    {"id": "mla", "aliases": ("MLA",), "en": "Multi-head Latent Attention", "zh": "多头潜变量注意力", "desc": "先把 K/V 压缩到低维潜变量、再按需展开的注意力结构"},
+    {"id": "moe", "aliases": ("MoE",), "en": "Mixture of Experts", "zh": "混合专家", "desc": "每个 token 只激活少数专家网络，以较少计算获得更大参数容量"},
+    {"id": "paged_attention", "aliases": ("PagedAttention", "Paged Attention"), "en": "Paged Attention", "zh": "分页注意力", "desc": "把 KV 缓存切成固定大小 block，并通过块表映射到非连续显存的注意力实现"},
+    {"id": "block_table", "aliases": ("block table",), "en": "block table", "zh": "块表", "desc": "记录逻辑 KV block 到物理显存 block 映射的每请求索引表"},
+    {"id": "continuous_batching", "aliases": ("连续批处理", "continuous batching", "Continuous Batching"), "en": "continuous batching", "zh": "连续批处理", "desc": "每次模型迭代都重新组批，请求完成即退出、等待请求可立即补入的调度方式"},
+    {"id": "chunked_prefill", "aliases": ("chunked prefill", "Chunked Prefill", "分块 prefill"), "en": "chunked prefill", "zh": "分块预填充", "desc": "把长 prompt 的 prefill 切成小块，与 decode 请求交错执行的调度策略"},
+    {"id": "prefix_caching", "aliases": ("prefix caching", "Prefix Caching", "前缀缓存"), "en": "prefix caching", "zh": "前缀缓存", "desc": "复用多个请求相同前缀已计算出的 KV 缓存，避免重复 prefill"},
+    {"id": "radix_attention", "aliases": ("RadixAttention", "Radix Attention"), "en": "Radix Attention", "zh": "基数树注意力", "desc": "用基数树管理可共享前缀的 KV 缓存，以 token 序列为键做复用与淘汰"},
+    {"id": "quantization", "aliases": ("量化", "quantization"), "en": "quantization", "zh": "量化", "desc": "用更低位宽表示权重或激活，以降低显存占用和搬运量", "exclude_prefixes": ("向", "预")},
+    {"id": "awq", "aliases": ("AWQ",), "en": "Activation-aware Weight Quantization", "zh": "激活感知权重量化", "desc": "依据激活分布保护重要权重通道的低比特权重量化方法"},
+    {"id": "gptq", "aliases": ("GPTQ",), "en": "Generative Pre-trained Transformer Quantization", "zh": "GPT 权重量化", "desc": "利用二阶信息逐层最小化重建误差的训练后权重量化方法"},
+    {"id": "fp8", "aliases": ("FP8",), "en": "8-bit Floating Point", "zh": "8 位浮点", "desc": "使用 8 位浮点表示权重或激活的低精度格式"},
+    {"id": "int4", "aliases": ("INT4",), "en": "4-bit Integer", "zh": "4 位整数", "desc": "使用 4 位整数表示权重、配合 scale 反量化的极低位宽格式"},
+    {"id": "speculative_decoding", "aliases": ("投机解码", "speculative decoding"), "en": "speculative decoding", "zh": "投机解码", "desc": "先用草稿模型生成多个候选 token，再由目标模型一次验证和接受"},
+    {"id": "draft_model", "aliases": ("草稿模型", "draft model"), "en": "draft model", "zh": "草稿模型", "desc": "投机解码中快速生成候选 token 的小模型"},
+    {"id": "target_model", "aliases": ("target model",), "en": "target model", "zh": "目标模型", "desc": "投机解码中负责验证候选 token 的原始大模型"},
+    {"id": "acceptance_rate", "aliases": ("接受率", "acceptance rate"), "en": "acceptance rate", "zh": "接受率", "desc": "草稿 token 被目标模型验证通过的比例"},
+    {"id": "kv_eviction", "aliases": ("KV 淘汰", "KV eviction", "KV cache eviction"), "en": "KV cache eviction", "zh": "KV 缓存淘汰", "desc": "按策略丢弃部分历史 KV，以降低长上下文显存与读取量"},
+    {"id": "pd_disaggregation", "aliases": ("PD 解耦", "prefill-decode disaggregation", "解耦式服务"), "en": "prefill-decode disaggregation", "zh": "预填充-解码解耦", "desc": "把 prefill 与 decode 放到不同实例或硬件池，分别优化两种瓶颈"},
+    {"id": "goodput", "aliases": ("goodput", "有效吞吐"), "en": "goodput", "zh": "有效吞吐", "desc": "满足延迟或正确性约束的成功请求吞吐"},
+    {"id": "hpa", "aliases": ("HPA",), "en": "Horizontal Pod Autoscaler", "zh": "水平 Pod 自动扩缩容", "desc": "Kubernetes 中按指标自动调整 Pod 副本数的控制器"},
+    {"id": "keda", "aliases": ("KEDA",), "en": "Kubernetes Event-driven Autoscaling", "zh": "Kubernetes 事件驱动扩缩容", "desc": "把事件或外部指标接入 HPA 的扩缩容组件"},
+    {"id": "router", "aliases": ("router", "Router", "路由器"), "en": "router", "zh": "路由器", "desc": "在多后端或多模型之间按成本、延迟或质量选择目标服务的组件"},
+    {"id": "tensorrt_llm", "aliases": ("TensorRT-LLM",), "en": "TensorRT for Large Language Models", "zh": "TensorRT 大语言模型推理引擎", "desc": "NVIDIA 的编译式 LLM 推理引擎，在加载时生成执行计划并做图优化"},
+    {"id": "cuda", "aliases": ("CUDA",), "en": "Compute Unified Device Architecture", "zh": "统一计算设备架构", "desc": "NVIDIA 的 GPU 并行计算平台与编程模型"},
+    {"id": "cuda_graph", "aliases": ("CUDA Graph", "CUDA 图"), "en": "CUDA Graph", "zh": "CUDA 图", "desc": "把多次 kernel 启动录制成一张图，以减少重复启动开销"},
+    {"id": "triton", "aliases": ("Triton",), "en": "Triton", "zh": "Triton GPU 编程语言", "desc": "用 Python 风格语法编写 GPU kernel 的语言与编译器"},
+    {"id": "shared_memory", "aliases": ("shared memory", "Shared Memory", "共享内存"), "en": "shared memory", "zh": "共享内存", "desc": "同一线程块内可见、延迟远低于显存的可编程片上存储"},
+    {"id": "warp", "aliases": ("warp", "Warp"), "en": "warp", "zh": "线程束", "desc": "GPU 上一次调度执行的 32 个线程组成的硬件执行单位"},
+    {"id": "occupancy", "aliases": ("occupancy", "Occupancy", "占用率"), "en": "occupancy", "zh": "占用率", "desc": "SM 上实际驻留 warp 数占硬件上限的比例"},
+    {"id": "bank_conflict", "aliases": ("bank conflict", "Bank Conflict", "存储体冲突"), "en": "bank conflict", "zh": "存储体冲突", "desc": "多个线程访问同一 shared memory bank 的不同地址而被迫串行"},
+    {"id": "gemm", "aliases": ("GEMM",), "en": "General Matrix Multiplication", "zh": "通用矩阵乘法", "desc": "注意力投影、MLP 和大多数线性层的基础计算算子"},
+    {"id": "fused_attention", "aliases": ("fused attention", "Fused Attention", "融合注意力"), "en": "fused attention", "zh": "融合注意力", "desc": "把 attention 的多个步骤融进一个 kernel，避免中间矩阵写入显存"},
+    {"id": "flash_attention", "aliases": ("FlashAttention",), "en": "FlashAttention", "zh": "闪存注意力", "desc": "通过分块与在线 softmax 减少 attention 中间矩阵读写的高效实现"},
+    {"id": "online_softmax", "aliases": ("online softmax", "Online Softmax", "在线 softmax"), "en": "online softmax", "zh": "在线 softmax", "desc": "分块计算 softmax 时维护运行最大值与归一化因子的数值稳定算法"},
+    {"id": "cutlass", "aliases": ("CUTLASS",), "en": "CUDA Templates for Linear Algebra Subroutines", "zh": "CUDA 线性代数模板库", "desc": "NVIDIA 提供的可组合 GEMM 与流水线 kernel 模板库"},
+    {"id": "cann", "aliases": ("CANN",), "en": "Compute Architecture for Neural Networks", "zh": "昇腾神经网络计算架构", "desc": "华为昇腾 NPU 的软件栈与算子开发平台"},
+    {"id": "ascendc", "aliases": ("AscendC", "Ascend C"), "en": "Ascend C", "zh": "昇腾 C 算子编程语言", "desc": "用于在昇腾 NPU 上编写自定义算子的 C++ 编程接口"},
+    {"id": "npu", "aliases": ("NPU",), "en": "Neural Processing Unit", "zh": "神经网络处理器", "desc": "面向神经网络张量计算加速的专用处理器"},
+    {"id": "vllm_ascend", "aliases": ("vllm-ascend",), "en": "vLLM Ascend plugin", "zh": "vLLM 昇腾插件", "desc": "把昇腾算子与运行时接入 vLLM 的硬件后端插件"},
+    {"id": "operator_coverage", "aliases": ("算子覆盖", "operator coverage"), "en": "operator coverage", "zh": "算子覆盖", "desc": "模型所需算子中，目标硬件已有可用实现的比例与清单"},
+    {"id": "tensor_parallelism", "aliases": ("张量并行", "tensor parallelism"), "en": "tensor parallelism", "zh": "张量并行", "desc": "把单个矩阵或张量切分到多张卡上协同计算"},
+    {"id": "mfu", "aliases": ("MFU",), "en": "Model FLOPs Utilization", "zh": "模型浮点算力利用率", "desc": "实际模型计算吞吐占硬件峰值算力的比例"},
+    {"id": "slo", "aliases": ("SLO",), "en": "Service Level Objective", "zh": "服务等级目标", "desc": "对延迟、可用性或错误率设定的可度量目标"},
+    {"id": "qps", "aliases": ("QPS",), "en": "Queries Per Second", "zh": "每秒查询数", "desc": "系统每秒处理的请求数"},
+    {"id": "ncu", "aliases": ("ncu",), "en": "NVIDIA Nsight Compute", "zh": "NVIDIA 内核性能分析器", "desc": "采集单个 GPU kernel 硬件计数器与瓶颈指标的工具"},
+    {"id": "nsys", "aliases": ("nsys",), "en": "NVIDIA Nsight Systems", "zh": "NVIDIA 系统级性能分析器", "desc": "采集 CPU、GPU、拷贝与同步时间线的系统级 profiler"},
+    {"id": "tbe", "aliases": ("TBE",), "en": "Tensor Boost Engine", "zh": "张量加速引擎", "desc": "昇腾 CANN 中较早的算子开发框架，用 DSL 描述算子计算"},
+    {"id": "rope", "aliases": ("RoPE",), "en": "Rotary Position Embedding", "zh": "旋转位置编码", "desc": "通过旋转 query/key 表示注入相对位置信息的编码方法"},
+    {"id": "rag", "aliases": ("RAG",), "en": "Retrieval-Augmented Generation", "zh": "检索增强生成", "desc": "先从外部知识库检索相关文档，再把结果交给模型生成"},
+]
+
 M1_WEEK_TO_CH = {
     "1": 6, "1续": 7, "2": 8, "3": 9, "4": 10, "5": 11, "6": 12,
     "7": 13, "8": 14, "8续": 15, "9": 16, "10": 17, "11": 18,
@@ -311,15 +377,21 @@ KEYLINE_KIND = {
     "小结": "summary", "验收": "summary",
 }
 
+REFERENCE_LABEL_RE = re.compile(r"^\s*>?\s*(?:\*\*(阅读锚点|阅读材料|延伸阅读|延伸|阅读|参考)(?:[。：:]?)\*\*|(阅读锚点|阅读材料|延伸阅读|延伸|阅读|参考)[：:])(?:[。：:]?)\s*(.*)$")
+HOW_LABEL_RE = re.compile(r"^\*\*怎么做\*\*(?:（[^）]*）|\([^)]*\))?[：:]?\s*(.*)$")
+OUTPUT_LABEL_RE = re.compile(r"^\*\*(?:本章产出|产出|产出物)([。：:]?)\*\*(?:[。：:]?)\s*.*$")
+BUFFER_LABEL_RE = re.compile(r"^\*\*缓冲\*\*.*$")
+
 
 def chapter_brief(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Pull the chapter-level goal/output out of the intro into cards."""
+    """Pull the chapter-level goal out of the intro into a card."""
     items: list[tuple[str, str]] = []
     kept: list[str] = []
     for line in lines:
         match = BRIEF_RE.match(line)
         if match:
-            items.append((match.group(1), match.group(2).strip()))
+            if match.group(1) == "本章目标":
+                items.append((match.group(1), match.group(2).strip()))
             continue
         kept.append(line)
     if not items:
@@ -398,7 +470,193 @@ def split_long_paragraph(line: str) -> list[str]:
     return [restore(group, store) for group in groups]
 
 
-def format_blocks(lines: list[str]) -> list[str]:
+INLINE_PROTECT_RE = re.compile(
+    r"(`[^`]*`|!?\[[^\]]*\]\([^)]*\)|<[^>]+>|https?://\S+)"
+)
+
+
+def protect_inline(text: str) -> tuple[str, list[str]]:
+    store: list[str] = []
+
+    def keep(match: re.Match[str]) -> str:
+        store.append(match.group(0))
+        return f"\x00{len(store) - 1}\x00"
+
+    return INLINE_PROTECT_RE.sub(keep, text), store
+
+
+def inside_parentheses(text: str, pos: int) -> bool:
+    depth = 0
+    for ch in text[:pos]:
+        if ch in "（(":
+            depth += 1
+        elif ch in "）)":
+            depth = max(0, depth - 1)
+    return depth > 0
+
+
+NON_DEFINITION_PREFIXES = (
+    "如果", "若", "例如", "比如", "见", "可", "当", "在", "不", "只",
+    "按", "默认", "下文", "本节", "第", "以及", "或", "并", "但",
+)
+
+
+def looks_like_definition(text: str, end: int) -> bool:
+    match = re.match(r"\s*[（(]([^（）()]{1,180})[）)]", text[end:])
+    if match is None:
+        return False
+    content = match.group(1).strip()
+    if not content or content.startswith(NON_DEFINITION_PREFIXES):
+        return False
+    if re.search(r"[A-Za-z]", content):
+        return True
+    if re.search(r"[，,：:]", content):
+        return True
+    return len(content) >= 3
+
+
+def excluded_match(text: str, match: re.Match[str], entry: dict[str, object]) -> bool:
+    for prefix in entry.get("exclude_prefixes", ()):  # type: ignore[union-attr]
+        if text[: match.start()].endswith(prefix):
+            return True
+    for suffix in entry.get("exclude_suffixes", ()):  # type: ignore[union-attr]
+        if text[match.end():].startswith(suffix):
+            return True
+    return False
+
+
+def annotatable_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.startswith(("#", "|", "<", ">", "---", "```", "~~~")):
+        return False
+    if line.startswith(("    ", "\t")):
+        return False
+    return True
+
+
+def glossary_annotation(term: str, entry: dict[str, str]) -> str:
+    en = entry["en"]
+    zh = entry["zh"]
+    desc = entry["desc"]
+    key = term.lower().replace("-", " ").strip()
+    en_key = en.lower().replace("-", " ").strip()
+    zh_key = zh.lower().strip()
+    if en_key == key:
+        inside = f"{zh}：{desc}" if zh_key != key else desc
+    elif zh_key == key:
+        inside = f"{en}：{desc}"
+    else:
+        inside = f"{en}，{zh}：{desc}"
+    return f"{term}（{inside}）"
+
+
+class TermAnnotator:
+    """Annotate the first prose use of each known term in a chapter once."""
+
+    def __init__(self) -> None:
+        self.seen: set[str] = set()
+        self.entries: list[tuple[dict[str, str], list[re.Pattern[str]]]] = []
+        for entry in TERM_GLOSSARY:
+            patterns = []
+            for alias in dict.fromkeys(entry["aliases"]):
+                if (
+                    not re.search(r"[A-Za-z]", alias)
+                    and len(alias) < 3
+                    and not entry.get("exclude_prefixes")
+                    and not entry.get("exclude_suffixes")
+                ):
+                    continue
+                escaped = re.escape(alias)
+                if re.search(r"[A-Za-z]", alias):
+                    escaped = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
+                patterns.append(re.compile(escaped, re.IGNORECASE))
+            self.entries.append((entry, patterns))
+
+    def annotate_line(self, line: str) -> str:
+        protected, store = protect_inline(line)
+        defined_here: set[str] = set()
+        for entry, patterns in self.entries:
+            if entry["id"] in self.seen:
+                continue
+            for pattern in patterns:
+                for match in pattern.finditer(protected):
+                    if excluded_match(protected, match, entry):
+                        continue
+                    if looks_like_definition(protected, match.end()):
+                        defined_here.add(entry["id"])
+                        break
+                if entry["id"] in defined_here:
+                    break
+        while True:
+            best: tuple[int, int, dict[str, str], re.Match[str]] | None = None
+            for entry, patterns in self.entries:
+                if entry["id"] in self.seen:
+                    continue
+                for pattern in patterns:
+                    for match in pattern.finditer(protected):
+                        if excluded_match(protected, match, entry):
+                            continue
+                        candidate = (match.start(), -(match.end() - match.start()), entry, match)
+                        if best is None or candidate[:2] < best[:2]:
+                            best = candidate
+                        break
+            if best is None:
+                break
+            _, _, entry, match = best
+            self.seen.add(entry["id"])
+            after = protected[match.end():]
+            if (
+                entry["id"] in defined_here
+                or inside_parentheses(protected, match.start())
+                or looks_like_definition(protected, match.end())
+            ):
+                continue
+            replacement = glossary_annotation(match.group(0), entry)
+            store.append(replacement)
+            end = match.end()
+            if protected[end:end + 1] == " ":
+                end += 1
+            protected = protected[: match.start()] + f"\x00{len(store) - 1}\x00" + protected[end:]
+        return restore(protected, store)
+
+    def annotate_lines(self, lines: list[str]) -> list[str]:
+        out: list[str] = []
+        fence: str | None = None
+        html_depth = 0
+        for line in lines:
+            stripped = line.strip()
+            fence_match = re.match(r"^(```+|~~~+)", stripped)
+            if fence is not None:
+                if fence_match and fence_match.group(1)[0] == fence:
+                    fence = None
+                out.append(line)
+                continue
+            if fence_match:
+                fence = fence_match.group(1)[0]
+                out.append(line)
+                continue
+            if html_depth > 0:
+                opens = len(re.findall(r"<(?:div|figure|ol|section|table)\b", line, re.IGNORECASE))
+                closes = len(re.findall(r"</(?:div|figure|ol|section|table)>", line, re.IGNORECASE))
+                html_depth = max(0, html_depth + opens - closes)
+                out.append(line)
+                continue
+            if re.match(r"^\s*<(?:div|figure|ol|section|table)\b", line, re.IGNORECASE):
+                opens = len(re.findall(r"<(?:div|figure|ol|section|table)\b", line, re.IGNORECASE))
+                closes = len(re.findall(r"</(?:div|figure|ol|section|table)>", line, re.IGNORECASE))
+                html_depth = max(0, opens - closes)
+                out.append(line)
+                continue
+            if not annotatable_line(line):
+                out.append(line)
+                continue
+            out.append(self.annotate_line(line))
+        return out
+
+
+def format_blocks(lines: list[str], references: list[str] | None = None) -> list[str]:
     """Split walls of text, wrap labels in callouts, and keep code/tables separate."""
     out: list[str] = []
     i = 0
@@ -409,6 +667,34 @@ def format_blocks(lines: list[str]) -> list[str]:
 
     while i < len(lines):
         line = lines[i]
+        ref_match = REFERENCE_LABEL_RE.match(line)
+        if ref_match:
+            label = ref_match.group(1) or ref_match.group(2)
+            content = ref_match.group(3).strip()
+            if (
+                label != "阅读材料"
+                and content
+                and not content.startswith("本章不读新材料")
+                and references is not None
+                and re.search(r"https?://|\[[^\]]+\]\([^)]+\)", content)
+            ):
+                references.append(content)
+            i += 1
+            continue
+
+        how_match = HOW_LABEL_RE.match(line)
+        if how_match:
+            rest = how_match.group(1).strip()
+            if rest:
+                out.extend(split_long_paragraph(rest))
+                out.append("")
+            i += 1
+            continue
+
+        if OUTPUT_LABEL_RE.match(line) or BUFFER_LABEL_RE.match(line):
+            i += 1
+            continue
+
         if line.startswith("```"):
             blank()
             if line.strip() == "```":
@@ -878,8 +1164,9 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     if figure_lines:
         out += figure_lines
         out.append("")
+    references: list[str] = []
     if intro_lines:
-        out += format_blocks(intro_lines)
+        out += format_blocks(intro_lines, references)
         out.append("")
     sec = 0
     for i, h in enumerate(body_hs):
@@ -890,20 +1177,34 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
             title = section_titles[sec - 1]
             out.append(f"## {chapter.num}.{sec} {title}")
             out.append("")
-            out += format_blocks(transform_lines(chunk[1:], module, chapter))
+            out += format_blocks(transform_lines(chunk[1:], module, chapter), references)
             out.append("")
         else:
             level = subhead_level(h, module)
             title = transform_title(h.title, module, chapter)
             out.append("#" * level + " " + title)
             out.append("")
-            out += format_blocks(transform_lines(chunk[1:], module, chapter))
+            out += format_blocks(transform_lines(chunk[1:], module, chapter), references)
             out.append("")
+    out = TermAnnotator().annotate_lines(out)
+    unique_refs: list[str] = []
+    seen_refs: set[str] = set()
+    for ref in references:
+        normalized = re.sub(r"\s+", " ", ref).strip()
+        if normalized and normalized not in seen_refs:
+            seen_refs.add(normalized)
+            unique_refs.append(normalized)
+    if unique_refs:
+        out += ["## 参考文献", ""]
+        out += [f"- {ref}" for ref in unique_refs]
+        out.append("")
     text = "\n".join(out)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = rewrite_links(text, source_dir, "docs/chapters")
     if chapter.num == 17:
         text = override_chapter_17(text)
+    text = re.sub(r"^\*\*(?:怎么做|本章产出|产出|产出物|阅读材料|缓冲)[^\n]*\n?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     write(f"docs/chapters/{chapter.slug}.md", text)
 
 

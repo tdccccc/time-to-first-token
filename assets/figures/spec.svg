@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-label="投机解码">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
-.label{font-size:15px;font-weight:600;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
+.label{font-size:18px;font-weight:600;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
 </style>
 <rect width="900" height="360" fill="#fbfcfe"/>
 <text x="40" y="42" class="title">投机解码：先猜，再验证</text>

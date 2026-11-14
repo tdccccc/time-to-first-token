@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="PagedAttention 逻辑块到物理页的映射">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
-.label{font-size:15px;font-weight:700;fill:#1f2937}.small{font-size:12px;fill:#6b7280}
+.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
+.label{font-size:18px;font-weight:700;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
 </style>
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
 <rect width="900" height="420" fill="#fbfcfe"/>
