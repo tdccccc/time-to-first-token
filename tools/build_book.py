@@ -908,7 +908,6 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
         text = text.replace("这个模块", "这个项目").replace("逐周教程", "正文教程")
     text = text.replace("本模块", "本部分").replace("该模块", "该部分")
     text = text.replace("这个模块", "这个部分")
-    text = text.replace("模块", "部分")
     # Chapter-intro labels.
     text = text.replace("**重点。**", "**本章目标。**")
     text = text.replace("**形式。**", "**阅读材料。**")
