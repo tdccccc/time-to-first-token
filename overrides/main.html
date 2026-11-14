@@ -4,7 +4,7 @@
   {{ super() }}
   {% if page %}
     <meta name="notes-page" content="{{ (page.url or 'index') | e }}">
-    <meta name="notes-title" content="{{ (page.title or config.site_name) | e }}">
+    <meta name="notes-title" content="{{ (page.meta.title or page.title or config.site_name) | e }}">
   {% endif %}
   <meta name="notes-repo" content="{{ (config.repo_url or '') | replace('https://github.com/', '') | e }}">
   <meta name="notes-branch" content="main">

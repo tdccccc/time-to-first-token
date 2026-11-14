@@ -1,116 +1,58 @@
 ---
 name: Progress tracker
-about: Track your way through the roadmap. Open this in your own fork.
-title: 'Roadmap progress: [your name or handle]'
+about: 按章跟踪 5 部分 31 章的阅读进度。Open this in your own fork.
+title: '阅读进度: [your name or handle]'
 labels: progress
 ---
 
-> **在网站上**：这是 GitHub issue 模板的静态副本，网页上的勾选不会保存。要保存进度，请用[进度打卡页](tracker/index.html)（数据存在浏览器本地），或按下面的方式在 GitHub issue 里勾选。
+> **在网站上**：站点里的[阅读进度](https://tdccccc.github.io/time-to-first-token/docs/progress/)可以勾选、导出 JSON、生成同步链接。这个 issue 模板是给 GitHub 用的静态副本；网页上的勾选不会写回仓库，issue 里的勾选由 GitHub 保存到你的账号。
 
-Tick sessions as you finish them. GitHub saves checkbox state to your account, so this works across every device you sign in from.
-
-论文均为选读：README 对应章节已有每篇论文的详细总结（核心思想、逻辑链、关键机制、关键数字），打勾跟踪的是课程本身，读不读全文不影响进度。
+论文是选读：正文对应章节已有详细总结，读不读论文原文不影响章节进度。
 
 Started on:
 
-### Week 1: The mental model
-- [ ] Mon. Making Deep Learning Go Brrrr, first half
-- [ ] Tue. Making Deep Learning Go Brrrr, second half
-- [ ] Wed. CS336 Lecture 5, GPUs, first 30 min
-- [ ] Thu. CS336 Lecture 5, second 30 min
-- [ ] Fri. Hand-derive arithmetic intensity for your model
+## 第一部分 基础与度量
 
-### Week 2: vLLM
-- [ ] Mon. PagedAttention announcement and paper
-- [ ] Tue. Serve a 7-8B model behind vLLM
-- [ ] Wed. vLLM V1 architecture
-- [ ] Thu. Inside vLLM, scheduler and block manager
-- [ ] Fri. Follow the block table code path
+- [ ] 第 1 章 Roofline：先算，再优化
+- [ ] 第 2 章 推理度量：四个数，一个分布
+- [ ] 第 3 章 Profiling：看时间花在哪
+- [ ] 第 4 章 写压测脚本：bench_openai.py
+- [ ] 第 5 章 跑出第一份基线
 
-### Week 3: Measurement
-- [ ] Mon. vLLM metrics design doc
-- [ ] Tue. Stand up Prometheus and Grafana
-- [ ] Wed. Import the dashboard, confirm live panels
-- [ ] Thu. Map every metric to a panel
-- [ ] Fri. Modal benchmarking methodology
+## 第二部分 推理框架
 
-### Week 4: SGLang and batching
-- [ ] Mon. RadixAttention
-- [ ] Tue. Deploy SGLang with the same model
-- [ ] Wed. SGLang talk and paper
-- [ ] Thu. Continuous batching and Orca
-- [ ] Fri. Sarathi-Serve, chunked prefill
+- [ ] 第 6 章 心智模型
+- [ ] 第 7 章 模型架构
+- [ ] 第 8 章 vLLM：先部署，再读内部实现
+- [ ] 第 9 章 度量基础设施
+- [ ] 第 10 章 SGLang、RadixAttention 与批处理内部
+- [ ] 第 11 章 压测到 1000 并发
+- [ ] 第 12 章 量化取舍
+- [ ] 第 13 章 投机解码与 KV 淘汰
+- [ ] 第 14 章 解耦式服务与 Kubernetes
+- [ ] 第 15 章 大规模集群 PD 优化（选读）
+- [ ] 第 16 章 单位经济学与路由器
+- [ ] 第 17 章 发表，然后养成阅读习惯
+- [ ] 第 18 章 TensorRT-LLM：编译式推理引擎（选读）
 
-### Week 5: Load testing
-- [ ] Mon. GuideLLM intro and install
-- [ ] Tue. First GuideLLM sweep
-- [ ] Wed. vllm bench serve cross-check
-- [ ] Thu. genai-perf concurrency sweep
-- [ ] Fri. Push past 1000 concurrent
+## 第三部分 算子优化
 
-### Week 6: Quantization
-- [ ] Mon. MIT 6.5940 Lecture 5, first half
-- [ ] Tue. Lecture 5 and 6, AWQ, GPTQ, SmoothQuant
-- [ ] Wed. Quantization survey, map methods to engines
-- [ ] Thu. Serve AWQ or GPTQ and FP8 variants
-- [ ] Fri. Quality proxy across FP16, FP8, INT4
+- [ ] 第 19 章 CUDA 优化阶梯：一个 GEMM，四次提速
+- [ ] 第 20 章 Triton 入门：用 Python 写 kernel
+- [ ] 第 21 章 Fused Attention 深讲：先推导，再写 kernel
+- [ ] 第 22 章 量化 Matmul 深讲：量化方案本身
+- [ ] 第 23 章 FlashAttention 2/3 与 CUTLASS：读工业级实现
+- [ ] 第 24 章 收口：把自写 kernel 接入推理引擎
 
-### Week 7: Speculative decoding and KV eviction
-- [ ] Mon. Speculative decoding docs and benchmark post
-- [ ] Tue. GPU MODE Lecture 22, first half
-- [ ] Wed. Benchmark speculative decoding at low and high QPS
-- [ ] Thu. StreamingLLM
-- [ ] Fri. Long-context eviction, measure memory and TTFT
+## 第四部分 国产芯片适配
 
-### Week 8: Disaggregation and Kubernetes
-- [ ] Mon. DistServe talk and paper
-- [ ] Tue. Splitwise and vLLM disaggregated prefilling
-- [ ] Wed. Mooncake and SGLang PD disaggregation
-- [ ] Thu. Deploy with the production stack
-- [ ] Fri. Autoscale on queue depth, not CPU
+- [ ] 第 25 章 芯片与软件栈地图：先画地图，再谈适配
+- [ ] 第 26 章 CANN 与 AscendC 深讲：算子从定义到编译到调用
+- [ ] 第 27 章 同一模型在 Ascend 上跑通 + vllm-ascend 插件架构
+- [ ] 第 28 章 算子覆盖分析
+- [ ] 第 29 章 移植案例：把 Triton kernel 搬到 Ascend
+- [ ] 第 30 章 精度回归与调优报告
 
-### Week 8 (continued): Large-scale cluster PD optimization
-- [ ] Mon. Mooncake deep dive: Conductor, KV pool, early rejection
-- [ ] Tue. KV transfer math: size, bandwidth, share of TTFT
-- [ ] Wed. Cross-node KV pooling and reuse
-- [ ] Thu. Multi-node disaggregated deployment, disaggregated vs colocated
-- [ ] Fri. Pool sizing, autoscaling signals, fault tolerance
+## 第五部分 综合项目
 
-### Week 9: Unit economics and the router
-- [ ] Mon. Inference economics from first principles
-- [ ] Tue. Re-derive cost per million tokens on your own GPU
-- [ ] Wed. Character.AI inference posts
-- [ ] Thu. Build the router
-- [ ] Fri. Token budgeting middleware
-
-### Week 10: Publish
-- [ ] Mon. Draft the benchmark writeup
-- [ ] Tue. Add labeled variants, publish
-- [ ] Wed. Set up the weekly reading habit
-- [ ] Thu. First habit session
-- [ ] Fri. Optional edge sampler
-
-### Week 11: TensorRT-LLM (optional)
-- [ ] Mon. Architecture: PyExecutor loop, IFB, paged KV, scheduler budgets
-- [ ] Tue. Deploy the same model behind trtllm-serve
-- [ ] Wed. FP8 quantization, measure with the M0 harness
-- [ ] Thu. EAGLE-3 speculative decoding, KV reuse check, disagg config
-- [ ] Fri. Three-engine comparison report and engine decision guide
-
-### Pre-publish checklist
-- [ ] Swept the request rate
-- [ ] Reported exact input and output token lengths
-- [ ] Reported p50, p95, p99
-- [ ] Kept TTFT and inter-token latency separate
-- [ ] Did not measure at the preemption point
-- [ ] Used realistic, not uniform, length distributions
-- [ ] Accounted for tokenizer differences
-- [ ] Pinned versions and published exact commands
-
----
-
-If you finish, link your benchmark writeup here. Open a PR to add it to the README.
-
----
-
-本 fork 新增模块：M0 基础与度量、M2 算子优化、M3 国产芯片适配、M4 综合项目，见 [模块地图](docs/MODULES.md)；M2–M3 的进度用各自模块页面里的清单跟踪，M4 已上线[占位页](docs/modules/M4-capstone/README.md)（目标、交付物与检查清单），正文待写。
+- [ ] 第 31 章 跨芯片推理优化报告

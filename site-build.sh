@@ -2,8 +2,8 @@
 # Build (or preview) the book-style MkDocs site from the repo's Markdown.
 #
 # MkDocs forbids docs_dir = repo root, so assemble a staging tree first.
-# tools/build_site_content.py then splits the monolithic README files into
-# per-week / per-section pages, rewrites links, and generates the catalog.
+# tools/build_book.py then splits the monolithic README files into
+# 5 parts / 31 chapters, rewrites links, and generates the catalog and progress page.
 #
 # Usage:
 #   bash site-build.sh        # build into site/
@@ -26,11 +26,11 @@ PYTHON="${PYTHON:-python3}"
 
 rm -rf site-src
 mkdir -p site-src
-cp README.md progress.md site-src/
+cp README.md site-src/
 cp -r docs assets tracker site-src/
 
-# Generate docs/m1/, module week pages, docs/catalog.md and index.md.
-"$PYTHON" tools/build_site_content.py
+# Generate docs/parts/, docs/chapters/, docs/catalog.md, docs/progress.md and index.md.
+"$PYTHON" tools/build_book.py
 
 if [[ "${1:-build}" == "serve" ]]; then
   # Note: edits to README.md / docs/ need a re-run of this script to reach site-src/.

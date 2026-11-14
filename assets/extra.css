@@ -298,3 +298,225 @@
     display: none !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Book chapter / part covers and chapter cards
+   --------------------------------------------------------------------------- */
+
+.chapter-cover,
+.part-cover {
+  margin: 0 0 1.6rem;
+  padding: 1.15rem 1.3rem 1.05rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.35rem;
+  border-left: 0.22rem solid var(--md-accent-fg-color);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(63, 81, 181, 0.2), transparent 55%),
+    linear-gradient(135deg, var(--md-default-bg-color), var(--md-code-bg-color));
+  box-shadow: 0 0.3rem 1.2rem rgba(15, 23, 42, 0.06);
+}
+
+.chapter-kicker,
+.part-kicker {
+  font-family: var(--md-code-font-family);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.md-typeset h1.chapter-title,
+.md-typeset h1.part-title {
+  margin: 0.1rem 0 0.5rem;
+  padding: 0;
+  border: 0;
+  font-size: clamp(1.8rem, 3.2vw, 2.5rem);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+
+.chapter-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.chapter-meta span {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 1rem;
+  background: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
+  font-size: 0.6rem;
+}
+
+.part-lede {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.95rem;
+  line-height: 1.7;
+  margin: 0 0 1rem;
+}
+
+.chapter-cards > ul > li,
+.part-cards > ul > li {
+  min-height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Reading progress page
+   --------------------------------------------------------------------------- */
+
+.progress-lede {
+  color: var(--md-default-fg-color--light);
+  max-width: 46rem;
+  line-height: 1.7;
+}
+
+.progress-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0.4rem 0 1.4rem;
+}
+
+.progress-track {
+  flex: 1;
+  height: 0.4rem;
+  border-radius: 1rem;
+  background: var(--md-default-fg-color--lightest);
+  overflow: hidden;
+}
+
+#book-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--md-accent-fg-color);
+  transition: width 0.2s ease;
+}
+
+#book-progress-text {
+  font-family: var(--md-code-font-family);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.book-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.progress-part h2 {
+  margin: 0 0 0.35rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
+  font-size: 0.95rem;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.38rem 0.2rem;
+  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.progress-row:hover {
+  background: var(--md-default-fg-color--lightest);
+}
+
+.progress-row input[type="checkbox"] {
+  width: 0.9rem;
+  height: 0.9rem;
+  accent-color: var(--md-accent-fg-color);
+}
+
+.progress-num {
+  width: 1.5rem;
+  color: var(--md-default-fg-color--light);
+  font-family: var(--md-code-font-family);
+  font-size: 0.6rem;
+}
+
+.progress-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-opt {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.25rem;
+  border: 0.05rem solid var(--md-accent-fg-color);
+  border-radius: 0.2rem;
+  color: var(--md-accent-fg-color);
+  font-size: 0.55rem;
+}
+
+.progress-link {
+  color: var(--md-accent-fg-color);
+  font-size: 0.6rem;
+  white-space: nowrap;
+}
+
+.progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1.2rem;
+}
+
+.progress-actions .md-button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.65rem;
+}
+
+.progress-feedback {
+  min-height: 1.1em;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.65rem;
+}
+
+.progress-feedback.is-error {
+  color: #c62828;
+}
+
+[data-md-color-scheme="slate"] .progress-feedback.is-error {
+  color: #ff8a80;
+}
+
+@media screen and (max-width: 44em) {
+  .chapter-cover,
+  .part-cover {
+    padding: 0.9rem 0.8rem 0.8rem;
+  }
+
+  .progress-row {
+    flex-wrap: wrap;
+  }
+
+  .progress-link {
+    margin-left: 2.4rem;
+  }
+}
+
+.md-typeset h1.home-title {
+  color: var(--md-default-fg-color);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  margin-top: 0.2rem;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
