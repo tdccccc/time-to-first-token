@@ -27,19 +27,19 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <line x1="90" y1="280" x2="90" y2="383" stroke="#94a3b8" stroke-width="1.2"/>
 <line x1="90" y1="383" x2="840" y2="383" stroke="#94a3b8" stroke-width="1.2"/>
 <text x="78" y="385" class="tick" text-anchor="end">0</text>
-<text x="78" y="337" class="tick" text-anchor="end">1500</text>
-<text x="78" y="289" class="tick" text-anchor="end">3000</text>
-<polyline points="110,368 410,367 510,363 610,351 710,324 810,284" fill="none" stroke="#0f9f6e" stroke-width="3"/>
-<circle cx="110" cy="368" r="4" fill="#0f9f6e"/><circle cx="410" cy="367" r="4" fill="#0f9f6e"/><circle cx="510" cy="363" r="4" fill="#0f9f6e"/><circle cx="610" cy="351" r="4" fill="#0f9f6e"/><circle cx="710" cy="324" r="4" fill="#0f9f6e"/><circle cx="810" cy="284" r="4" fill="#0f9f6e"/>
-<text x="650" y="338" class="small" fill="#b45309">p95 开始陡增</text>
+<text x="78" y="337" class="tick" text-anchor="end">3000</text>
+<text x="78" y="289" class="tick" text-anchor="end">6000</text>
+<polyline points="110,376 410,372 510,371 610,359 710,332 810,290" fill="none" stroke="#0f9f6e" stroke-width="3"/>
+<circle cx="110" cy="376" r="4" fill="#0f9f6e"/><circle cx="410" cy="372" r="4" fill="#0f9f6e"/><circle cx="510" cy="371" r="4" fill="#0f9f6e"/><circle cx="610" cy="359" r="4" fill="#0f9f6e"/><circle cx="710" cy="332" r="4" fill="#0f9f6e"/><circle cx="810" cy="290" r="4" fill="#0f9f6e"/>
+<text x="660" y="370" class="small" fill="#b45309">p95 开始陡增</text>
 
 <line x1="610" y1="95" x2="610" y2="393" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4"/>
 <rect x="550" y="72" width="120" height="22" rx="4" fill="#fffbeb" stroke="#fde68a"/>
 <text x="610" y="87" class="small" text-anchor="middle">拐点附近</text>
-<rect x="620" y="240" width="190" height="52" rx="7" fill="#fff7ed" stroke="#fed7aa"/>
-<text x="715" y="260" class="small" text-anchor="middle">拐点之后：多出来的并发</text>
-<text x="715" y="278" class="small" text-anchor="middle">主要变成排队，不是产出</text>
+<rect x="620" y="225" width="205" height="52" rx="7" fill="#fff7ed" stroke="#fed7aa"/>
+<text x="722" y="245" class="small" text-anchor="middle">拐点之后：多出来的并发</text>
+<text x="722" y="263" class="small" text-anchor="middle">主要变成排队，不增加吞吐</text>
 
 <line x1="90" y1="400" x2="840" y2="400" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
-<text x="465" y="421" class="note" text-anchor="middle">并发（1、8、16、32、64、128，横轴按 log2 等距）· 算例数据，不是实测</text>
+<text x="465" y="421" class="note" text-anchor="middle">并发（1、8、16、32、64、128；1→8 压缩显示）· 算例数据，不是实测</text>
 </svg>
