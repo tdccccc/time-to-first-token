@@ -1,45 +1,62 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="吞吐与 p95 延迟随并发变化的示意曲线">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="吞吐与 p95 延迟随并发变化的算例曲线：拐点区间 32–64">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:16px;font-weight:700;fill:#1f2937}.small{font-size:14px;fill:#4b5563}
-.tick{font-size:13px;fill:#6b7280}.note{font-size:14px;fill:#6b7280}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:17px;font-weight:600;fill:#1f2937}
+.small{font-size:14px;fill:#334155}
+.tick{font-size:13px;fill:#64748b}
+.axis{stroke:#94a3b8;stroke-width:1.2}
+.grid{stroke:#e2e8f0;stroke-width:1}
 </style>
-<defs>
-<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-</defs>
 <rect width="900" height="430" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">吞吐—延迟曲线：拐点比峰值更有用</text>
-<text x="40" y="64" class="sub">并发继续增加时，吞吐先放缓、p95 再陡增；两个信号要一起看。</text>
+<text x="40" y="40" class="title">吞吐—延迟曲线：拐点比峰值更有用</text>
+<text x="40" y="64" class="sub">算例（与 11.4 表一致）：吞吐先涨后平，p95 在拐点后陡增；并发档位等距，1→8 已压缩。</text>
 
-<text x="40" y="101" class="label">吞吐（请求/秒）</text>
-<line x1="90" y1="115" x2="90" y2="218" stroke="#94a3b8" stroke-width="1.2"/>
-<line x1="90" y1="218" x2="840" y2="218" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="78" y="220" class="tick" text-anchor="end">0</text>
-<text x="78" y="171" class="tick" text-anchor="end">25</text>
-<text x="78" y="123" class="tick" text-anchor="end">50</text>
-<polyline points="110,213 410,184 510,156 610,140 710,132 810,130" fill="none" stroke="#3f51b5" stroke-width="3"/>
-<circle cx="110" cy="213" r="4" fill="#3f51b5"/><circle cx="410" cy="184" r="4" fill="#3f51b5"/><circle cx="510" cy="156" r="4" fill="#3f51b5"/><circle cx="610" cy="140" r="4" fill="#3f51b5"/><circle cx="710" cy="132" r="4" fill="#3f51b5"/><circle cx="810" cy="130" r="4" fill="#3f51b5"/>
-<text x="420" y="173" class="small">吞吐增长变慢</text>
-<text x="700" y="122" class="small" fill="#b45309">接近平台</text>
+<rect x="548" y="106" width="146" height="286" fill="#fffbeb" opacity="0.7"/>
+<line x1="548" y1="106" x2="548" y2="392" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4"/>
+<line x1="694" y1="106" x2="694" y2="392" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="621" y="110" class="small" text-anchor="middle" fill="#b45309">拐点区间 32–64</text>
 
-<text x="40" y="266" class="label">p95 延迟（毫秒）</text>
-<line x1="90" y1="280" x2="90" y2="383" stroke="#94a3b8" stroke-width="1.2"/>
-<line x1="90" y1="383" x2="840" y2="383" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="78" y="385" class="tick" text-anchor="end">0</text>
-<text x="78" y="337" class="tick" text-anchor="end">3000</text>
-<text x="78" y="289" class="tick" text-anchor="end">6000</text>
-<polyline points="110,376 410,372 510,371 610,359 710,332 810,290" fill="none" stroke="#0f9f6e" stroke-width="3"/>
-<circle cx="110" cy="376" r="4" fill="#0f9f6e"/><circle cx="410" cy="372" r="4" fill="#0f9f6e"/><circle cx="510" cy="371" r="4" fill="#0f9f6e"/><circle cx="610" cy="359" r="4" fill="#0f9f6e"/><circle cx="710" cy="332" r="4" fill="#0f9f6e"/><circle cx="810" cy="290" r="4" fill="#0f9f6e"/>
-<text x="660" y="370" class="small" fill="#b45309">p95 开始陡增</text>
+<text x="40" y="98" class="label">吞吐（请求/秒）</text>
+<line x1="90" y1="220" x2="840" y2="220" class="axis"/>
+<line x1="90" y1="118" x2="90" y2="220" class="axis"/>
+<text x="80" y="224" class="tick" text-anchor="end">0</text>
+<text x="80" y="173" class="tick" text-anchor="end">25</text>
+<text x="80" y="122" class="tick" text-anchor="end">50</text>
+<polyline points="110,214.9 256,183.3 402,154.7 548,138.4 694,130.2 840,128.2" fill="none" stroke="#3f51b5" stroke-width="3"/>
+<circle cx="110" cy="214.9" r="4.5" fill="#3f51b5"/><text x="110" y="205" class="small" text-anchor="middle">2.5</text>
+<circle cx="256" cy="183.3" r="4.5" fill="#3f51b5"/><text x="256" y="174" class="small" text-anchor="middle">18</text>
+<circle cx="402" cy="154.7" r="4.5" fill="#3f51b5"/><text x="402" y="146" class="small" text-anchor="middle">32</text>
+<circle cx="548" cy="138.4" r="4.5" fill="#3f51b5"/><text x="538" y="129" class="small" text-anchor="end">40</text>
+<circle cx="694" cy="130.2" r="4.5" fill="#3f51b5"/><text x="704" y="121" class="small" text-anchor="start">44</text>
+<circle cx="840" cy="128.2" r="4.5" fill="#3f51b5"/><text x="840" y="119" class="small" text-anchor="end">45</text>
+<text x="760" y="158" class="small" fill="#64748b">饱和段</text>
 
-<line x1="610" y1="95" x2="610" y2="393" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4"/>
-<rect x="550" y="72" width="120" height="22" rx="4" fill="#fffbeb" stroke="#fde68a"/>
-<text x="610" y="87" class="small" text-anchor="middle">拐点附近</text>
-<rect x="620" y="225" width="205" height="52" rx="7" fill="#fff7ed" stroke="#fed7aa"/>
-<text x="722" y="245" class="small" text-anchor="middle">拐点之后：多出来的并发</text>
-<text x="722" y="263" class="small" text-anchor="middle">主要变成排队，不增加吞吐</text>
+<text x="40" y="264" class="label">p95 延迟（毫秒）</text>
+<line x1="90" y1="380" x2="840" y2="380" class="axis"/>
+<line x1="90" y1="280" x2="90" y2="380" class="axis"/>
+<text x="80" y="384" class="tick" text-anchor="end">0</text>
+<text x="80" y="334" class="tick" text-anchor="end">3000</text>
+<text x="80" y="284" class="tick" text-anchor="end">6000</text>
+<polyline points="110,372.8 256,369.3 402,368.3 548,356.3 694,330.2 840,289.6" fill="none" stroke="#0f9f6e" stroke-width="3"/>
+<circle cx="110" cy="372.8" r="4.5" fill="#0f9f6e"/><text x="110" y="363" class="small" text-anchor="middle">430</text>
+<circle cx="256" cy="369.3" r="4.5" fill="#0f9f6e"/><text x="256" y="360" class="small" text-anchor="middle">640</text>
+<circle cx="402" cy="368.3" r="4.5" fill="#0f9f6e"/><text x="402" y="359" class="small" text-anchor="middle">700</text>
+<circle cx="548" cy="356.3" r="4.5" fill="#0f9f6e"/><text x="538" y="347" class="small" text-anchor="end">1420</text>
+<circle cx="694" cy="330.2" r="4.5" fill="#0f9f6e"/><text x="704" y="321" class="small" text-anchor="start">2990</text>
+<circle cx="840" cy="289.6" r="4.5" fill="#0f9f6e"/><text x="840" y="281" class="small" text-anchor="end">5425</text>
 
-<line x1="90" y1="400" x2="840" y2="400" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
-<text x="465" y="421" class="note" text-anchor="middle">并发（1、8、16、32、64、128；1→8 压缩显示）· 算例数据，不是实测</text>
+<line x1="110" y1="380" x2="110" y2="386" class="axis"/>
+<line x1="256" y1="380" x2="256" y2="386" class="axis"/>
+<line x1="402" y1="380" x2="402" y2="386" class="axis"/>
+<line x1="548" y1="380" x2="548" y2="386" class="axis"/>
+<line x1="694" y1="380" x2="694" y2="386" class="axis"/>
+<line x1="840" y1="380" x2="840" y2="386" class="axis"/>
+<text x="110" y="402" class="tick" text-anchor="middle">1</text>
+<text x="256" y="402" class="tick" text-anchor="middle">8</text>
+<text x="402" y="402" class="tick" text-anchor="middle">16</text>
+<text x="548" y="402" class="tick" text-anchor="middle">32</text>
+<text x="694" y="402" class="tick" text-anchor="middle">64</text>
+<text x="840" y="402" class="tick" text-anchor="middle">128</text>
 </svg>

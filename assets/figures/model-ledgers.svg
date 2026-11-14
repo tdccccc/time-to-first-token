@@ -1,75 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="五个模型的总参数与每 8K 请求全局 KV 对照：两列均为对数轴，参数规模与 KV 账并不同向">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="五个模型的总参数与每 8K 请求全局 KV 对照：两列均为对数轴">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 .title{font-size:25px;font-weight:700;fill:#1f2937}
-.sub{font-size:15px;fill:#6b7280}
-.ptitle{font-size:17px;font-weight:700;fill:#1f2937}
-.row{font-size:15px;fill:#1f2937}
-.val{font-size:14px;fill:#374151}
-.tick{font-size:13px;fill:#6b7280}
-.note{font-size:13.5px;fill:#6b7280}
+.sub{font-size:15px;fill:#64748b}
+.ptitle{font-size:17px;font-weight:600;fill:#1f2937}
+.row{font-size:16px;fill:#1f2937}
+.val{font-size:14px;fill:#334155}
+.tick{font-size:13px;fill:#64748b}
+.note{font-size:13px;fill:#64748b}
 </style>
 <rect width="900" height="430" fill="#fbfcfe"/>
 <text x="40" y="40" class="title">参数规模与 KV 账并不同向</text>
-<text x="40" y="64" class="sub">同一行是一个模型；左列总参数，右列每 8K 请求的全局 KV，两列都是对数轴，固定状态另计。</text>
-<text x="200" y="102" class="ptitle">总参数（B）</text>
-<text x="570" y="102" class="ptitle">每 8K 请求全局 KV（MiB）</text>
-<line x1="227.0" y1="120" x2="227.0" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="227.0" y="348" class="tick" text-anchor="middle">10</text>
-<line x1="604.0" y1="120" x2="604.0" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="604.0" y="348" class="tick" text-anchor="middle">10</text>
-<line x1="316.5" y1="120" x2="316.5" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="316.5" y="348" class="tick" text-anchor="middle">100</text>
-<line x1="717.1" y1="120" x2="717.1" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="717.1" y="348" class="tick" text-anchor="middle">100</text>
-<line x1="406.1" y1="120" x2="406.1" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="406.1" y="348" class="tick" text-anchor="middle">1,000</text>
-<line x1="830.1" y1="120" x2="830.1" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="830.1" y="348" class="tick" text-anchor="middle">1,000</text>
-<line x1="200" y1="330" x2="460" y2="330" stroke="#cbd5e1" stroke-width="1.2"/>
-<line x1="570" y1="330" x2="850" y2="330" stroke="#cbd5e1" stroke-width="1.2"/>
-<line x1="520" y1="112" x2="520" y2="330" stroke="#e5e7eb" stroke-width="1"/>
-<text x="40" y="150" class="row">Qwen3-8B</text>
-<line x1="219.2" y1="145" x2="466" y2="145" stroke="#cbd5e1" stroke-width="1"/>
-<circle cx="219.2" cy="145" r="10" fill="#6366f1" opacity="0.13"/>
-<circle cx="219.2" cy="145" r="5.5" fill="#6366f1"/>
-<text x="470" y="150" class="val">8.19</text>
-<circle cx="837.0" cy="145" r="10" fill="#6366f1" opacity="0.13"/>
-<circle cx="837.0" cy="145" r="5.5" fill="#6366f1"/>
-<text x="849.0" y="150" class="val">1,152</text>
-<text x="40" y="190" class="row">Qwen3.6</text>
-<line x1="275.3" y1="185" x2="466" y2="185" stroke="#cbd5e1" stroke-width="1"/>
-<circle cx="275.3" cy="185" r="10" fill="#0891b2" opacity="0.13"/>
-<circle cx="275.3" cy="185" r="5.5" fill="#0891b2"/>
-<text x="470" y="190" class="val">34.66</text>
-<circle cx="740.1" cy="185" r="10" fill="#0891b2" opacity="0.13"/>
-<circle cx="740.1" cy="185" r="5.5" fill="#0891b2"/>
-<text x="752.1" y="190" class="val">160</text>
-<text x="40" y="230" class="row">V4-Flash</text>
-<line x1="357.2" y1="225" x2="466" y2="225" stroke="#cbd5e1" stroke-width="1"/>
-<circle cx="357.2" cy="225" r="10" fill="#16a34a" opacity="0.13"/>
-<circle cx="357.2" cy="225" r="5.5" fill="#16a34a"/>
-<text x="470" y="230" class="val">284.3</text>
-<circle cx="653.6" cy="225" r="10" fill="#16a34a" opacity="0.13"/>
-<circle cx="653.6" cy="225" r="5.5" fill="#16a34a"/>
-<text x="665.6" y="230" class="val">27.46</text>
-<text x="40" y="270" class="row">V4.1 Flash</text>
-<line x1="394.8" y1="265" x2="466" y2="265" stroke="#cbd5e1" stroke-width="1"/>
-<circle cx="394.8" cy="265" r="10" fill="#d97706" opacity="0.13"/>
-<circle cx="394.8" cy="265" r="5.5" fill="#d97706"/>
-<text x="470" y="270" class="val">748.5</text>
-<circle cx="586.2" cy="265" r="10" fill="#d97706" opacity="0.13"/>
-<circle cx="586.2" cy="265" r="5.5" fill="#d97706"/>
-<text x="598.2" y="270" class="val">6.953</text>
-<text x="40" y="310" class="row">Kimi K3</text>
-<line x1="445.8" y1="305" x2="466" y2="305" stroke="#cbd5e1" stroke-width="1"/>
-<circle cx="445.8" cy="305" r="10" fill="#db2777" opacity="0.13"/>
-<circle cx="445.8" cy="305" r="5.5" fill="#db2777"/>
-<text x="470" y="310" class="val">2,779</text>
-<circle cx="754.9" cy="305" r="10" fill="#db2777" opacity="0.13"/>
-<circle cx="754.9" cy="305" r="5.5" fill="#db2777"/>
-<text x="766.9" y="310" class="val">216</text>
-<text x="40" y="376" class="note">读法：参数从少到多排，KV 没有跟着同向变化。</text>
-<text x="40" y="397" class="note">Qwen3-8B 参数最少、KV 最大；V4.1 Flash 参数第二、KV 最小。</text>
-<text x="40" y="418" class="note">口径：V4-Flash/V4.1 为生产混合格式；其余按表 7.4 的 BF16/紧凑 MLA/混合口径；V4.1 总数含 Engram。</text>
+<text x="40" y="64" class="sub">同一行是一个模型，左右同色；左列总参数，右列每 8K 请求全局 KV，两列均为对数轴。</text>
+
+<text x="305" y="100" class="ptitle" text-anchor="middle">总参数（B）</text>
+<text x="680" y="100" class="ptitle" text-anchor="middle">每 8K 请求全局 KV（MiB）</text>
+
+<g class="tick">
+<line x1="206" y1="118" x2="206" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+<line x1="292" y1="118" x2="292" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+<line x1="378" y1="118" x2="378" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+<line x1="587" y1="118" x2="587" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+<line x1="680" y1="118" x2="680" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+<line x1="772" y1="118" x2="772" y2="320" stroke="#e2e8f0" stroke-width="1"/>
+</g>
+<line x1="180" y1="320" x2="430" y2="320" stroke="#94a3b8" stroke-width="1.2"/>
+<line x1="560" y1="320" x2="800" y2="320" stroke="#94a3b8" stroke-width="1.2"/>
+<text x="206" y="338" class="tick" text-anchor="middle">10</text>
+<text x="292" y="338" class="tick" text-anchor="middle">100</text>
+<text x="378" y="338" class="tick" text-anchor="middle">1,000</text>
+<text x="587" y="338" class="tick" text-anchor="middle">10</text>
+<text x="680" y="338" class="tick" text-anchor="middle">100</text>
+<text x="772" y="338" class="tick" text-anchor="middle">1,000</text>
+
+<text x="40" y="147" class="row">Qwen3-8B</text>
+<circle cx="198.5" cy="142" r="10" fill="#3f51b5" opacity="0.14"/>
+<circle cx="198.5" cy="142" r="5.5" fill="#3f51b5"/>
+<text x="210" y="147" class="val">8.19</text>
+<circle cx="777.9" cy="142" r="10" fill="#3f51b5" opacity="0.14"/>
+<circle cx="777.9" cy="142" r="5.5" fill="#3f51b5"/>
+<text x="790" y="147" class="val">1,152</text>
+
+<text x="40" y="187" class="row">Qwen3.6</text>
+<circle cx="252.4" cy="182" r="10" fill="#0f9f6e" opacity="0.14"/>
+<circle cx="252.4" cy="182" r="5.5" fill="#0f9f6e"/>
+<text x="264" y="187" class="val">34.66</text>
+<circle cx="698.8" cy="182" r="10" fill="#0f9f6e" opacity="0.14"/>
+<circle cx="698.8" cy="182" r="5.5" fill="#0f9f6e"/>
+<text x="711" y="187" class="val">160</text>
+
+<text x="40" y="227" class="row">V4-Flash</text>
+<circle cx="331.1" cy="222" r="10" fill="#b45309" opacity="0.14"/>
+<circle cx="331.1" cy="222" r="5.5" fill="#b45309"/>
+<text x="343" y="227" class="val">284.3</text>
+<circle cx="628.2" cy="222" r="10" fill="#b45309" opacity="0.14"/>
+<circle cx="628.2" cy="222" r="5.5" fill="#b45309"/>
+<text x="640" y="227" class="val">27.46</text>
+
+<text x="40" y="267" class="row">V4.1 Flash</text>
+<circle cx="367.3" cy="262" r="10" fill="#f59e0b" opacity="0.16"/>
+<circle cx="367.3" cy="262" r="5.5" fill="#f59e0b"/>
+<text x="379" y="267" class="val">748.5</text>
+<circle cx="573.2" cy="262" r="10" fill="#f59e0b" opacity="0.16"/>
+<circle cx="573.2" cy="262" r="5.5" fill="#f59e0b"/>
+<text x="585" y="267" class="val">6.953</text>
+
+<text x="40" y="307" class="row">Kimi K3</text>
+<circle cx="416.4" cy="302" r="10" fill="#64748b" opacity="0.16"/>
+<circle cx="416.4" cy="302" r="5.5" fill="#64748b"/>
+<text x="428" y="307" class="val">2,779</text>
+<circle cx="710.8" cy="302" r="10" fill="#64748b" opacity="0.16"/>
+<circle cx="710.8" cy="302" r="5.5" fill="#64748b"/>
+<text x="723" y="307" class="val">216</text>
+
+<text x="40" y="370" class="note">读法：参数从少到多排，KV 没有同向变化；Qwen3-8B 参数最少、KV 最大，V4.1 Flash 参数第二、KV 最小。</text>
+<text x="40" y="394" class="note">口径：V4-Flash/V4.1 为生产混合格式；其余按表 7.4 的 BF16/紧凑 MLA/混合口径；V4.1 总数含 Engram。</text>
 </svg>

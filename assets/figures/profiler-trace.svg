@@ -1,60 +1,72 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="CPU 与 GPU 双泳道 trace 示意">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="CPU 与 GPU 双泳道 trace 示意：kernel、空白与同步等待">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.lane{font-size:18px;font-weight:600;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
-.bar{font-size:15px;font-weight:600;fill:#ffffff}.axis{stroke:#94a3b8;stroke-width:1.5}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.lane{font-size:16px;font-weight:600;fill:#1f2937}
+.small{font-size:14px;fill:#64748b}
+.bar{font-size:14px;font-weight:600;fill:#ffffff}
+.tick{font-size:13px;fill:#64748b}
+.axis{stroke:#94a3b8;stroke-width:1.5}
 </style>
 <rect width="900" height="430" fill="#fbfcfe"/>
 <text x="40" y="40" class="title">一次推理的 trace：两条线，两种时间</text>
-<text x="40" y="64" class="sub">示意，不是实测。CPU 线记录发射与调度，GPU 线记录真正执行。</text>
-<g transform="translate(650 30)">
-<rect x="0" y="0" width="14" height="14" rx="2" fill="#e5e7eb"/><text x="20" y="12" class="small">CPU</text>
-<rect x="62" y="0" width="14" height="14" rx="2" fill="#0ea5e9"/><text x="82" y="12" class="small">kernel</text>
-<rect x="140" y="0" width="14" height="14" rx="2" fill="#fee2e2" stroke="#ef4444" stroke-dasharray="3 2"/><text x="160" y="12" class="small">等待</text>
+<text x="40" y="64" class="sub">示意，不代表具体硬件的数值。CPU 线记录发射与调度，GPU 线记录真正执行。</text>
+<g transform="translate(628 24)">
+<rect x="0" y="0" width="13" height="13" rx="2" fill="#e2e8f0"/><text x="19" y="11" class="tick">CPU</text>
+<rect x="60" y="0" width="13" height="13" rx="2" fill="#3f51b5"/><text x="79" y="11" class="tick">kernel</text>
+<rect x="139" y="0" width="13" height="13" rx="2" fill="#fee2e2" stroke="#f87171" stroke-dasharray="3 2"/><text x="158" y="11" class="tick">等待</text>
 </g>
-<text x="90" y="112" class="lane">CPU：Python 调用、dispatch、kernel 启动</text>
+
+<text x="90" y="104" class="lane">CPU：Python 调用、dispatch、kernel 启动</text>
 <g>
-<rect x="90" y="124" width="100" height="38" rx="5" fill="#e5e7eb"/>
-<text x="100" y="148" class="small" fill="#374151">Python / 调度</text>
-<rect x="190" y="124" width="80" height="38" rx="5" fill="#3f51b5"/>
-<text x="200" y="148" class="bar">launch ×3</text>
-<rect x="270" y="124" width="120" height="38" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-<text x="280" y="148" class="small" fill="#b45309">synchronize</text>
-<rect x="390" y="124" width="60" height="38" rx="5" fill="#3f51b5"/>
-<text x="400" y="148" class="bar">launch</text>
-<rect x="450" y="124" width="110" height="38" rx="5" fill="#e5e7eb"/>
-<text x="460" y="148" class="small" fill="#374151">Python / 后处理</text>
+<rect x="90" y="118" width="95" height="40" rx="5" fill="#e2e8f0"/>
+<text x="100" y="143" class="small" fill="#64748b">Python / 调度</text>
+<rect x="185" y="118" width="80" height="40" rx="5" fill="#3f51b5"/>
+<text x="195" y="143" class="bar">launch ×3</text>
+<rect x="265" y="118" width="120" height="40" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.2"/>
+<text x="275" y="143" class="small" fill="#b45309">synchronize</text>
+<rect x="385" y="118" width="65" height="40" rx="5" fill="#3f51b5"/>
+<text x="395" y="143" class="bar">launch</text>
+<rect x="450" y="118" width="110" height="40" rx="5" fill="#e2e8f0"/>
+<text x="460" y="143" class="small" fill="#64748b">Python / 采样</text>
+<rect x="560" y="118" width="60" height="40" rx="5" fill="#3f51b5"/>
+<text x="570" y="143" class="bar">launch</text>
+<rect x="620" y="118" width="160" height="40" rx="5" fill="#e2e8f0"/>
+<text x="630" y="143" class="small" fill="#64748b">Python / 后处理</text>
 </g>
-<text x="90" y="212" class="lane">GPU：kernel 执行、拷贝</text>
+
+<text x="90" y="196" class="lane">GPU：kernel 执行、拷贝</text>
 <g>
-<rect x="205" y="224" width="30" height="44" rx="4" fill="#0ea5e9"/><text x="214" y="251" class="bar">k1</text>
-<rect x="240" y="224" width="30" height="44" rx="4" fill="#0ea5e9"/><text x="249" y="251" class="bar">k2</text>
-<rect x="275" y="224" width="30" height="44" rx="4" fill="#0ea5e9"/><text x="284" y="251" class="bar">k3</text>
-<rect x="305" y="224" width="85" height="44" rx="4" fill="#fee2e2" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="4 3"/>
-<text x="315" y="251" class="small" fill="#b91c1c">GPU 空等</text>
-<rect x="395" y="224" width="125" height="44" rx="4" fill="#3f51b5"/>
-<text x="405" y="251" class="bar">长 kernel</text>
-<rect x="525" y="224" width="25" height="44" rx="4" fill="#0ea5e9"/><text x="530" y="251" class="bar">k5</text>
-<rect x="555" y="224" width="25" height="44" rx="4" fill="#0ea5e9"/><text x="560" y="251" class="bar">k6</text>
-<rect x="620" y="224" width="160" height="44" rx="4" fill="#3f51b5"/>
-<text x="630" y="251" class="bar">长 kernel</text>
-<rect x="785" y="224" width="25" height="44" rx="4" fill="#0ea5e9"/><text x="790" y="251" class="bar">k8</text>
+<rect x="200" y="210" width="28" height="46" rx="4" fill="#3f51b5"/><text x="214" y="238" class="bar" text-anchor="middle">k1</text>
+<rect x="230" y="210" width="28" height="46" rx="4" fill="#3f51b5"/><text x="244" y="238" class="bar" text-anchor="middle">k2</text>
+<rect x="260" y="210" width="28" height="46" rx="4" fill="#3f51b5"/><text x="274" y="238" class="bar" text-anchor="middle">k3</text>
+<rect x="290" y="210" width="95" height="46" rx="4" fill="#fee2e2" stroke="#f87171" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="300" y="238" class="small" fill="#b45309">GPU 空等</text>
+<rect x="390" y="210" width="130" height="46" rx="4" fill="#3f51b5"/>
+<text x="400" y="238" class="bar">长 kernel</text>
+<rect x="525" y="210" width="25" height="46" rx="4" fill="#3f51b5"/><text x="537.5" y="238" class="bar" text-anchor="middle">k5</text>
+<rect x="552" y="210" width="25" height="46" rx="4" fill="#3f51b5"/><text x="564.5" y="238" class="bar" text-anchor="middle">k6</text>
+<rect x="580" y="210" width="200" height="46" rx="4" fill="#3f51b5"/>
+<text x="590" y="238" class="bar">长 kernel</text>
+<rect x="785" y="210" width="25" height="46" rx="4" fill="#3f51b5"/><text x="797.5" y="238" class="bar" text-anchor="middle">k8</text>
 </g>
+
 <g fill="none" stroke-width="1.5">
-<path d="M90 278 V271 H205 V278" stroke="#94a3b8"/>
-<path d="M305 278 V271 H390 V278" stroke="#ef4444"/>
+<path d="M90 264 V256 H200 V264" stroke="#94a3b8"/>
+<path d="M290 264 V256 H390 V264" stroke="#f87171"/>
 </g>
-<text x="95" y="296" class="small">启动前空等：CPU 还在准备</text>
-<text x="305" y="296" class="small" fill="#b91c1c">同步点：GPU 等 CPU 读回结果</text>
-<line x1="90" y1="350" x2="840" y2="350" class="axis"/>
-<g class="small">
-<line x1="90" y1="344" x2="90" y2="356" class="axis"/><text x="90" y="374" text-anchor="middle">0</text>
-<line x1="240" y1="344" x2="240" y2="356" class="axis"/><text x="240" y="374" text-anchor="middle">0.4</text>
-<line x1="390" y1="344" x2="390" y2="356" class="axis"/><text x="390" y="374" text-anchor="middle">0.8</text>
-<line x1="540" y1="344" x2="540" y2="356" class="axis"/><text x="540" y="374" text-anchor="middle">1.2</text>
-<line x1="690" y1="344" x2="690" y2="356" class="axis"/><text x="690" y="374" text-anchor="middle">1.6</text>
-<line x1="840" y1="344" x2="840" y2="356" class="axis"/><text x="828" y="374">2.0 ms</text>
+<text x="95" y="282" class="small">启动前空等：CPU 还在准备</text>
+<text x="290" y="282" class="small" fill="#b45309">同步点：GPU 等 CPU 读回结果</text>
+
+<line x1="90" y1="336" x2="840" y2="336" class="axis"/>
+<g class="tick">
+<line x1="90" y1="330" x2="90" y2="342" class="axis"/><text x="90" y="354" text-anchor="middle">0</text>
+<line x1="240" y1="330" x2="240" y2="342" class="axis"/><text x="240" y="354" text-anchor="middle">0.4</text>
+<line x1="390" y1="330" x2="390" y2="342" class="axis"/><text x="390" y="354" text-anchor="middle">0.8</text>
+<line x1="540" y1="330" x2="540" y2="342" class="axis"/><text x="540" y="354" text-anchor="middle">1.2</text>
+<line x1="690" y1="330" x2="690" y2="342" class="axis"/><text x="690" y="354" text-anchor="middle">1.6</text>
+<line x1="840" y1="330" x2="840" y2="342" class="axis"/><text x="840" y="354" text-anchor="end">2.0 ms</text>
 </g>
-<text x="90" y="408" class="small">先看 GPU 线有没有成片空白，再对齐 CPU 线看空白下方在做什么，最后才排算子。</text>
+<text x="90" y="394" class="small">先看 GPU 线有没有成片空白，再对齐 CPU 线看空白下方在做什么，最后才排算子。</text>
 </svg>

@@ -1,32 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-label="投机解码">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="投机解码：草稿模型先猜，目标模型一次验证">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:18px;font-weight:600;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:18px;font-weight:600;fill:#1f2937}
+.small{font-size:14px;fill:#64748b}
+.note{font-size:13px;fill:#64748b}
 </style>
-<rect width="900" height="360" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">投机解码：先猜，再验证</text>
-<text x="40" y="64" class="sub">draft 模型连续猜多个 token，target 模型一次前向验证；接受率决定收益。</text>
-<text x="70" y="110" class="small">draft 模型（小、快）</text>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">投机解码：先猜，再验证</text>
+<text x="40" y="64" class="sub">草稿模型连续猜 γ 个 token，目标模型一次前向并行验证；接受率决定收益。</text>
+
+<text x="70" y="104" class="small">草稿模型（draft）：自回归猜 4 个候选</text>
 <g>
-<rect x="70" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="105" y="155" class="small" text-anchor="middle">d1</text>
-<rect x="150" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="185" y="155" class="small" text-anchor="middle">d2</text>
-<rect x="230" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="265" y="155" class="small" text-anchor="middle">d3</text>
-<rect x="310" y="125" width="70" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="345" y="155" class="small" text-anchor="middle">d4</text>
+<rect x="70" y="120" width="80" height="50" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="110" y="151" class="small" text-anchor="middle">d1</text>
+<rect x="160" y="120" width="80" height="50" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="200" y="151" class="small" text-anchor="middle">d2</text>
+<rect x="250" y="120" width="80" height="50" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="290" y="151" class="small" text-anchor="middle">d3</text>
+<rect x="340" y="120" width="80" height="50" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="380" y="151" class="small" text-anchor="middle">d4</text>
 </g>
-<line x1="395" y1="149" x2="485" y2="149" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
-<rect x="495" y="105" width="250" height="90" rx="10" fill="#fff" stroke="#dbe3ef"/>
-<text x="620" y="135" class="label" text-anchor="middle">target 模型</text>
-<text x="620" y="158" class="small" text-anchor="middle">一次前向，并行验证 4 个</text>
-<text x="620" y="178" class="small" text-anchor="middle">接受 / 拒绝，从修正分布重采样</text>
-<line x1="620" y1="205" x2="620" y2="245" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
+<line x1="70" y1="188" x2="420" y2="188" stroke="#94a3b8" stroke-width="1.2"/>
+<line x1="70" y1="182" x2="70" y2="194" stroke="#94a3b8" stroke-width="1.2"/>
+<line x1="420" y1="182" x2="420" y2="194" stroke="#94a3b8" stroke-width="1.2"/>
+<text x="245" y="206" class="small" text-anchor="middle">γ = 4</text>
+<line x1="425" y1="145" x2="481" y2="145" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+<rect x="485" y="110" width="345" height="90" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="657" y="138" class="label" text-anchor="middle">目标模型（target）</text>
+<text x="657" y="162" class="small" text-anchor="middle">一次前向，并行验证 4 个候选</text>
+<text x="657" y="184" class="small" text-anchor="middle">接受 / 拒绝；拒绝处按修正分布重采样</text>
+<line x1="657" y1="204" x2="657" y2="244" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
 <g>
-<rect x="300" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="345" y="283" class="small" text-anchor="middle">接受</text>
-<rect x="400" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="445" y="283" class="small" text-anchor="middle">接受</text>
-<rect x="500" y="255" width="90" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="545" y="283" class="small" text-anchor="middle">接受</text>
-<rect x="600" y="255" width="90" height="44" rx="7" fill="#fee2e2" stroke="#fecaca"/><text x="645" y="283" class="small" text-anchor="middle">拒绝</text>
+<rect x="458" y="254" width="80" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="498" y="282" class="small" text-anchor="middle">接受</text>
+<rect x="544" y="254" width="80" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="584" y="282" class="small" text-anchor="middle">接受</text>
+<rect x="630" y="254" width="80" height="44" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="670" y="282" class="small" text-anchor="middle">接受</text>
+<rect x="716" y="254" width="140" height="44" rx="7" fill="#fee2e2" stroke="#fecaca"/><text x="786" y="282" class="small" text-anchor="middle">拒绝 → 重采样</text>
 </g>
-<text x="70" y="330" class="small">期望产出 ≈ 1 + α + α² + …；α 是接受率。α 低时，draft 的开销可能吃掉收益。</text>
-<text x="70" y="350" class="small">所以要看交叉点：低 QPS 的加速比不是结论，负载曲线才是。</text>
-<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<text x="70" y="282" class="small">本轮示例：接受 3 个、拒绝 1 个</text>
+
+<text x="70" y="352" class="label">期望产出 E = 1 + α + α² + … + α^γ；α 为接受率，γ = 4。</text>
+<text x="70" y="390" class="note">示意：接受率 α 决定收益；低 QPS 的加速比不能外推到高 QPS。</text>
 </svg>

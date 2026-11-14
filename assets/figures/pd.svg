@@ -1,29 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" role="img" aria-label="解耦式服务">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="解耦式服务：prefill 池、decode 池与 KV 传输的抽象示意">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:19px;font-weight:700;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:19px;font-weight:700;fill:#1f2937}
+.small{font-size:14px;fill:#64748b}
 </style>
-<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-<rect width="900" height="400" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">解耦式服务：prefill 与 decode 分池</text>
-<text x="40" y="64" class="sub">两个阶段的瓶颈不同，才值得拆成两套实例；KV 要跨池传输。</text>
-<rect x="50" y="150" width="110" height="70" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="105" y="180" class="small" text-anchor="middle">router</text><text x="105" y="200" class="small" text-anchor="middle">请求入口</text>
-<line x1="162" y1="170" x2="235" y2="125" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
-<rect x="240" y="80" width="270" height="100" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="375" y="110" class="label" text-anchor="middle">prefill 池</text>
-<text x="375" y="135" class="small" text-anchor="middle">算力密集，适合大 batch 的 prefill</text>
-<text x="375" y="155" class="small" text-anchor="middle">产出一整段 KV</text>
-<rect x="560" y="220" width="270" height="100" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-<text x="695" y="250" class="label" text-anchor="middle">decode 池</text>
-<text x="695" y="275" class="small" text-anchor="middle">带宽密集，逐 token 生成</text>
-<text x="695" y="295" class="small" text-anchor="middle">只读 KV，不再算 prefill</text>
-<rect x="370" y="200" width="150" height="60" rx="8" fill="#fffbeb" stroke="#fde68a"/>
-<text x="445" y="225" class="small" text-anchor="middle">KV 传输 / 池</text>
-<text x="445" y="243" class="small" text-anchor="middle">网络 · 显存</text>
-<line x1="510" y1="165" x2="445" y2="198" stroke="#f59e0b" stroke-width="2" marker-end="url(#a)"/>
-<line x1="520" y1="230" x2="558" y2="245" stroke="#f59e0b" stroke-width="2" marker-end="url(#a)"/>
-<text x="70" y="350" class="small">收益 = prefill 排队省下的时间 − KV 传输成本；传输慢、prompt 短时不一定划算。</text>
-<text x="70" y="374" class="small">两池的卡数、网络、扩缩容信号要一起设计，不能只拆服务。</text>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">解耦式服务：prefill 与 decode 分池</text>
+<text x="40" y="64" class="sub">抽象示意：只画两池与 KV 传输，不展开跨节点拓扑；收益取决于 KV 传输成本。</text>
+
+<rect x="50" y="190" width="120" height="80" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="110" y="224" class="small" text-anchor="middle" style="font-size:16px;font-weight:600;fill:#1f2937">router</text>
+<text x="110" y="246" class="small" text-anchor="middle">请求入口</text>
+
+<rect x="250" y="100" width="260" height="110" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="380" y="136" class="label" text-anchor="middle">prefill 池</text>
+<text x="380" y="164" class="small" text-anchor="middle">算力密集：大 batch 预填充</text>
+<text x="380" y="188" class="small" text-anchor="middle">产出一整段 KV</text>
+
+<rect x="380" y="250" width="160" height="70" rx="8" fill="#fffbeb" stroke="#fde68a"/>
+<text x="460" y="280" class="small" text-anchor="middle" style="font-size:16px;font-weight:600;fill:#1f2937">KV 传输</text>
+<text x="460" y="304" class="small" text-anchor="middle">网络 / 显存</text>
+
+<rect x="570" y="250" width="260" height="110" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+<text x="700" y="286" class="label" text-anchor="middle">decode 池</text>
+<text x="700" y="314" class="small" text-anchor="middle">带宽密集：逐 token 生成</text>
+<text x="700" y="338" class="small" text-anchor="middle">只读 KV，不再算 prefill</text>
+
+<line x1="172" y1="220" x2="246" y2="168" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+<line x1="440" y1="214" x2="440" y2="246" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="450" y="234" class="small" fill="#b45309">KV 写出</text>
+<line x1="544" y1="285" x2="566" y2="285" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow)"/>
+
+<text x="50" y="404" class="small">收益 = 省下的 prefill 排队与干扰 − KV 传输成本；两池的卡数与扩缩容信号要一起设计。</text>
 </svg>

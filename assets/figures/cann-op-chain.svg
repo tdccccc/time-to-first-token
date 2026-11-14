@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="CANN 分层与 AscendC 算子的定义、编译、注册、调用四环">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.head{font-size:16px;font-weight:700;fill:#1f2937}
+.label{font-size:15px;font-weight:700;fill:#1f2937}
+.detail{font-size:14px;fill:#64748b}
+.num{font-size:14px;font-weight:700;fill:#1f2937}
+.note{font-size:14px;fill:#64748b}
+</style>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">一个 AscendC 算子要过的四道手</text>
+<text x="40" y="64" class="sub">左边是 CANN 的层，右边是一个算子从源码到被 vLLM 调用的四环；任何一环没接上，症状都出现在别处。</text>
+
+<text x="40" y="96" class="head">CANN 分层：算子开发横跨编译层与接口层</text>
+<text x="490" y="96" class="head">四环：定义 → 编译 → 注册 → 调用</text>
+<line x1="460" y1="88" x2="460" y2="376" stroke="#e2e8f0" stroke-width="1.2"/>
+
+<g>
+<rect x="40" y="106" width="390" height="38" rx="6" fill="#e0e7ff" stroke="#c7d2fe"/>
+<text x="56" y="121" class="label">推理引擎与插件</text>
+<text x="56" y="138" class="detail">vLLM + vllm-ascend：模型代码与平台插件</text>
+
+<rect x="40" y="146" width="390" height="38" rx="6" fill="#dbeafe" stroke="#bfdbfe"/>
+<text x="56" y="161" class="label">框架适配</text>
+<text x="56" y="178" class="detail">torch_npu：op_plugin 接到 AscendCL</text>
+
+<rect x="40" y="186" width="390" height="38" rx="6" fill="#dbeafe" stroke="#bfdbfe"/>
+<text x="56" y="201" class="label">计算语言 / 接口</text>
+<text x="56" y="218" class="detail">AscendCL：acl · aclrt · aclnn</text>
+
+<rect x="40" y="226" width="390" height="38" rx="6" fill="#d1fae5" stroke="#a7f3d0"/>
+<text x="56" y="241" class="label">计算服务层</text>
+<text x="56" y="258" class="detail">AOL 算子库 · GE 图引擎 · AOE 调优</text>
+
+<rect x="40" y="266" width="390" height="38" rx="6" fill="#fef3c7" stroke="#fde68a"/>
+<text x="56" y="281" class="label">计算编译层</text>
+<text x="56" y="298" class="detail">Ascend C 编译器 · TBE · 图编译器</text>
+
+<rect x="40" y="306" width="390" height="38" rx="6" fill="#fee2e2" stroke="#fecaca"/>
+<text x="56" y="321" class="label">执行层 / 基础层</text>
+<text x="56" y="338" class="detail">Runtime · Graph Executor · HCCL · 驱动与固件</text>
+
+<rect x="40" y="346" width="390" height="38" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+<text x="56" y="361" class="label">昇腾 NPU</text>
+<text x="56" y="378" class="detail">AIV 向量核 · AIC 矩阵核</text>
+</g>
+
+<g>
+<rect x="490" y="106" width="370" height="60" rx="7" fill="#fef3c7" stroke="#fde68a"/>
+<circle cx="510" cy="123" r="11" fill="#ffffff" stroke="#f59e0b"/>
+<text x="510" y="128" class="num" text-anchor="middle">1</text>
+<text x="530" y="124" class="label">定义</text>
+<text x="530" y="141" class="detail">op_host/：原型、shape/dtype 推导、tiling</text>
+<text x="530" y="158" class="detail">op_kernel/：Init / Process</text>
+
+<rect x="490" y="176" width="370" height="60" rx="7" fill="#d1fae5" stroke="#a7f3d0"/>
+<circle cx="510" cy="193" r="11" fill="#ffffff" stroke="#0f9f6e"/>
+<text x="510" y="198" class="num" text-anchor="middle">2</text>
+<text x="530" y="194" class="label">编译</text>
+<text x="530" y="211" class="detail">build.sh → custom_opp_*.run 或 vendors/</text>
+<text x="530" y="228" class="detail">产物：kernel 二进制 + 信息库 + aclnn 库</text>
+
+<rect x="490" y="246" width="370" height="60" rx="7" fill="#dbeafe" stroke="#bfdbfe"/>
+<circle cx="510" cy="263" r="11" fill="#ffffff" stroke="#3f51b5"/>
+<text x="510" y="268" class="num" text-anchor="middle">3</text>
+<text x="530" y="264" class="label">注册</text>
+<text x="530" y="281" class="detail">CANN：ASCEND_CUSTOM_OPP_PATH</text>
+<text x="530" y="298" class="detail">PyTorch：_C_ascend；vLLM：register_oot</text>
+
+<rect x="490" y="316" width="370" height="60" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/>
+<circle cx="510" cy="333" r="11" fill="#ffffff" stroke="#64748b"/>
+<text x="510" y="338" class="num" text-anchor="middle">4</text>
+<text x="530" y="334" class="label">调用</text>
+<text x="530" y="351" class="detail">forward_oot → aclnn → Runtime → kernel</text>
+<text x="530" y="368" class="detail">模型侧只需替换 forward_oot</text>
+</g>
+
+<polygon points="675,174 669,166 681,166" fill="#94a3b8"/>
+<polygon points="675,244 669,236 681,236" fill="#94a3b8"/>
+<polygon points="675,314 669,306 681,306" fill="#94a3b8"/>
+
+<text x="40" y="404" class="note">源码→kernel 在编译层；算子包→OPP 在服务层；调用走 aclnn；目录名随版本变化。</text>
+</svg>

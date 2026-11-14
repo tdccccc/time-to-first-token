@@ -1,22 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="国产芯片软件栈">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="国产芯片软件栈五层：驱动、SDK、算子库、框架插件、推理引擎">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:18px;font-weight:700;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:18px;font-weight:700;fill:#1f2937}
+.small{font-size:14px;fill:#64748b}
+.tick{font-size:13px;fill:#64748b}
 </style>
-<rect width="900" height="420" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">国产芯片软件栈：一层都不能少</text>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">国产芯片软件栈：一层都不能少</text>
 <text x="40" y="64" class="sub">模型能不能跑、算子覆盖到哪、性能损失多少，答案都在这些层之间。</text>
+
 <g>
-<rect x="170" y="95" width="560" height="48" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/><text x="190" y="125" class="label">推理引擎</text><text x="700" y="125" class="small" text-anchor="end">vLLM / SGLang</text>
-<rect x="170" y="153" width="560" height="48" rx="7" fill="#dbeafe" stroke="#bfdbfe"/><text x="190" y="183" class="label">框架插件</text><text x="700" y="183" class="small" text-anchor="end">vllm-ascend / 自定义 op</text>
-<rect x="170" y="211" width="560" height="48" rx="7" fill="#d1fae5" stroke="#a7f3d0"/><text x="190" y="241" class="label">算子库</text><text x="700" y="241" class="small" text-anchor="end">AscendC / cuBLAS / Triton</text>
-<rect x="170" y="269" width="560" height="48" rx="7" fill="#fef3c7" stroke="#fde68a"/><text x="190" y="299" class="label">SDK / 运行时</text><text x="700" y="299" class="small" text-anchor="end">CANN / CUDA</text>
-<rect x="170" y="327" width="560" height="48" rx="7" fill="#fee2e2" stroke="#fecaca"/><text x="190" y="357" class="label">驱动 / 固件</text><text x="700" y="357" class="small" text-anchor="end">NPU driver / GPU driver</text>
+<rect x="170" y="94" width="560" height="46" rx="7" fill="#e0e7ff" stroke="#c7d2fe"/>
+<text x="190" y="123" class="label">推理引擎</text>
+<text x="710" y="123" class="small" text-anchor="end">vLLM / SGLang</text>
+
+<rect x="170" y="152" width="560" height="46" rx="7" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.6"/>
+<text x="190" y="181" class="label">框架插件</text>
+<text x="710" y="181" class="small" text-anchor="end">vllm-ascend / 厂商插件</text>
+
+<rect x="170" y="210" width="560" height="46" rx="7" fill="#d1fae5" stroke="#a7f3d0"/>
+<text x="190" y="239" class="label">算子库</text>
+<text x="710" y="239" class="small" text-anchor="end">AscendC / TBE</text>
+
+<rect x="170" y="268" width="560" height="46" rx="7" fill="#dbeafe" stroke="#bfdbfe"/>
+<text x="190" y="297" class="label">SDK / 运行时</text>
+<text x="710" y="297" class="small" text-anchor="end">CANN / DTK / MUSA</text>
+
+<rect x="170" y="326" width="560" height="46" rx="7" fill="#fee2e2" stroke="#fecaca"/>
+<text x="190" y="355" class="label">驱动 / 固件</text>
+<text x="710" y="355" class="small" text-anchor="end">NPU driver / firmware</text>
 </g>
-<text x="40" y="150" class="small" transform="rotate(-90 40 150)" text-anchor="middle">软件</text>
-<text x="40" y="340" class="small" transform="rotate(-90 40 340)" text-anchor="middle">硬件</text>
-<line x1="110" y1="95" x2="110" y2="375" stroke="#94a3b8" stroke-width="1.5"/>
-<polygon points="110,90 104,102 116,102" fill="#94a3b8"/>
-<text x="60" y="400" class="small">适配顺序：先跑通（驱动/SDK）→ 再覆盖（算子/插件）→ 再调优（调度/显存）→ 最后写报告。</text>
+
+<line x1="110" y1="372" x2="110" y2="98" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="54" y="150" class="tick" text-anchor="middle" transform="rotate(-90 54 150)">上层</text>
+<text x="54" y="340" class="tick" text-anchor="middle" transform="rotate(-90 54 340)">底层</text>
+<text x="40" y="404" class="small">适配顺序：先跑通（驱动/SDK）→ 再覆盖（算子/插件）→ 再调优（调度/显存）。</text>
 </svg>

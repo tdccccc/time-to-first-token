@@ -1,62 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 440" role="img" aria-label="编译式引擎：加载时定执行计划，运行时按计划循环">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="编译式引擎：加载时定执行计划，运行时按计划循环">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:15px;font-weight:700;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
-.plan{font-size:18px;font-weight:700;fill:#92400e}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:15px;font-weight:700;fill:#1f2937}
+.small{font-size:13px;fill:#64748b}
+.plan{font-size:18px;font-weight:700;fill:#b45309}
 </style>
-<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-<rect width="900" height="440" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">编译式引擎：加载时定计划，运行时按计划走</text>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">编译式引擎：加载时定计划，运行时按计划走</text>
 <text x="40" y="64" class="sub">权重不变，变的是图、kernel、执行图与 KV 布局；这些决定在加载时定死。</text>
-<text x="40" y="98" class="label">加载时（一次性）</text>
-<text x="190" y="98" class="small">首次加载要把计划定完；缓存命中后快一些</text>
+
+<text x="40" y="94" class="label">加载时（一次性）</text>
+<text x="190" y="94" class="small">权重、图、kernel 与 KV 布局在这里定死</text>
 <g>
-<rect x="40" y="110" width="150" height="64" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="115" y="136" class="label" text-anchor="middle">权重与模型配置</text>
-<text x="115" y="156" class="small" text-anchor="middle">HF checkpoint</text>
-<rect x="210" y="110" width="150" height="64" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="285" y="136" class="label" text-anchor="middle">图优化</text>
-<text x="285" y="156" class="small" text-anchor="middle">算子融合</text>
-<rect x="380" y="110" width="150" height="64" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="455" y="136" class="label" text-anchor="middle">kernel 选择</text>
-<text x="455" y="156" class="small" text-anchor="middle">含 JIT 编译</text>
-<rect x="550" y="110" width="160" height="64" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="630" y="136" class="label" text-anchor="middle">执行图捕获</text>
-<text x="630" y="156" class="small" text-anchor="middle">KV 缓存布局</text>
-<rect x="730" y="110" width="130" height="64" rx="8" fill="#fffbeb" stroke="#fde68a"/>
-<text x="795" y="140" class="plan" text-anchor="middle">执行计划</text>
-<text x="795" y="160" class="small" text-anchor="middle">形状绑定</text>
+<rect x="40" y="106" width="150" height="58" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="115" y="130" class="label" text-anchor="middle">权重与模型配置</text>
+<text x="115" y="150" class="small" text-anchor="middle">HF checkpoint</text>
+<rect x="200" y="106" width="150" height="58" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="275" y="130" class="label" text-anchor="middle">图优化</text>
+<text x="275" y="150" class="small" text-anchor="middle">算子融合</text>
+<rect x="360" y="106" width="150" height="58" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="435" y="130" class="label" text-anchor="middle">kernel 选择</text>
+<text x="435" y="150" class="small" text-anchor="middle">含 JIT 编译</text>
+<rect x="520" y="106" width="160" height="58" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="600" y="130" class="label" text-anchor="middle">执行图捕获</text>
+<text x="600" y="150" class="small" text-anchor="middle">KV 缓存布局</text>
+<rect x="690" y="106" width="130" height="58" rx="8" fill="#fffbeb" stroke="#fde68a"/>
+<text x="755" y="131" class="plan" text-anchor="middle">执行计划</text>
+<text x="755" y="151" class="small" text-anchor="middle">形状绑定</text>
 </g>
-<line x1="190" y1="142" x2="208" y2="142" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="360" y1="142" x2="378" y2="142" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="530" y1="142" x2="548" y2="142" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="710" y1="142" x2="728" y2="142" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="795" y1="174" x2="795" y2="220" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="785" y="202" class="small" text-anchor="end">运行时按计划执行</text>
-<rect x="40" y="222" width="820" height="136" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
-<text x="56" y="246" class="label">运行时循环（执行计划已定）</text>
+<line x1="190" y1="135" x2="198" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="350" y1="135" x2="358" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="510" y1="135" x2="518" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="680" y1="135" x2="688" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="755" y1="164" x2="755" y2="198" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="745" y="190" class="small" text-anchor="end">运行时按计划执行</text>
+
+<rect x="40" y="202" width="820" height="132" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
+<text x="56" y="226" class="label">运行时循环（执行计划已定）</text>
 <g>
-<rect x="56" y="272" width="120" height="56" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="116" y="304" class="label" text-anchor="middle">取请求</text>
-<rect x="206" y="272" width="130" height="56" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="271" y="298" class="label" text-anchor="middle">调度</text>
-<text x="271" y="316" class="small" text-anchor="middle">三预算</text>
-<rect x="366" y="272" width="120" height="56" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="426" y="304" class="label" text-anchor="middle">准备 KV</text>
-<rect x="516" y="272" width="110" height="56" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="571" y="304" class="label" text-anchor="middle">执行</text>
-<rect x="656" y="272" width="110" height="56" rx="8" fill="#fff" stroke="#dbe3ef"/>
-<text x="711" y="304" class="label" text-anchor="middle">采样</text>
+<rect x="60" y="244" width="120" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="120" y="276" class="label" text-anchor="middle">取请求</text>
+<rect x="205" y="244" width="130" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="270" y="270" class="label" text-anchor="middle">调度</text>
+<text x="270" y="290" class="small" text-anchor="middle">三预算</text>
+<rect x="360" y="244" width="120" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="420" y="276" class="label" text-anchor="middle">准备 KV</text>
+<rect x="505" y="244" width="110" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="560" y="276" class="label" text-anchor="middle">执行</text>
+<rect x="640" y="244" width="110" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="695" y="276" class="label" text-anchor="middle">采样</text>
 </g>
-<line x1="176" y1="300" x2="204" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="336" y1="300" x2="364" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="486" y1="300" x2="514" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="626" y1="300" x2="654" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<line x1="711" y1="328" x2="711" y2="346" stroke="#94a3b8" stroke-width="1.5"/>
-<line x1="711" y1="346" x2="116" y2="346" stroke="#94a3b8" stroke-width="1.5"/>
-<line x1="116" y1="346" x2="116" y2="330" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a)"/>
-<text x="413" y="340" class="small" text-anchor="middle">下一步：循环，不重编</text>
-<text x="40" y="384" class="small">调度受三本预算约束：max_batch_size（并发）、max_seq_len（单序列长度）、max_num_tokens（每步 token 池）。</text>
-<text x="40" y="410" class="small">变更模型结构、形状分布、GPU 架构或引擎版本 → 执行计划失效，回到加载时重做。</text>
+<line x1="180" y1="271" x2="203" y2="271" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="335" y1="271" x2="358" y2="271" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="480" y1="271" x2="503" y2="271" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="615" y1="271" x2="638" y2="271" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="695" y1="298" x2="695" y2="316" stroke="#94a3b8" stroke-width="1.5"/>
+<line x1="695" y1="316" x2="120" y2="316" stroke="#94a3b8" stroke-width="1.5"/>
+<line x1="120" y1="316" x2="120" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="407" y="310" class="small" text-anchor="middle">下一步：循环，不重编</text>
+
+<text x="40" y="358" class="small">调度三预算：max_batch_size（并发）、max_seq_len（序列长）、max_num_tokens（每步 token 数）。</text>
+<text x="40" y="382" class="small">变更模型结构、形状分布、GPU 架构或引擎版本 → 执行计划失效，回到加载时重做。</text>
 </svg>

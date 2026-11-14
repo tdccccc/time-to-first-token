@@ -1,30 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="静态批处理与连续批处理对比">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="静态批处理与连续批处理的时间线对比">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:18px;font-weight:600;fill:#1f2937}.small{font-size:14px;fill:#6b7280}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:18px;font-weight:600;fill:#1f2937}
+.small{font-size:14px;fill:#334155}
+.tick{font-size:13px;fill:#64748b}
 </style>
-<rect width="900" height="420" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">批处理的时间线</text>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">批处理的时间线</text>
 <text x="40" y="64" class="sub">静态 batch 等最慢的请求；连续批处理在请求结束时立即换入新请求。</text>
-<text x="70" y="110" class="label">静态批处理</text>
+
+<text x="70" y="96" class="label">静态批处理</text>
 <g>
-<rect x="70" y="125" width="150" height="26" rx="5" fill="#c7d2fe"/><text x="145" y="143" class="small" text-anchor="middle">A</text>
-<rect x="70" y="160" width="230" height="26" rx="5" fill="#bae6fd"/><text x="185" y="178" class="small" text-anchor="middle">B</text>
-<rect x="70" y="195" width="310" height="26" rx="5" fill="#fde68a"/><text x="225" y="213" class="small" text-anchor="middle">C</text>
-<rect x="310" y="125" width="150" height="26" rx="5" fill="#e5e7eb"/>
-<rect x="300" y="160" width="160" height="26" rx="5" fill="#e5e7eb"/>
-<text x="470" y="180" class="small" fill="#b45309">GPU 空等：batch 要等 C 结束</text>
+<rect x="90" y="108" width="150" height="24" rx="5" fill="#c7d2fe"/><text x="165" y="125" class="small" text-anchor="middle">A</text>
+<rect x="240" y="108" width="160" height="24" rx="5" fill="#f1f5f9"/><text x="320" y="125" class="small" fill="#94a3b8" text-anchor="middle">空槽</text>
+<rect x="90" y="144" width="230" height="24" rx="5" fill="#bae6fd"/><text x="205" y="161" class="small" text-anchor="middle">B</text>
+<rect x="320" y="144" width="80" height="24" rx="5" fill="#f1f5f9"/><text x="360" y="161" class="small" fill="#94a3b8" text-anchor="middle">空槽</text>
+<rect x="90" y="180" width="310" height="24" rx="5" fill="#fde68a"/><text x="245" y="197" class="small" text-anchor="middle">C</text>
 </g>
-<text x="70" y="270" class="label">连续批处理</text>
+<text x="425" y="125" class="small" fill="#b45309">A、B 结束后槽位空等，batch 要等 C。</text>
+<line x1="40" y1="222" x2="860" y2="222" stroke="#e2e8f0" stroke-width="1"/>
+
+<text x="70" y="250" class="label">连续批处理</text>
 <g>
-<rect x="70" y="285" width="150" height="26" rx="5" fill="#c7d2fe"/><text x="145" y="303" class="small" text-anchor="middle">A</text>
-<rect x="220" y="285" width="150" height="26" rx="5" fill="#bae6fd"/><text x="295" y="303" class="small" text-anchor="middle">B</text>
-<rect x="70" y="320" width="230" height="26" rx="5" fill="#fde68a"/><text x="185" y="338" class="small" text-anchor="middle">C</text>
-<rect x="300" y="320" width="140" height="26" rx="5" fill="#d1fae5"/><text x="370" y="338" class="small" text-anchor="middle">D</text>
-<rect x="440" y="320" width="120" height="26" rx="5" fill="#e0e7ff"/><text x="500" y="338" class="small" text-anchor="middle">E</text>
-<text x="580" y="338" class="small" fill="#0f9f6e">结束即换入，GPU 不空转</text>
+<rect x="90" y="262" width="150" height="24" rx="5" fill="#c7d2fe"/><text x="165" y="279" class="small" text-anchor="middle">A</text>
+<rect x="240" y="262" width="150" height="24" rx="5" fill="#d1fae5"/><text x="315" y="279" class="small" text-anchor="middle">D</text>
+<rect x="390" y="262" width="130" height="24" rx="5" fill="#e0e7ff"/><text x="455" y="279" class="small" text-anchor="middle">G</text>
+<rect x="90" y="298" width="230" height="24" rx="5" fill="#bae6fd"/><text x="205" y="315" class="small" text-anchor="middle">B</text>
+<rect x="320" y="298" width="150" height="24" rx="5" fill="#fef3c7"/><text x="395" y="315" class="small" text-anchor="middle">E</text>
+<rect x="90" y="334" width="310" height="24" rx="5" fill="#fde68a"/><text x="245" y="351" class="small" text-anchor="middle">C</text>
+<rect x="400" y="334" width="150" height="24" rx="5" fill="#dbeafe"/><text x="475" y="351" class="small" text-anchor="middle">F</text>
 </g>
-<line x1="70" y1="370" x2="830" y2="370" stroke="#94a3b8" stroke-width="1.5"/>
-<text x="450" y="392" class="small" text-anchor="middle">时间 →</text>
+<text x="570" y="279" class="small" fill="#0f9f6e">结束即换入：A→D→G、B→E、C→F。</text>
+
+<line x1="90" y1="366" x2="840" y2="366" stroke="#94a3b8" stroke-width="1.5"/>
+<polygon points="846,366 836,361 836,371" fill="#94a3b8"/>
+<text x="840" y="386" class="small" text-anchor="end">时间 →</text>
+<text x="70" y="410" class="small">示意：提高 GPU 占用率与吞吐、缩短排队等待，但不改变单个 token 的计算速度。</text>
 </svg>
