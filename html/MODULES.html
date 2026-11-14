@@ -175,7 +175,7 @@ li{margin:4px 0}
 <p>M2 与 M1 后半段可以并行：M1 第 6 周讲量化时，正好做 M2 第 4 周的量化 matmul；M1 第 7 周讲投机解码时，可以对照 M2 第 5 周读的 kernel 实现。M3 建议放在 M1 之后，因为它需要你已经会部署、会压测、会读 profiler 输出。</p>
 <h2 id="_2">每个模块的共同规则</h2>
 <ul>
-<li><strong>每节时长</strong>：M0/M1 每节 30 分钟，M2/M3 每节 60 分钟（课本密度版）；做不完的留到缓冲日，不要拖长单节。</li>
+<li><strong>每节时长</strong>：每节 60 分钟（课本密度版）；做不完的留到缓冲日，不要拖长单节。</li>
 <li><strong>每节开头标硬件门槛</strong>：「无卡可做 / 需云 GPU / 需国产芯片卡」，并给出无卡替代路径。</li>
 <li><strong>每节有产出</strong>：一张图、一份表、一段能跑的代码、一份报告——没有产出的节不算完成。</li>
 <li><strong>不编数字</strong>：没测的写“待补测”；国产芯片相关的实测一律按「某年某月某版本实测」的格式记录。</li>
@@ -193,6 +193,7 @@ li{margin:4px 0}
 <li>M2 第 6 周：原计划把 fused attention 包成 CustomOp，核实 vLLM 源码后改用 Triton 版 SiluAndMul（attention 走 Attention 后端）。</li>
 <li>M2 由 5 周扩为 6 周（第 3 周 fused attention、第 4 周量化 matmul 专讲）。</li>
 <li>M2/M3 于 2026-11-12 按课本密度重写（InferLoop 写法，每节 60 分钟）。</li>
+<li>M0/M1 于 2026-11-13 按课本密度重写（InferLoop 写法，每节 60 分钟；M1 主线 25 小时→50 小时，M0 总时长 2.5 小时→5 小时）。</li>
 </ul>
 </main>
 <footer>本页由 Markdown 生成，源文件：<a href="../docs/MODULES.md">docs/MODULES.md</a>。请勿直接改 HTML，改 md 后运行 <code>python3 html/build.py</code> 重新生成。</footer>

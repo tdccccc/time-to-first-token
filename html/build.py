@@ -209,7 +209,7 @@ def main():
     for (_, out, name, desc) in PAGES:
         items.append(f'<li><a href="{out}"><strong>{html_mod.escape(name)}</strong></a>——{html_mod.escape(desc)}</li>')
     index_body = f"""<h1>AI Infra 学习计划 · HTML 版</h1>
-<p>一份 10 周、每天 30 分钟的中文路线图：边做边学 LLM 推理服务。50 节核心课，外加第 8 周（续）大规模集群 PD 优化与第 11 周 TensorRT-LLM 两处可选加深，另有 M0–M4 五个模块。内容与仓库里的 Markdown 完全一致，只是换成了能在浏览器里直接读的样子。</p>
+<p>一份 10 周、每天 60 分钟的中文路线图：边做边学 LLM 推理服务。50 节核心课，外加第 8 周（续）大规模集群 PD 优化与第 11 周 TensorRT-LLM 两处可选加深，另有 M0–M4 五个模块。内容与仓库里的 Markdown 完全一致，只是换成了能在浏览器里直接读的样子。</p>
 <ul>
 {''.join(items)}
 </ul>
