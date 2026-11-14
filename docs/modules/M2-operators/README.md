@@ -1010,62 +1010,49 @@ qk = tl.where(keep, qk, -float("inf"))
 
 ## 第 22 章 · 量化 Matmul 深讲：量化方案本身
 
-> 硬件：本周需要 GPU；无卡时先做第 1 节的手算与第 2–3 节的代码编写，实测标注“待补测”。
->
-> 本周的主角不是 kernel，是量化方案本身——scale 怎么定、误差从哪来、融合省什么。kernel 只是把方案落地的载体。
->
-> 本周主线一句话：量化是一笔交易——用精度换搬运量；五节就是把这笔交易的定价（scale）、执行（INT8 matmul 与 fused dequant）、验收（autotune 实测与 Roofline）一笔一笔算清楚。
+一个 INT8 权重的 4096×4096 matmul 在 A100 上能快多少？M=32 的 decode 形状下，FP16 要搬 34.08 MB，INT8 只搬 17.17 MB，时间上限几乎跟着减半；M=1024 的 prefill 形状下，算术强度 682.7 已经在脊点右边，搬运减半换不成时间，能指望的只有 INT8 tensor core 的峰值从 312 TFLOPS 抬到 624 TOPS。同一个量化方案，两档形状的收益来源不同；哪一笔能兑现，先看 scale 的粒度把 kernel 定成了什么结构。
+
+第 12 章算过量化的误差口径：格点、scale、离群值与质量表。本章把量化方案当作输入，只追它在 kernel 里的三个后果：scale 的形状与数量、dequant 发生的位置、最终落到 Roofline 图的哪一侧。三条线索对应五节：scale 粒度（22.1）、INT8 `tl.dot` 路径（22.2）、fused dequant（22.3）、autotune 与计时（22.4）、Roofline 收口（22.5）。
+
+**本章目标。** 给定一种 scale 粒度（per-tensor / per-channel / per-token / per-group）和一档目标形状（decode 的 M=32 或 prefill 的 M=1024），能判断 scale 能否提到 K 循环外、dequant 应融进 matmul 还是单独物化，并写出对应的 Triton kernel，用 `triton.autotune`、`do_bench` 和 Roofline 给出可复现的验收口径。
 
 ### 第 1 节 · Scale 怎么来：三种粒度与误差从哪来
 
-**目标**：理解 per-tensor / per-channel / per-token 三种量化粒度的 scale 是怎么算出来的，以及误差从哪来。
+对称 INT8 量化的 scale 只有一条来源：`s = max|w| / 127`，`w_q = round(w / s)` 钳到 `[-127, 127]`，反量化是 `w' = w_q · s`。舍入让每个元素最多偏离半个格点，所以 `|w − w'| ≤ s / 2`；`s` 由管辖范围内的最大绝对值决定，离群值越大，`s` 越大，小值的绝对误差上界跟着变大。三种粒度的区别，就是“管辖范围”有多大；误差算例与相对误差的读法在第 12 章，本节只看粒度在 kernel 里留下什么。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+per-tensor 的 scale 是一个标量；per-channel 给每个输出列一个 scale，权重常用；per-token 给每个输入行（token）一个 scale，激活常用。权重训练完就固定，per-channel static 一次算好；激活每次前向都变，per-token 只能 dynamic（动态）现算，或者用校准集定 static、赌分布不变。误差的来源是同一个：`s` 被该范围内最大的元素顶大，其余元素的误差上界是 `s/2`。粒度越细，离群值能污染的 scale 越少，误差越小；代价是 scale 的数量增加，而且 scale 依赖的下标会改写 kernel 的结构。
 
-先把量化压缩成一个公式。对称 INT8 量化（symmetric quantization，把一段连续的浮点区间对称地映射到整数区间）：给定一个 scale `s`，`w_q = round(w / s)`，钳制到 `[-127, 127]`，反量化 `w' = w_q · s`。scale 的取法是 `s = max|w| / 127`，量化误差的上界是 `|w − w'| ≤ s / 2`。看这个公式：scale 由最大的那个值定，误差上界由 scale 定——scale 越大，误差越大。整个量化的精度问题就归结为“怎么让 scale 尽可能小”。
+还有一档更细的：per-group 把 K 切成每 `g` 个一组，每组一个 scale。以权重 B 为例，scale 的形状是 `[K/g, N]`，分组把误差压得更小，但 `s_b` 从此依赖 k。四种粒度的 kernel 后果：
 
-为什么误差上界恰好是 `s / 2`？`round` 的舍入最多偏离半个量化单位：`w / s` 与最近的整数最多差 0.5，乘回 scale 就是 `0.5 · s`。上界的推导只有一步，但它的含义值得停一下：这个上界管的是绝对误差（absolute error），不是相对误差（relative error）。一个绝对误差 0.037 的值，如果它本身只有 0.12，相对误差就是 31%——上界没有撒谎，它保的本来就是另一种误差。后面手算的例子会让这一点现形。
+| 粒度 | scale 的形状 | 数量 | 依赖的下标 | 能否提到 K 循环外 |
+|---|---|---|---|---|
+| per-tensor | 标量 | 1 | 无 | 能 |
+| per-channel | `[N]` | N | 输出列 j | 能 |
+| per-token | `[M]` | M | 输出行 i | 能 |
+| per-group | `[K/g, N]` | (K/g)·N | 输出列 j 与 k 所在的组 | 不能 |
 
-为什么是 127，不是 128？int8 能表示的范围是 `[-128, 127]`，对称量化只用 `[-127, 127]`，空出 `-128` 不用。换来的是两点：0 精确对应 0，正负两边完全对称。代价是量化格点从 256 个减到 255 个，少一个格点，换来零点精确。0 这个值在神经网络里到处都是——padding、mask 掉的位置——0 量化不准会引入系统性的偏置。最大值 `max|w|` 恰好落在 127 上，反量化回来分毫不差，下面手算里 10.0 的误差就是 0，这就是 scale 定义本身的性质：被 scale 的那个最大值永远没有误差，误差全落在比它小的值身上。
+前三行的 scale 对 k 是常数，可以从 K 维求和里提出来，等整数累加完再乘一次；第四行必须在 K 方向分组处理。至于 dequant 本身发生在循环外还是循环里，还取决于权重是不是以 int8 分块读入：22.2 的 epilogue 在循环外乘 scale，22.3 的 fused kernel 在循环里展开权重，两件事的判据不同。
 
-三种粒度，scale 的“管辖范围”不同：
-- **per-tensor**：整个张量一个 scale，`s = max|整个张量| / 127`。最简单，但一个离群值会把整个张量的 scale 顶上去。
-- **per-channel**（权重常用）：每个输出通道一个 scale，`s_j = max|第 j 列| / 127`。离群值只影响它所在的通道。
-- **per-token**（激活常用）：每个 token（每行）一个 scale，`s_i = max|第 i 行| / 127`。激活的分布随输入变，所以 scale 要运行时现算（dynamic）；也可以事先用校准集定好（static），省了运行时开销，但分布一变就可能失配。
+scale 本身的访存很小：N=4096 时 per-channel 的 `s_b` 是 16 KB，M=1024 时 per-token 的 `s_a` 是 4 KB，相对 16.78 MB 的 int8 权重可以忽略。scale 的成本不在字节数，在它出现的位置：能提到循环外，它就是 epilogue 里的一次乘法；提不出去，它就在 K 循环里每块都要乘一次。
 
-为什么权重用 per-channel、激活用 per-token？权重训练完就固定了，分布不变，per-channel static 一次算好一直用；激活每次前向都不一样，分布跟着输入走，只能 per-token dynamic 现算。粒度不是随便选的，是跟着“分布变不变”走的。
+dynamic 的代价则可以单独算。per-token 要在每次前向里现算每行的 amax：以 M=1024、K=4096 为例，读 fp16 激活 8.39 MB、写 int8 激活 4.19 MB，多出 12.58 MB 搬运；同一形状 FP16 matmul 的总搬运是 50.33 MB，量化准备占 25.0%。M=32 时同样是读 0.26 MB、写 0.13 MB，共 0.39 MB，只占总搬运 34.08 MB 的 1.2%。dynamic 的代价随 M 线性增长：decode 形状付得起，prefill 形状要先算这笔账。static 用校准集把 scale 离线定好，省掉这次 pass，代价是分布失配的风险；校准集怎么选、失配误差怎么量，在第 12 章。
 
-dynamic 的代价可以先算一笔账。per-token dynamic 每次前向都要对激活做一次规约（求每行最大值），多一次访存与同步。以 M=1024、K=4096 的激活为例：fp16 激活本身是 1024×4096×2 字节 = 8.39MB，求每行最大值要把它完整读一遍，再写回 int8 激活 1024×4096×1 字节 = 4.19MB，量化准备这一步一共 12.58MB 的额外搬运。同一形状 FP16 matmul 的总搬运是 50.33MB（第 3 节会逐项算），量化准备就占了约 25%。static 省掉这 12.58MB，但要回答“校准集能不能代表真实输入”——省下的搬运换成了一个假设，假设错了，误差就从舍入误差变成失配误差。推理引擎里常见的做法是权重 per-channel static、激活 per-token dynamic——权重分布固定，激活分布随输入变，各取所需。
-
-手算一个例子，体会离群值的破坏力。一行权重 `[0.1, -0.08, 0.12, 10.0, 0.09]`：per-tensor 的 scale 是 `10 / 127 ≈ 0.079`，`0.1` 量化成 `round(0.1 / 0.079) = 1`，反量化得 `0.079`——21% 的误差。如果 10.0 在别的通道，per-channel 下这一行的 scale 是 `0.12 / 127 ≈ 0.0009`，误差上界 `0.0005`。这就是为什么权重用量化几乎都用 per-channel：它把离群值关进一个通道里。
-
-把这行数的五个元素逐个算完，对比才完整。per-tensor 下 scale `s = 10/127 ≈ 0.0787`，误差上界 `s/2 ≈ 0.0394`：0.1 量化成 1，反量化 0.0787，误差 21.3%；-0.08 量化成 -1，反量化 -0.0787，误差 1.6%；0.12 量化成 2，反量化 0.1575，误差 31.2%；10.0 量化成 127，反量化 10.0，误差 0%；0.09 量化成 1，反量化 0.0787，误差 12.5%。五个绝对误差分别是 0.021、0.0013、0.037、0、0.011，全在上界 0.039 之内——上界没有被违反。看相对误差那一列，画面就变了：最大的值误差 0%，最小的几个值误差 12%–31%。离群值定 scale 的机制决定了受害者永远是小值：scale 是按最大的人定刻度，矮个子的身高就量不准。0.12 那个元素最有说服力：绝对误差 0.037 没有超过上界 0.039，相对误差却到了 31%——同一个数，绝对误差的账本说“合规”，相对误差的账本说“没法用”。评价量化误差的时候，先问一句“绝对还是相对”，两个账本不要混着算。
-
-per-channel 下再算一遍。这一行的 scale 是 `0.12/127 ≈ 0.000945`，误差上界 `s/2 ≈ 0.000472`：0.1 量化成 106，反量化 0.1002，误差 0.16%；-0.08 量化成 -85，反量化 -0.0803，误差 0.39%；0.12 量化成 127，反量化 0.12，误差 0%；0.09 量化成 95，反量化 0.0898，误差 0.26%。四个元素的相对误差全压到 0.5% 以下。两个粒度的误差上界一比：0.0394 除以 0.000472，约 83 倍。本例中 per-channel 把误差上界压低了约 83 倍——“把离群值关进一个通道”这句话的定价就是 83 倍。离群值越大，这个倍数背后的绝对误差差距就越大。
-
-离群值再大 10 倍会怎样？把 10.0 换成 100.0，per-tensor 的 scale 变成 `100/127 ≈ 0.787`，误差上界 `s/2 ≈ 0.394`。0.1 除以 0.787 得 0.127，四舍五入是 0，反量化得 0，误差 100%——这个值在量化后直接消失了。离群值从 10 涨到 100，小值的命运从“量不准”变成“不存在”。误差上界随离群值线性长大（`s/2 = max|w|/254`），离群值每大 10 倍，所有小值的误差上界就大 10 倍。这个线性关系就是 per-tensor 在真实权重上站不住脚的原因：真实权重的分布总有长尾，最大值与典型值之间差一两个量级是常态。
-
-还有一个方向的错误值得算一遍：scale 取小了会怎样？直觉说 scale 越小格点越密、精度越高，这个直觉只在不发生钳制的前提下成立。`s = max|w| / 127` 已经是“不发生钳制的最小 scale”——再小，最大值就装不下。上面那个例子里 scale 取一半（约 0.0394），10.0 除以 0.0394 得 254，四舍五入后钳制到 127，反量化得 5.0，误差 50%。这个误差不受 `s/2` 上界保护：钳制误差（clipping error）可以任意大，它不遵守舍入误差的规矩。scale 的取法卡在两个悬崖中间：大了，舍入误差 `s/2` 跟着大；小了，钳制误差没有上界。`max|w| / 127` 就是卡在悬崖边上的那个点——刚好不钳制，一点不多。所谓“scale 越小越好”，完整说法是“在不钳制的前提下，scale 越小越好”。
-
-回头看三种粒度的选择，逻辑收拢成一句话：scale 的管辖范围越小，离群值的破坏半径就越小，代价是 scale 本身的数量与管理成本上升。per-tensor 只要 1 个 scale，per-channel 要 N 个（权重列数），per-token 要 M 个（token 数，还得每次现算）。精度与成本的权衡不在公式里，在这三个数里。下一节写 kernel 的时候，scale 的数量会直接变成访存量：per-token 的 `scale_a` 是 M 个 float，per-channel 的 `scale_b` 是 N 个 float，epilogue 里每个程序只读自己那一行一列的 scale——这就是为什么 scale 能放在 epilogue 里乘，而不用在累加前乘。
-
-**产出**：一份三种粒度的误差直觉 + 上面的手算（离群值例子 + 误差上界），再加一句话：本例中 per-tensor 的误差上界是 per-channel 的约 83 倍，离群值越大，这个倍数背后的绝对误差差距就越大。
+本节只讨论对称量化（zero point 固定为 0）；非对称量化多一个零点，scale 的代数不变，kernel 里多一次减法，后面两条路径的结构不变。
 
 ### 第 2 节 · INT8 `tl.dot` 路径：int8 输入、int32 累加、epilogue 再乘 scale
 
-**目标**：写出一个 INT8 matmul：int8 输入、`tl.dot` 得 int32 累加、epilogue 里再乘回 scale。
+A（激活）与 B（权重）都以 int8 存：A 的形状 `[M, K]`，per-token scale `s_a` 形状 `[M]`；B 的形状 `[K, N]`，per-channel scale `s_b` 形状 `[N]`。`tl.dot` 做 int8×int8→int32 的乘加，累加器是整数；scale 等到 K 循环结束再乘。能这样安排，是因为两个 scale 都不依赖 k：
 
-**怎么做**（60 分钟，需 GPU 做正确性验证；无卡先写代码）：
+```text
+Σ_k (a_q[i,k] · s_a[i]) · (b_q[k,j] · s_b[j])
+  = s_a[i] · s_b[j] · Σ_k a_q[i,k] · b_q[k,j]
+```
 
-先想清楚数据流：A（激活，per-token scale）与 B（权重，per-channel scale）都以 int8 存，`tl.dot` 做 int8×int8 → int32 累加；acc 是整数域的，scale 不能在累加前乘——必须等累加完，在 epilogue 里一次乘回：`C = acc_fp32 · s_a[:, None] · s_b[None, :]`。这一步在寄存器里完成，不额外访存。
+取 `s_a = 0.01`、`s_b = 0.02`，K 方向两项，`a = [3, -5]`、`b = [7, 2]`。先 dequant 再乘：`0.03×0.14 + (-0.05)×0.04 = 0.0022`。先整数点积再乘：`0.01×0.02×(21 − 10) = 0.0002×11 = 0.0022`。两边相等；K 方向有多少项，这个提法就省多少次浮点乘。
 
-为什么 scale 能等到最后再乘？因为 scale 不依赖求和下标 k：`s_a` 只跟行有关，`s_b` 只跟列有关，所以它们可以从 K 维的求和里提出来——`Σ_k (a_q · s_a) · (b_q · s_b) = s_a · s_b · Σ_k a_q · b_q`。能提出来，才能先整数累加、后乘 scale；提不出来（比如 scale 跟 k 有关），就得每乘一次都 dequant 一次，那是第 3 节的 fused dequant。
+如果 scale 沿着 K 变，提法失效。per-group 量化把 K 切成 `g` 个一组，每组一个 `s_b[g, j]`，求和里每一项的 scale 都不同，只能每组单独 dequant 后再累加，或者把每组的部分和分别乘上该组 scale 再加起来。22.3 的 fused kernel 也在循环里乘 scale，但原因是权重以 int8 分块读入、必须在进 `tl.dot` 前展开，不是因为 scale 依赖 k；两种“循环内乘 scale”长得像，理由不同。
 
-拿两个数验算一下这个提法。设 `s_a = 0.01`、`s_b = 0.02`，K 方向只有两项：`a = [3, -5]`，`b = [7, 2]`。先 dequant 再乘：`(3×0.01)×(7×0.02) + (-5×0.01)×(2×0.02) = 0.03×0.14 + (-0.05)×0.04 = 0.0042 - 0.002 = 0.0022`。先整数累加再乘 scale：`0.01×0.02×(3×7 + (-5)×2) = 0.0002×(21 - 10) = 0.0002×11 = 0.0022`。两边相等，提法成立。关键在第二步里 `s_a` 和 `s_b` 被一次性提到求和外面——K 方向有多少项，这个提法就省了多少次乘法：K=4096 时，逐项乘 scale 要做 4096 次浮点乘，先累加再乘只要 1 次。整数累加省的不只是访存，还有乘法次数。
-
-反过来，什么情况下这个提法会失效？scale 跟 k 有关的时候。比如 per-group 量化（group-wise quantization，每 128 个 k 元素共享一个 scale，推理引擎里很常见的做法）下，scale 是 `s_b[k_group, n]`，求和里每一项的 scale 都不一样，提不出来，只能每组 dequant 一次。本节的 per-token × per-channel 之所以能提出来，是因为两个 scale 都不依赖 k——粒度方案决定了 kernel 的结构，上一节的粒度选择在这里收到了第一笔回报。粒度不是纸面上的分类，它直接决定 epilogue 长什么样。
-
-量化用 PyTorch 做（这部分是数据准备，不是 kernel 本身）：
+量化用 PyTorch 做，这部分是数据准备，不是 kernel 本身：
 
 ```python
 def quant_per_token(x):
@@ -1083,9 +1070,9 @@ def quant_per_channel(w):
     return q, scale
 ```
 
-这两段量化代码里有个容易略过的细节：`clamp_min(1e-8)`。如果某一行（或某一列）全是 0，`amax` 就是 0，scale 会是 0，后面 `x / scale` 是除以 0，得 inf 或 NaN。`clamp_min(1e-8)` 把 scale 的下限钉在 `1e-8`，全零行量化后还是全零（0 除以 `1e-8` 还是 0），scale 本身是个极小的正数，反量化 `0 × 1e-8` 还是 0。1e-8 这个数不是精度参数，是防除零的护栏——它不参与任何精度讨论，只保证代码在全零输入下不炸。顺带一提，`amax / 127.0` 里除的是 127.0 不是 128.0，对应上一节的对称量化约定：最大值落在 127 上。
+`clamp_min(1e-8)` 是防除零的护栏，不是精度参数：某一行或某一列全为 0 时，`amax` 是 0，`scale` 会是 0，`x / scale` 得 inf 或 NaN；把下限钉在 1e-8 之后，全零行量化后仍是全零，反量化也是 0。除的是 127.0 而不是 128.0，对应上一节的对称约定：最大值落在 127 上。
 
-INT8 matmul kernel：
+INT8 matmul kernel（示意，按当前 Triton 版本调整，未在本书环境编译运行）：
 
 ```python
 import torch
@@ -1098,55 +1085,56 @@ def matmul_int8_kernel(a_ptr, b_ptr, c_ptr,
                        stride_am, stride_ak, stride_bk, stride_bn,
                        stride_cm, stride_cn,
                        scale_a_ptr, scale_b_ptr,
-                       BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
-    pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
+                       BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+                       BLOCK_K: tl.constexpr, GROUP_M: tl.constexpr):
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    num_pid_in_group = GROUP_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
     a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.int32)
     for k in range(0, tl.cdiv(K, BLOCK_K)):
         k_rem = K - k * BLOCK_K
-        a = tl.load(a_ptrs, mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem), other=0)
-        b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N), other=0)
-        acc = tl.dot(a, b, acc)
+        a = tl.load(a_ptrs,
+                    mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem),
+                    other=0)
+        b = tl.load(b_ptrs,
+                    mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N),
+                    other=0)
+        acc = tl.dot(a, b, acc, out_dtype=tl.int32)
         a_ptrs += BLOCK_K * stride_ak
-        b_ptrs += BLOCK_K * stride_bn
+        b_ptrs += BLOCK_K * stride_bk
+
     sa = tl.load(scale_a_ptr + offs_m, mask=offs_m < M, other=0.0)
     sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=0.0)
     c = acc.to(tl.float32) * sa[:, None] * sb[None, :]
     c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
-    mask_c = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-    tl.store(c_ptrs, c.to(tl.float16), mask=mask_c)
-
-def matmul_int8(a_q, b_q, scale_a, scale_b):
-    M, K = a_q.shape
-    K2, N = b_q.shape
-    assert K == K2
-    c = torch.empty((M, N), dtype=torch.float16, device=a_q.device)
-    BLOCK_M, BLOCK_N, BLOCK_K = 64, 64, 32
-    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
-    matmul_int8_kernel[grid](a_q, b_q, c, M, N, K,
-        a_q.stride(0), a_q.stride(1), b_q.stride(0), b_q.stride(1),
-        c.stride(0), c.stride(1),
-        scale_a.float(), scale_b.float(),
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K)
-    return c
+    tl.store(c_ptrs, c.to(tl.float16),
+             mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
 
-读这段 kernel，先对一下它与第 1 周 FP16 matmul 的异同。结构一模一样：算 `pid_m`、`pid_n`，tile 指针沿 K 维步进，`tl.dot` 累加，最后写回。变的只有三处：输入是 int8，acc 是 `tl.int32`，epilogue 多了一行乘 scale。结构不变是好事——第 1 周调通的 tile 逻辑、mask 写法、指针步进，全数复用；变的这三处就是量化方案落地的全部内容。
+这段 kernel 与第 20 章的 FP16 matmul 结构相同：分组映射、K 循环、`tl.dot` 累加、带 mask 写回。变的只有三处：输入是 int8，累加器是 `tl.int32`，epilogue 多了一行 `acc.to(tl.float32) * sa[:, None] * sb[None, :]`。第 20 章调通的 tile 逻辑与 mask 写法可以复用；这三处就是量化方案落地的全部内容。
 
-acc 为什么必须是 int32？算一笔账就明白。int8 的最大值是 127，两个 127 相乘是 16129；K=256 的累加最坏是 `127×127×256 = 4,129,024`，int16 的上限是 32767，4,129,024 是它的约 126 倍。更糟的是，连一个 BLOCK_K=32 的局部和都会溢出：`127×127×32 = 516,128`，是 int16 上限的约 15.8 倍。所以“先用 int16 累加、最后再转 int32”这条退路不存在——第一个 BLOCK_K 跑完 acc 就已经溢出成负数了，错误从第一步就开始累积。int32 的上限是 2,147,483,647，就算 K=4096 全长累加，最坏值也只有 `127×127×4096 = 66,064,384`，只占 int32 上限的约 3.1%，余量约 32 倍。int32 不是“保险起见”，是唯一能装下累加的类型；int16 不是“精度差一点”，是算到一半就错。类型选错与精度选错是两回事：类型错了，结果直接是错的。
+指针步进有一处容易写错：`b_ptrs += BLOCK_K * stride_bk`，`stride_bk` 是 B 在 K 方向的行步长（行主序下等于 N），不是 `stride_bn`。写成 `stride_bn` 时，如果 B 是连续的行主序 `[K, N]`，`stride_bn = 1`，指针每步只挪 BLOCK_K 个元素而不是 BLOCK_K 行；形状对得上，读进来的却是错位的数据，结果全错且不会报越界。A 的步进用 `stride_ak`，同理。
 
-epilogue 这一行也值得拆开看：`c = acc.to(tl.float32) * sa[:, None] * sb[None, :]`。`sa` 是 `tl.load(scale_a_ptr + offs_m)` 读进来的，每行一个；`sb` 是每列一个。`sa[:, None]` 把它竖过来（形状 BLOCK_M×1），`sb[None, :]` 把它横过去（1×BLOCK_N），广播（broadcasting）之后每个输出元素 `(i, j)` 恰好乘上 `sa[i] * sb[j]`。广播在这里不是语法糖，是语义本身：scale 的粒度（per-token 管行、per-channel 管列）直接写成了广播的形状。读 scale 的访存量也可以算：每个程序读 BLOCK_M + BLOCK_N 个 float，64+64=128 个，512 字节——相对 tile 的访存可以忽略。scale 的访存从来不是问题，scale 的位置才是：它必须在 epilogue，不在循环里。
+累加器必须是 int32。int8 的最大值是 127，两个 127 相乘是 16129；一个 `BLOCK_K=32` 的局部和最坏是 `127×127×32 = 516,128`，是 int16 上限 32,767 的约 15.8 倍——第一个 K 块就会溢出成负数。K=4096 全长累加的最坏值是 `127×127×4096 = 66,064,384`，占 int32 上限 2,147,483,647 的 3.1%，余量约 32 倍。int16 不是精度差一点，是算到一半就错；int32 是唯一装得下的类型。
 
-注意：`tl.load` 的 mask 必须同时盖住 M/N 维与 K 维余量——只盖 K 维时，M 或 N 不是 BLOCK 倍数会在尾块越界读。第 4 节的 M=32（decode 形状）就会撞上这一点，换形状前先确认 mask 齐全。
+mask 要同时盖住 M/N 与 K 两个方向。M=32、`BLOCK_M=64` 时，tile 的后 32 行指向 A 之外；只有 K 维的 `k_rem` mask 管不住它。没有 M 维 mask，轻则读进无关数据、结果错得无声，重则越界访问报错。两个 mask 是正交的：K mask 管“这一块 K 读完没有”，M/N mask 管“这一行/列存不存在”。第 20 章的方阵练习里 M、N、K 都是 BLOCK 的整倍数，这个缺口藏得住；decode 的 M=32 是第一个让它露出来的形状。
 
-M=32 的时候 mask 的问题会变得具体。BLOCK_M=64，M=32，tile 的 64 行里有一半是越界行——`offs_m` 的后 32 个位置指向 A 矩阵之外的内存。没有 M 维 mask，`tl.load` 会把矩阵外面的内存读进来，轻则读到别的数据（结果错得悄无声息），重则越界访问直接报错。K 维的 `k_rem` mask 只管 K 方向的尾巴，管不了 M 方向。两个 mask 是正交的（orthogonal，互相独立、缺一不可）：K mask 管“这一块 K 有没有读完”，M/N mask 管“这一行/列是不是真的存在”。第 1 周的 FP16 matmul 测的是方阵大 batch，M、N、K 全是 BLOCK 的整倍数，mask 的缺失藏得住；M=32 的 decode 形状是第一个让它藏不住的形状。写 kernel 的时候先问一句：这个形状下，哪个维度的尾块会越界？
+`tl.dot` 的输入约束按当前 Triton 文档：两个操作数都是二维或三维、内维一致，元素类型支持 int8、float8_e5m2、fp16、bf16、fp32，累加器支持 fp16、fp32、int32；int8 输入的 `out_dtype` 显式写 `tl.int32`。文档没有把 M/N/K 的最小值写成硬性条款，实际能不能落到 tensor core 由后端决定：Ampere 的 INT8 MMA 指令形状是 m16n8k32（PTX 的 `mma.sync.aligned.m16n8k32` 一族），所以 M/N 取 16 的倍数、K 取 32 的倍数最稳，`BLOCK_M=64, BLOCK_N=64, BLOCK_K=32` 就是照这条约束取的。换卡、换 Triton 版本时，先看编译输出有没有落到 tensor core，再看计时；具体形状与对齐要求以你装的版本为准。
 
-正确性检查：与 FP16 参考对比。量化有误差，`torch.allclose` 的绝对容限不再适用——改用相对误差，并把它记下来（这是本周的精度账本）：
+正确性用相对误差比。量化误差按比例走，固定绝对容限没有意义；下面的检查把分母下限钉在 1，避免参考值接近 0 时相对误差爆炸：
 
 ```python
 torch.manual_seed(0)
@@ -1156,33 +1144,28 @@ a_q, sa = quant_per_token(a)
 b_q, sb = quant_per_channel(b)
 c = matmul_int8(a_q, b_q, sa, sb)
 ref = a @ b
-rel_err = ((c.float() - ref.float()).abs() / ref.float().abs().clamp_min(1)).mean()
+rel_err = ((c.float() - ref.float()).abs()
+           / ref.float().abs().clamp_min(1)).mean()
 print('mean relative error:', rel_err.item())
 ```
 
-为什么用相对误差？量化误差是按比例走的：值越大，绝对误差越大，固定一个绝对容限没有意义——相对误差才是“误差占结果的几分之几”。预期相对误差在 1% 量级；如果大一个数量级，先查 scale 的粒度（是不是把 per-token 与 per-channel 弄反了）与 `tl.dot` 的累加类型（必须是 int32，int16 会溢出：127×127×256 ≈ 410 万，远超 int16 的 32767）。
+预期平均相对误差在 1% 量级（算例，不是实测）；大一个数量级时，先查 scale 的粒度是否弄反（per-token 与 per-channel），再查累加器是不是 int32。输出是 fp16，本身也带一次舍入；要单独看量化误差，把输出留成 fp32 再比。
 
-“按比例走”可以拿一个三元点积手算验证。取 `a = [0.5, -0.3, 0.8]`，`b = [0.4, 0.9, -0.2]`，精确点积是 `0.5×0.4 + (-0.3)×0.9 + 0.8×(-0.2) = 0.2 - 0.27 - 0.16 = -0.23`。per-tensor 量化：`s_a = 0.8/127 ≈ 0.006299`，`a` 量化成 `[79, -48, 127]`；`s_b = 0.9/127 ≈ 0.007087`，`b` 量化成 `[56, 127, -28]`。整数点积是 `79×56 + (-48)×127 + 127×(-28) = 4424 - 6096 - 3556 = -5228`，乘回 scale：`-5228 × 0.006299 × 0.007087 ≈ -0.2334`。相对误差是 `|-0.2334 - (-0.23)| / 0.23 ≈ 1.47%`——正好落在“1% 量级”的预期里。这个 1.47% 不是测出来的，是手算出来的；它说明 1% 的预期不是随意估计的数，是量化误差本身的量级：每个元素带一个 `s/2` 量级的绝对误差，K 项加总后相对误差收敛到百分之一上下。
+epilogue 的代价可以逐项算。每个输出元素做 4 次操作：int32→fp32、乘 `sa`、乘 `sb`、fp32→fp16。M=32、N=4096 时输出 131,072 个元素，4 次操作共 524,288 次；总 FLOPs 是 `2×32×4096×4096 = 1,073,741,824`，占比 0.049%。M=1024 时输出 4,194,304 个元素，操作数 16,777,216 次；总 FLOPs 34,359,738,368，占比还是 0.049%。两个形状同占比不是巧合：比例是 `4MN / (2MNK) = 2/K`，K=4096 时就是 0.049%；K 缩到 256，比例升到 0.78%。
 
-`rel_err` 的分母里还有个细节：`ref.float().abs().clamp_min(1)`。参考值接近 0 的位置，绝对误差再小，除以一个接近 0 的分母，相对误差也会爆炸。`clamp_min(1)` 把分母的下限钉在 1，参考值小于 1 的位置按绝对误差计，参考值大于 1 的位置按相对误差计——它在两种误差口径之间划了一条线。没有这行，`rel_err` 的平均值会被少数几个接近 0 的参考值绑架，一个位置的相对误差上千，整张表的平均数就没法看了。
+这 0.049% 是“操作数占 tensor core FLOPs 的比例”，不是“时间占比”。epilogue 的 4 次操作跑在 CUDA core 上，A100 的 FP32 峰值约 19.5 TFLOPS，tensor core 的 INT8 峰值是 624 TOPS，两者差 32 倍；按时间算，同样的操作数占比会被放大。K=4096 时它仍然很小，K 很小时就不能忽略。把这点写清楚，才不会把“epilogue 只占 0.05% FLOPs”误读成“epilogue 不花时间”。
 
-epilogue 乘 scale 的代价也可以先算出来，免得第 4 节实测时算错账。每个输出元素在 epilogue 里做 4 次操作：int32 转 fp32、乘 `sa`、乘 `sb`、fp32 转 fp16。M=32 时输出是 32×4096 = 131,072 个元素，一共 524,288 次操作；M=1024 时输出是 4,194,304 个元素，一共约 1678 万次操作。两档形状下，这个数都是总 FLOPs（2·M·N·K）的约 0.05%——epilogue 的乘法本身便宜得很。如果第 4 节实测发现 INT8 离 2 倍峰值很远，账不要先记在 epilogue 的乘法上，先查 int8 的 `tl.dot` 路径本身（tensor core 的 int8 利用率）与访存结构。算账的时候，先把便宜的部分排除掉，剩下的才是真凶。
-
-一个常见的误解：“INT8 快 2 倍是因为算得快”。算得快只是半句：A100 上 INT8 tensor core 约 624 TOPS，FP16 约 312 TFLOPS，峰值确实是 2 倍。但 INT8 的另一半提速来自搬运——权重从 2 字节/元素降到 1 字节/元素，搬运量直接减半。峰值算力翻倍、搬运量减半，两件事同时发生，缺一边的解释都不完整。第 5 节会把这两边放进同一张 Roofline 图里，那时候“为什么快”才算答完。
-
-**产出**：一个 INT8 matmul + 一份相对误差记录（数值与容限判断），再加一句：三元点积手算的相对误差约 1.47%，落在 1% 量级的预期里。
+INT8 相对 FP16 的算力峰值是 2 倍，来自两笔独立的账。A100 的公开规格是稠密 FP16 312 TFLOPS、稠密 INT8 624 TOPS；这两个数不含结构化稀疏，稀疏会把两者各自再翻一倍（624 TFLOPS、1248 TOPS），但 2:4 稀疏要求权重有特定模式，量化方案不保证这一点，本章的账按稠密算。两笔账是：tensor core 峰值翻倍，权重每元素从 2 字节降到 1 字节。它们落在不同的形状上——decode 形状吃搬运减半，prefill 与方阵吃峰值翻倍；两笔账不会乘成 4 倍：一个形状通常只兑现其中一笔。
 
 ### 第 3 节 · Fused dequant+matmul：dequant 融进 matmul，不单独物化 FP16 权重
 
-**目标**：写出 fused dequant+matmul，并与“先 dequant 再 matmul”的两步基线做访存对比。
+只量化权重时，激活保持 fp16。权重以 int8 存在 HBM，要用它做 fp16 matmul，有两条路：先跑一个 dequant kernel 把整块权重展开成 fp16 写回 HBM，再跑 matmul 读回来；或者在 matmul 的 K 循环里读 int8 tile，当场乘 scale 转成 fp16，直接喂给 `tl.dot`。前者是两步基线，后者是 fused dequant。图 22-1 把位宽与权重体积放在一起（与第 12 章共用）：16 位到 8 位，权重每元素从 2 字节降到 1 字节；本节只用到这一格。以 4096×4096 的权重为例，两步基线里权重每元素要过手 5 字节——读 int8 1 字节、写 fp16 2 字节、再读 fp16 2 字节；融合版只读 1 字节。
 
-**怎么做**（60 分钟，需 GPU；无卡先写代码）：
+按整块权重算：dequant 读 16.78 MB、写 33.55 MB，matmul 再读 33.55 MB，权重这一项一共 83.89 MB；融合版只读 16.78 MB，省下 67.11 MB，是融合版自身权重搬运的 4 倍。把激活与输出加进来，M=32 的两步基线总搬运约 84.41 MB，融合版 17.30 MB；对照的直接 FP16 matmul（权重已经是 fp16）是 34.08 MB。三个数放在一起，才分得清“融合相对两步基线”和“量化相对 FP16”是两笔不同的账：前者省 79.5%，后者省 49.2%。
 
-先想清楚两步基线的问题：权重以 int8 存，要先跑一个 dequant kernel 把它展开成 FP16（写回 HBM），再跑 FP16 matmul 把它读回来。权重每用一次就多一次“展开→写回→读回”的往返。按字节算，权重每元素要过手 5 字节（读 int8 1 字节、写 fp16 2 字节、再读 fp16 2 字节），融合版只读 1 字节。dequant 融合就是把展开放在寄存器里做：读 int8 tile，乘 scale 转成 fp16，立刻喂给 `tl.dot`，FP16 权重永远不落 HBM。
+两步基线多出来的两次 fp16 读写，读写的还是同一份权重：先写出去，再读回来，中间没有别的 kernel 消费它。融合要消灭的就是这个往返——数据写出去又读回来，纯粹是格式转换的过路费。
 
-5 字节对 1 字节，按 4096×4096 的权重矩阵展开成总量更直观。权重一共 4096×4096 = 16,777,216 个元素。两步基线里，dequant kernel 读 int8 权重 16.78MB，写 fp16 权重 33.55MB，matmul 再把 fp16 权重读回来 33.55MB——权重这一项的搬运一共 83.89MB。融合版只读 int8 权重 16.78MB，一次。一笔省下 67.11MB，省掉的搬运是融合版自身搬运的 4 倍。注意省掉的是权重这个最大头的搬运：M=32 的 decode 形状下，FP16 matmul 的总搬运约 34.08MB，权重占 33.55MB（第 5 节会逐项算，占比 98.5%）——省权重的搬运，就是省几乎全部的搬运。两步基线多出来的那两次 fp16 读写，读写的还是同一份权重：先写出去，再读回来，中间没有任何别的 kernel 用它。这就是融合要消灭的往返：数据写出去又读回来，中间没有人消费它，纯粹是格式转换的过路费。
-
-Fused kernel（A 是 fp16 激活，B 是 int8 权重 + per-channel scale）：
+Fused kernel（A 是 fp16 激活，B 是 int8 权重 + per-channel scale；示意，按当前 Triton 版本调整）：
 
 ```python
 @triton.jit
@@ -1191,127 +1174,132 @@ def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
                                 stride_am, stride_ak, stride_bk, stride_bn,
                                 stride_cm, stride_cn,
                                 scale_b_ptr,
-                                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
-    pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
+                                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+                                BLOCK_K: tl.constexpr, GROUP_M: tl.constexpr):
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    num_pid_in_group = GROUP_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
     a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
-    sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=0.0)
+    sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=1.0)
+
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_K)):
         k_rem = K - k * BLOCK_K
-        a = tl.load(a_ptrs, mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem), other=0.0)
-        b_int8 = tl.load(b_ptrs, mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N), other=0)
+        a = tl.load(a_ptrs,
+                    mask=(offs_m[:, None] < M) & (offs_k[None, :] < k_rem),
+                    other=0.0)
+        b_int8 = tl.load(b_ptrs,
+                         mask=(offs_k[:, None] < k_rem) & (offs_n[None, :] < N),
+                         other=0)
         b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)
         acc = tl.dot(a, b, acc)
         a_ptrs += BLOCK_K * stride_ak
-        b_ptrs += BLOCK_K * stride_bn
+        b_ptrs += BLOCK_K * stride_bk
+
     c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
-    mask_c = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-    tl.store(c_ptrs, acc.to(tl.float16), mask=mask_c)
+    tl.store(c_ptrs, acc.to(tl.float16),
+             mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
 
-读这段 kernel，先看 dequant 发生的位置。循环里 `b_int8 = tl.load(...)` 读进来的是 int8 tile，下一行 `b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)` 在寄存器里把它展开成 fp16，紧接着 `tl.dot(a, b, acc)` 就把它消费掉。`b` 这个 fp16 tile 从生到死只活在寄存器里：它没有对应的 HBM 地址，没有 `tl.store` 写它，也没有下一个 kernel 读它。融合的本质就是这个——中间结果的生命周期缩短到一次循环迭代之内，短到不需要经过 HBM。上一节的 epilogue 乘 scale 也是同样的手法：acc 转 fp32、乘 scale、转 fp16，全在寄存器里完成。两节的差别在乘 scale 的位置：上一节 scale 在循环外乘一次，这一节 scale 在循环内每个 k 步乘一次——因为这一节的 scale 是权重 dequant 的一部分，而权重是分 k 步读进来的。
+dequant 发生在循环里：`b_int8 = tl.load(...)` 读 int8 tile，下一行 `b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)` 在寄存器里展开成 fp16，紧接着被 `tl.dot` 消费。`b` 没有 HBM 地址，没有 `tl.store` 写它，也没有下一个 kernel 读它；它的生命周期只有一次循环迭代。22.2 的 epilogue 乘 scale 是同一个手法：中间结果留在寄存器里，不落 HBM。
 
-为什么 dequant 要先转 fp32 再转回 fp16，而不是直接在 fp16 里乘？`b_int8.to(tl.float32) * sb[None, :]` 这一步的乘法发生在 fp32 里：int8 的整数值（最大 127）乘上 fp32 的 scale，乘积的精度由 fp32 兜底；如果直接在 fp16 里乘，乘积要先舍入到 fp16 的精度再进 `tl.dot`，等于在进 tensor core 之前先丢一轮精度。最后的 `.to(tl.float16)` 是为了喂给 `tl.dot`——fp16 的 tensor core 要 fp16 输入。顺序是：fp32 里算准，fp16 里算快。各取所需，分工写在类型转换的顺序里。
+先转 fp32 再转 fp16，是因为 int8 的整数值乘 fp32 scale 的乘积由 fp32 兜底；直接在 fp16 里乘，乘积先舍入到 fp16 再进 tensor core，等于多丢一轮精度。最后的 `.to(tl.float16)` 是喂给 fp16 tensor core 的输入要求。顺序是 fp32 里算准、fp16 里算快。
 
-`sb` 的加载位置也值得看一眼：`sb = tl.load(scale_b_ptr + offs_n, mask=offs_n < N, other=0.0)` 写在循环外面，只读一次。scale 不依赖 k（上一节的提法在这里同样成立），所以它可以提到循环外；`b_int8` 依赖 k，必须在循环里分步读。循环外读一次的东西与循环内每步都读的东西，分界线就是“依不依赖 k”。scale 的访存量也可以算：N=4096 个 float，一共 16,384 字节，16KB——相对 16.78MB 的权重可以忽略。融合省的是权重的 67.11MB，不是 scale 的 16KB，账要算在大头上。
+`sb` 在循环外读一次：scale 不依赖 k，可以提到循环外；`b_int8` 依赖 k，必须在循环里分步读。N=4096 个 fp32 scale 是 16 KB，相对 16.78 MB 的权重可以忽略；融合省的是权重的 67.11 MB，不是这 16 KB。如果权重是 per-group，`sb` 也要按 k 组取，循环外的那次加载要挪进循环里；kernel 结构不变，多一次索引。
 
-注意：这里的 `tl.load` 也要同时盖 M/N 维与 K 维余量（同第 2 节），第 4 步的 M=32 形状下尾块同样会越界。
+指针步进与 mask 的边界同 22.2：`b_ptrs += BLOCK_K * stride_bk`，M/N 与 K 两个方向的 mask 都要齐。
 
-关键点：`b_int8.to(tl.float32) * sb[None, :]` 是在寄存器里对每个元素做的——dequant 的代价是每个元素几次 ALU 操作，省的是 HBM 往返。融合的收益取决于 matmul 本来卡在哪：小 batch（decode 形状，M 很小）时 matmul 是访存受限，省搬运就是省时间；大 batch 时 matmul 是计算受限，dequant 的 ALU 开销占比上升，收益收窄。这个判断先写下来，下一节实测验证。
+dequant 的 ALU 代价要另算。每个权重元素做 3 次操作：int8→fp32、乘 scale、fp32→fp16。一个权重 tile 会被 M 方向的每个程序块各展开一次，总操作数是 `3 × ⌈M/BLOCK_M⌉ × K × N`，与 matmul 的 `2·M·N·K` 相比，占比是 `3 × ⌈M/BLOCK_M⌉ / (2M)`。M=32、`BLOCK_M=64` 时，M 方向只有一个程序块，占比 4.7%；M=1024、`BLOCK_M=64` 时，16 个程序块各展开一次，占比 2.3%；`BLOCK_M=128` 时降到 1.2%。M=32 时 `BLOCK_M` 从 64 换到 128，向上取整仍是 1，占比不变——dequant 的摊薄靠 M 变大，不靠 tile 变大。
 
-dequant 的 ALU 代价可以先算出来，让“占比上升”有个具体的数。每个权重元素在 dequant 里做 3 次操作：int8 转 fp32、乘 scale、fp32 转 fp16。权重一共 16,777,216 个元素，一份权重完整 dequant 一次就是约 5033 万次操作。但注意：每个权重 tile 会被 M 方向的每个程序块各 dequant 一次——权重在 HBM 里只存一份，在寄存器里却要展开 M/BLOCK_M 份。总的 dequant 操作数是 `3 × ⌈M/BLOCK_M⌉ × K × N`，占总 FLOPs（2·M·N·K）的比例是 `3 × ⌈M/BLOCK_M⌉ / (2M)`。M=32、BLOCK_M=64 时，M 方向只有一个程序块，比例是 3/(2×32) ≈ 4.7%；M=1024、BLOCK_M=64 时，16 个程序块各展开一次，比例是 3×16/(2×1024) ≈ 2.3%；BLOCK_M 换成 128，比例降到约 1.2%。M 是 BLOCK_M 的整倍数时，这个比例约等于 `3/(2·BLOCK_M)`——只由 BLOCK_M 定。decode 形状下有个反直觉的结论：BLOCK_M 从 64 换到 128 并不能摊薄 dequant，因为 M=32 时 M 方向本来就只有一个程序块，权重只被展开一次，占比由 M 定，不由 BLOCK_M 定。dequant 的摊薄要靠 M 变大，不是靠 tile 变大。
+这些也是操作数比例，不是时间比例：dequant 的 3 次操作跑在 CUDA core 上，matmul 跑在 tensor core 上，按时间算占比会被放大；decode 形状下 dequant 与 HBM 读可以重叠，prefill 形状下它会直接占用 issue 带宽。方向是确定的：M 越大，dequant 的相对代价越小。
 
-这句话可以用 Roofline 先算一遍（N=K=4096，FP16）：M=32 时算术强度约 31 FLOP/字节，低于 A100 的 FP16 平衡点约 156，访存受限；M=1024 时算术强度约 680，高于平衡点，计算受限。所以“decode 省搬运就是省时间、prefill 收益收窄”不是感觉，是 Roofline 算出来的——下一节测的就是这个预测准不准。
+把 fused 点放回 Roofline（N=K=4096，A100，FP16 峰值 312 TFLOPS，带宽按 2 TB/s 取整）：M=32 时 FP16 的算术强度约 31.5，fused 约 62.1，仍在脊点 156 左边，访存受限，省一半权重搬运大约能换一半时间；M=1024 时 FP16 约 682.7，fused 约 1024，已在脊点右边，计算受限，省下的 16.78 MB 换算不成时间，dequant 的 ALU 反而多花。fused 的 `tl.dot` 仍是 fp16 输入，峰值还是 312 TFLOPS——它没有 INT8 路径那笔峰值翻倍。
 
-Roofline 的数可以逐项验算一遍，免得把它当成黑箱。算术强度（arithmetic intensity，FLOPs 除以搬运字节数）= 2·M·N·K / 总搬运字节。M=32 时，FLOPs 是 2×32×4096×4096 = 1,073,741,824（约 1.07 GFLOP）；搬运是权重 fp16 33.55MB + 激活 fp16 0.26MB + 输出 fp16 0.26MB = 34.08MB；算术强度是 1,073,741,824 / 34,078,720 ≈ 31.5。M=1024 时，FLOPs 是 34.36 GFLOP；搬运是权重 33.55MB + 激活 8.39MB + 输出 8.39MB = 50.33MB；算术强度是 34,359,738,368 / 50,331,648 ≈ 682.7。平衡点约 156 的含义是：算术强度低于 156，时间由搬运定；高于 156，时间由算力定。M=32 的 31.5 远在平衡点左边，省搬运直接换算成省时间；M=1024 的 682.7 远在平衡点右边，时间由 FLOPs 定，省下的字节换算不成时间。
+“融合总是更快”不成立。融合是一笔交易：拿 ALU 操作换 HBM 往返。访存受限时，HBM 往返是瓶颈，交易划算；计算受限时，瓶颈是 FLOPs，换回来的字节不值钱，付出去的 ALU 还占地方。22.2 的 INT8 路径与这一节的 fused 路径也不是谁替代谁：前者把激活和权重都量化，省得更多，代价是激活的量化误差与 epilogue 的账；后者只动权重，激活保持 fp16，误差小，省得少。
 
-融合版的点也可以先标出来。M=32 的 fused dequant：搬运是权重 int8 16.78MB + 激活 fp16 0.26MB + 输出 fp16 0.26MB = 17.30MB，算术强度是 1,073,741,824 / 17,301,504 ≈ 62.1——相对 FP16 的 31.5 向右移了一倍，但还是低于平衡点 156，依然访存受限，所以时间大约减半。M=1024 的 fused：搬运是权重 int8 16.78MB + 激活 fp16 8.39MB + 输出 fp16 8.39MB = 33.55MB，算术强度是 34,359,738,368 / 33,554,432 = 1024——远在平衡点右边，计算受限，省下的 16.78MB 字节换算不成时间，而 dequant 的 ALU（约占 FLOPs 的 2.3%）是实打实多花的。这就是“收益收窄”的机制：融合省的是搬运，搬运不再是瓶颈的时候，省下来的东西就不值钱了，而 dequant 的 ALU 账单照付。两个形状的预测正好相反，下一节一次实测就能同时验证两个。
-
-一个常见的误解：“融合总是更快”。融合是一笔交易：拿 ALU 操作换 HBM 往返。访存受限时，HBM 往返是瓶颈，交易划算；计算受限时，瓶颈是 FLOPs，换回来的字节不值钱，付出去的 ALU 还占地方。上一节的 INT8 matmul 与这一节的 fused dequant 不是谁替代谁的关系：INT8 matmul 把激活和权重都量化了，省得更多，但要付量化误差与 epilogue 的账；fused dequant 只动权重，激活保持 fp16，误差小，但省得少。两个 kernel 的取舍，第 5 节会放进同一张表里。
-
-融合这个手法，本周已经是第三次出现。第 2 周的 fused softmax 把减最大值、exp、求和留在寄存器里，不把中间结果写回 HBM；第 3 周的 FlashAttention 把 S、P 两个 N×N 矩阵留在 SRAM 里，不落 HBM；这一节把 dequant 的 fp16 权重留在寄存器里，不落 HBM。三次融合消灭的是同一种东西：写出去又读回来、中间没有人消费的中间结果。融合的判断标准也可以收拢成一句话：中间结果有没有别的消费者？没有，就融掉；有，就留着。
-
-两步基线（对照用，PyTorch 一行）：`b_fp16 = (b_q.float() * sb).to(torch.float16)`，再 `torch.matmul(a, b_fp16)`。用 `triton.testing.do_bench` 测两边在 M=32（decode 形状）与 M=1024（prefill 形状）下的耗时，填表。
-
-这行基线代码本身就是两步基线的全部成本：`(b_q.float() * sb)` 在 HBM 里物化出一份 fp16 权重（33.55MB 写），`.to(torch.float16)` 再定一次类型，`torch.matmul` 把它读回来（33.55MB 读）。一行代码，三次 HBM 往返——融合要消灭的就是这三次。测的时候注意，基线的 dequant 与 matmul 是两个 kernel，`do_bench` 要把两个加起来算，不要只测 matmul 那一半：只测一半，基线就显得比实际快，融合的收益就被低估了。
-
-**产出**：一个 fused dequant kernel + 一份两步基线 vs 融合版的访存对比表（M=32 与 M=1024 两档），再加一句：M=32 的融合点算术强度约 62.1，仍在平衡点左边；M=1024 的融合点约 1024，已在平衡点右边——两档形状的预测正好相反，下一节一次验证两个。
+同样的判断标准在第 20 章的 fused softmax 与第 21 章的 FlashAttention 里已经用过：把中间结果留在寄存器或 SRAM，前提是它没有别的消费者。dequant 出来的 fp16 权重只被本次 `tl.dot` 消费，所以可以融；如果同一份权重后面还有别的 kernel 要用，或者 M 方向有多个 tile、每个 tile 都要重新展开一次，物化一次反而可能更省——22.5 会把重复读的边界写进 Roofline 的假设里。
 
 ### 第 4 节 · Autotune + 实测：BLOCK 配置扫一遍，`do_bench` 计时
 
-**目标**：给第 2–3 节的两个 kernel 做 autotune，出一份配置-耗时对照表。
+22.2 与 22.3 的 kernel 都写死了 `BLOCK_M=64, BLOCK_N=64, BLOCK_K=32`。这组值在 M=32 和 M=1024 上不可能同时最优：decode 形状程序块少，tile 开大只会让更多 SM 空转；prefill 形状程序块多，tile 开大才能提高复用、摊薄 dequant。把配置交给 `triton.autotune` 扫一遍，按形状各选一组。
 
-**怎么做**（60 分钟，需 GPU；无卡先写配置表框架，实测标注“待补测”）：
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 64,  'BLOCK_K': 32,
+                       'GROUP_M': 8}, num_warps=4, num_stages=3),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64,  'BLOCK_K': 32,
+                       'GROUP_M': 8}, num_warps=4, num_stages=3),
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 128, 'BLOCK_K': 32,
+                       'GROUP_M': 8}, num_warps=8, num_stages=3),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 32,
+                       'GROUP_M': 8}, num_warps=8, num_stages=4),
+    ],
+    key=['M', 'N', 'K'],
+)
+@triton.jit
+def matmul_int8_kernel(...):
+    ...
+```
 
-给两个 kernel 套 `@triton.autotune`，`key` 取 `['M', 'N', 'K']`（形状一变就重调——M=32 和 M=1024 想要的 BLOCK_M 不一样）。配置覆盖 `BLOCK_M × BLOCK_N × BLOCK_K` 与 `num_warps` 的组合，至少扫 4 组，例如：`(64, 64, 32, warps=4)`、`(128, 64, 32, warps=4)`、`(64, 128, 32, warps=8)`、`(128, 128, 32, warps=8)`。每组配置第一次调用时都要编译加实测，配置越多调优越久——4 组是起步，不是上限。
+`key=['M','N','K']` 的意思是：这三个运行时参数一变，autotune 就重新扫配置；`BLOCK_*`、`GROUP_M`、`num_warps`、`num_stages` 是被扫的变量，不放进 key。M=32 与 M=1024 会被当成两个 key 各扫一遍；如果 kernel 还有别的会改变最优配置的运行时参数（比如 per-group 的 group size），也要放进 key，否则会拿错缓存。调优成本是“配置数 × key 数”次编译加计时：4 组配置 × 2 档形状 = 8 次；配置翻倍，成本翻倍。第一次调用时 autotune 把每组都跑一遍并缓存结果，之后的调用直接取缓存。
 
-autotune 的 `key` 先讲透。`key=['M', 'N', 'K']` 的意思是：autotune 按形状缓存调优结果，M、N、K 任何一个变了，就重新扫一遍配置。为什么形状一变就要重调？因为最优配置跟着形状走：M=32 的 decode 形状与 M=1024 的 prefill 形状，想要的 BLOCK_M 不一样——第 3 节的 Roofline 已经说了，一个访存受限，一个计算受限，tile 的取舍没有理由相同。`key` 里不写 `BLOCK_M` 这些，是因为它们是被扫的变量，不是缓存的条件；`key` 里写的是“什么变了就要重调”，答案是形状。调优的成本也可以算：4 组配置 × 2 档形状 = 8 个（配置，形状）组合，每个组合第一次调用时编译加实测——8 次编译是调优的固定成本，配置翻倍，成本跟着翻倍。4 组是起步，不是上限；但每加一组配置，都要问一句“多扫这一组，换来的信息值不值一次编译”。
+启动时 grid 要按当前配置算，BLOCK_* 不再从调用处传：
 
-4 组配置里每个数都有分工。BLOCK_M 是 tile 的高度：M 方向一次算多少行，决定一个程序块复用 B tile 的次数——BLOCK_M 越大，读进来的 B tile 被越多的行共享。BLOCK_N 是 tile 的宽度：N 方向一次算多少列，决定 A tile 的复用次数。BLOCK_K 固定 32：K 方向每步推进的长度，32 是 int8 `tl.dot` 的常用步长（第 2 节算过，一个 BLOCK_K=32 的局部和最坏是 516,128，int32 装得下）。num_warps 是每个程序块的 warp 数：4 个 warp 是 128 个线程，8 个 warp 是 256 个线程——warp 越多，一个程序块内的并行度越高，但每个线程分到的寄存器与 shared memory 越少。4 组配置扫的其实是两个维度的取舍：tile 大小（复用 vs 占用）与 warp 数（并行度 vs 每线程资源）。没有一组配置在两个维度上同时占优，这就是要实测的原因。
+```python
+grid = lambda META: (
+    triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),
+)
+matmul_int8_kernel[grid](a_q, b_q, c, M, N, K,
+    a_q.stride(0), a_q.stride(1), b_q.stride(0), b_q.stride(1),
+    c.stride(0), c.stride(1), scale_a.float(), scale_b.float())
+```
 
-两档形状下，程序块的数量先算出来——它决定了占用率的上限。grid 是 `(cdiv(M, BLOCK_M), cdiv(N, BLOCK_N))`，程序块总数是两个方向的乘积。M=32、BLOCK_M=64、BLOCK_N=64 时，M 方向 1 个程序块，N 方向 64 个，一共 64 个程序块；BLOCK_M 与 BLOCK_N 都换成 128，一共 32 个。A100 有 108 个 SM（NVIDIA 官方文档数据），64 个程序块只能覆盖约 59% 的 SM，32 个只能覆盖约 30%——decode 形状下，剩下的 SM 是空转的，tile 越大，空转的 SM 越多。M=1024 时情况反过来：BLOCK_M=64、BLOCK_N=64，一共 16×64 = 1024 个程序块；BLOCK_M 与 BLOCK_N 都换成 128，一共 8×32 = 256 个——两组都远超 108 个 SM，SM 全有活干，tile 大小的取舍不再受程序块数量卡脖子。decode 与 prefill 的 autotune 结论很可能相反：decode 偏爱小 tile（程序块多，SM 覆盖全），prefill 偏爱大 tile（复用高，dequant 摊薄）。这个预测先写下来，实测的时候对照着看——如果实测说 decode 也偏爱大 tile，那就要回头查：是不是小 tile 的 shared memory 或 launch 开销反而成了瓶颈。
+计时用 `triton.testing.do_bench`。它的 `warmup=25, rep=100` 是毫秒预算，不是迭代次数：先估一次单次耗时，再按预算换算 warmup 与重复次数；返回值默认是每次运行的均值，单位毫秒。它在每次计时前清 L2，所以量到的是“每次调用从冷 L2 开始”的时间，调用内部的复用仍然发生。自动调参要在正式计时前完成：do_bench 会先调用一次被测函数估时，autotune 的编译与扫配置就发生在那一次；不要把首次调用算进正式计时。
 
-测两档形状：M=32（decode）与 M=1024（prefill），N=K=4096。每组记三列：耗时、换算成的算力（TFLOPS = 2·M·N·K / 耗时）、与 FP16 Triton matmul 基线的比值。基线是用来回答“量化到底买到了多少速度”的——没有基线，TFLOPS 只是一个数。INT8 的理论峰值算力通常是 FP16 的 2 倍（A100 上 INT8 tensor core 约 624 TOPS，FP16 约 312 TFLOPS，数字以厂商公开规格为准），但实测能到多少取决于 `tl.dot` 的 int8 路径与 epilogue 开销（epilogue 里乘 scale、转 fp16，是 FP16 版不付的账）——先测再下结论。
+```python
+ms = triton.testing.do_bench(
+    lambda: matmul_int8(a_q, b_q, sa, sb),
+    warmup=25, rep=100, return_mode="median",
+)
+tflops = 2 * M * N * K / (ms * 1e-3) / 1e12
+```
 
-TFLOPS 的换算可以先备好一张换算尺，实测的时候直接套。分子 2·M·N·K 是固定的：M=32 时是 2×32×4096×4096 = 1,073,741,824 FLOP（约 1.07 GFLOP），M=1024 时是 34,359,738,368 FLOP（约 34.36 GFLOP）。耗时以微秒计，TFLOPS = 分子 / 耗时 / 1e12：M=32 时 TFLOPS ≈ 1073.7 / t(µs)，M=1024 时 TFLOPS ≈ 34359.7 / t(µs)。换算尺备好，实测的数字一出来就能换算，不用现推公式。比值那一列也要备好分母：FP16 Triton matmul 基线要在同一形状、同一台卡上测，不要拿别的卡、别的形状的数来比——比值只在“同一形状、同一硬件、同一测量方法”下才有意义。
+耗时以毫秒计，上面的换算是 `2MNK / (t_ms × 1e9)`；换成微秒，M=32 的换算尺是 `TFLOPS ≈ 1073.7 / t(µs)`，M=1024 是 `34359.7 / t(µs)`。基线要在同一形状、同一张卡、同一测量方法下测；两步基线的 dequant 与 matmul 是两个 kernel，`do_bench` 的 lambda 里要把两个都调用，只测 matmul 会把基线报快、把融合收益报小。
 
-624 TOPS 对 312 TFLOPS 这个 2 倍是天花板，不是承诺。天花板的意思是：INT8 的算力上限是 FP16 的 2 倍，实测能到多少，取决于 int8 的 `tl.dot` 路径能不能把 tensor core 喂饱。第 2 节算过一笔相关的账：epilogue 的乘 scale 与类型转换只占总 FLOPs 的约 0.05%——如果实测离 2 倍很远，账不要先记在 epilogue 上。更可能的缺口在两处：一是 int8 tensor core 路径本身的利用率（tile 形状、访存对齐、流水线），二是 decode 形状下程序块太少、SM 覆盖不满（上面算的 59% 与 30%）。两个缺口，第 4 节的表一次能看出来：同一形状下换配置，TFLOPS 跟着动，说明缺口在配置；换什么配置都不动，说明缺口在形状本身。
+两步基线还有一个 L2 陷阱：dequant 写出的 fp16 权重 33.55 MB，A100 的 L2 是 40 MB，matmul 紧接着读它时可能大量命中 L2，没走 HBM。do_bench 只在两次调用之间清 L2，清不掉同一次调用里的这次复用。所以两步基线的实测可能比“5 字节/元素都走 HBM”的估算快；要判断，用 ncu 看 DRAM 读字节，不要只看时间。
 
-验证第 3 节的判断：fused dequant 在 M=32 时应该明显快于两步基线（省了权重展开的 HBM 往返），在 M=1024 时差距收窄。如果实测与判断不符，记下来——这是第 6 周“负面结果分析”的素材。第 3 节的预测是可证伪的，测出来不对也是结果，藏起来才是浪费。
+程序块数量决定 SM 覆盖的上限。A100 有 108 个 SM。M=32、`BLOCK_M=64`、`BLOCK_N=64` 时，grid 是 1×64=64 个程序块，覆盖约 59% 的 SM；`BLOCK_M` 与 `BLOCK_N` 都换成 128，grid 是 1×32=32 个，只覆盖约 30%。M=1024 时，64×64 的配置有 16×64=1024 个程序块，128×128 有 8×32=256 个，两组都远超 108 个 SM。预期是：decode 偏爱小 tile（程序块多，SM 覆盖全），prefill 偏爱大 tile（复用高，dequant 摊薄）。M=32 时 M 方向只有一个 tile，`GROUP_M` 退化成 1，分组排序不起作用；它只在 M 方向有多个 tile 时才有意义。
 
-“明显快”与“差距收窄”在填表之前先定好标准，免得实测完了各说各话。M=32 时 fused 的算术强度约 62.1，仍在平衡点左边，时间由搬运定：搬运从两步基线的 83.89MB（权重那一项）降到 16.78MB，时间应该跟着降七八成——如果实测只快了一点点，先查两步基线的 dequant 是不是被 L2 缓存兜住了：33.55MB 的 fp16 权重在 40MB 的 L2 里理论上塞得下，matmul 第二次读可能命中 L2，没走 HBM——这个可能性要记下来，实测的时候对照 ncu 的 DRAM 读数判断，待补测）。M=1024 时 fused 的算术强度约 1024，已在平衡点右边，时间由 FLOPs 定：两步基线的总时间里 matmul 占大头，dequant 的 83.89MB 搬运只占一小部分，fused 省掉它，差距收窄是预期的。判断的标准写在表头下面，实测的数字填进去，对得上就是验证，对不上就是第 6 周的素材——两种结果都有去处，测之前先把去处想好。
+表里的数字全部待补测；正文出现的 TFLOPS 都是算例或上限。同一形状下再与 FP16 matmul 比，比值写在同一行：
 
-**产出**：一份配置-耗时对照表（两档形状 × 至少 4 组配置）+ 一句“判断是否成立”的结论。表头先备好，数字待补测：
+| 配置（BLOCK_M, BLOCK_N, BLOCK_K, warps, stages） | INT8 M=32 | fused M=32 | INT8 M=1024 | fused M=1024 |
+|---|---|---|---|---|
+| 64, 64, 32, 4, 3 | 待补测 | 待补测 | 待补测 | 待补测 |
+| 128, 64, 32, 4, 3 | 待补测 | 待补测 | 待补测 | 待补测 |
+| 64, 128, 32, 8, 3 | 待补测 | 待补测 | 待补测 | 待补测 |
+| 128, 128, 32, 8, 4 | 待补测 | 待补测 | 待补测 | 待补测 |
+| FP16 matmul（同形状） | 待补测 | 待补测 | 待补测 | 待补测 |
+| 两步基线（dequant + matmul） | — | 待补测 | — | 待补测 |
 
-| 形状 | kernel | 配置（BLOCK_M，BLOCK_N，BLOCK_K，warps） | 耗时（待补测） | TFLOPS（待补测） | / FP16 基线（待补测） |
-|---|---|---|---|---|---|
-| M=32 | INT8 matmul | （64，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=32 | INT8 matmul | （128，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=32 | INT8 matmul | （64，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=32 | INT8 matmul | （128，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=32 | fused dequant | （64，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=32 | fused dequant | （128，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=32 | fused dequant | （64，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=32 | fused dequant | （128，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=32 | 两步基线 | — | 待补测 | 待补测 | 待补测 |
-| M=1024 | INT8 matmul | （64，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=1024 | INT8 matmul | （128，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=1024 | INT8 matmul | （64，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=1024 | INT8 matmul | （128，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=1024 | fused dequant | （64，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=1024 | fused dequant | （128，64，32，4） | 待补测 | 待补测 | 待补测 |
-| M=1024 | fused dequant | （64，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=1024 | fused dequant | （128，128，32，8） | 待补测 | 待补测 | 待补测 |
-| M=1024 | 两步基线 | — | 待补测 | 待补测 | 待补测 |
+填完表先看两件事。同一形状下换配置，TFLOPS 动不动：动，说明缺口在配置；怎么换都不动，说明缺口在形状本身（程序块太少或访存结构）。INT8 与 fused 各自相对 FP16 的比值是否落在 Roofline 预测的方向上：M=32 的搬运减半应该换来接近 2 倍的上限，M=1024 的 INT8 峰值翻倍应该换来接近 2 倍，fused 在 M=1024 上不该有明显收益。测出来与预测不符，记下来——第 24 章的负面结果分析要的就是这种记录，藏起来才是浪费。
 
 ### 第 5 节 · 小结：量化省的是什么（搬运量），代价是什么（精度），在 Roofline 图上标点
 
-**目标**：收拢本周的结论，把两个 kernel 的 Roofline 点标到图上。
+把 22.2 与 22.3 的形状代回 Roofline，八个点一次标全（N=K=4096；A100 稠密峰值 312 TFLOPS / 624 TOPS；带宽按 2 TB/s 取整，脊点约 156 FLOP/字节）：
 
-**怎么做**（60 分钟，总结无卡可做）：
-
-算术强度对比：同一个 4096³ matmul，FP16 版搬运量是权重与激活各 2 字节/元素，INT8 版权重只剩 1 字节/元素——量化首先省的是搬运量，算术强度向右移；同时 int8 的 `tl.dot` 峰值算力更高，Roofline 的顶也抬高了。两边一起动，这就是量化提速的完整解释。省多少取决于权重占搬运的比重：M=32 的 decode 形状下，FP16 版总搬运约 34MB 里权重占 33.5MB——九成八以上，INT8 把总搬运几乎减半；方阵大 batch 下激活和输出也占大头，省的比例就小。量化最划算的形状，是权重占主导的形状。
-
-“向右移”与“顶抬高”这两句话可以落实成八个点，标在同一张 Roofline 图上。先算方阵 4096³ 这一档：FP16 版搬运是权重、激活、输出各 4096×4096×2 字节 = 33.55MB，三项一共 100.66MB，FLOPs 是 2×4096³ = 137.44 GFLOP，算术强度是 137,438,953,472 / 100,663,296 ≈ 1365；INT8 版（激活与权重 int8、输出 fp16）搬运是 16.78 + 16.78 + 33.55 = 67.11MB，算术强度是 137,438,953,472 / 67,108,864 = 2048。两个点都在平衡点 156 的右边，都是计算受限——方阵大 batch 下，量化省的 33.55MB 字节换算不成时间，提速只能来自顶的抬高（312 → 624）。再算 decode 这一档：M=32 的 FP16 点算术强度约 31.5，INT8 点约 62.5，fused 点约 62.1——三个点全在平衡点左边，都是访存受限，提速来自搬运减半（总搬运 34.08MB → INT8 的 17.17MB，约 0.504 倍）。同一张图上，两档形状的提速机制正好相反：decode 靠向右移，方阵靠顶抬高。Roofline 图的价值就在这里：它把“为什么快”拆成两个方向，哪个形状靠哪边，一眼就能看出来。
-
-fused 点与 INT8 点在 M=32 时几乎重合（62.1 对 62.5），这个重合本身就是一道检查题。两个 kernel 的搬运只差激活那一项：fused 的激活是 fp16（0.26MB），INT8 的激活是 int8（0.13MB），差 0.13MB；总搬运 17.30MB 对 17.17MB，差 0.8%。点重合说明 fused 与 INT8 在 decode 形状下的搬运账几乎一样，差别在别处：fused 的激活没有量化误差，INT8 的激活有。搬运账一样、精度账不一样——这就是第 3 节说的“fused 省得少、误差小”的定量版。
-
-省多少取决于权重占搬运的比重，这句话也可以落实成三个数。M=32 时，FP16 总搬运 34.08MB 里权重占 33.55MB，占比 98.5%——九成八以上，INT8 把总搬运压到 17.17MB，几乎减半。M=1024 时，FP16 总搬运 50.33MB 里权重占 33.55MB，占比 66.7%，激活与输出占了剩下的 33.3%，INT8 总搬运 29.36MB，是 FP16 的约 0.583 倍——省了，但没有减半。方阵 4096³ 时，权重只占 FP16 总搬运的 33.3%，INT8 总搬运 67.11MB，是 FP16 的约 0.667 倍。权重占比从 98.5% 掉到 66.7% 再掉到 33.3%，省的比例跟着从 0.504 倍走到 0.583 倍再走到 0.667 倍。“量化最划算的形状，是权重占主导的形状”——这句话的三个数就是 98.5%、66.7%、33.3%。decode 之所以是量化的主场，不是因为它小，是因为它的搬运里权重占了九成八。
-
-代价：精度。第 2 节的相对误差就是代价的度量。把“相对误差”与“提速比”并排放进同一张表——量化方案的取舍永远是这两个数的权衡，不是单看速度。快 2 倍、误差 5% 的方案可能没法上线；快 1.2 倍、误差 0.5% 的方案可能就上线了。数字说了算。
-
-这张表的两列数字来源不一样，要分清楚。相对误差那一列是第 2 节的精度账本：三元点积手算约 1.47%，预期在 1% 量级——这是本周唯一能量化精度的实测口径（手算也是实测的一种）。提速比那一列是第 4 节的配置-耗时对照表：INT8 matmul 与 fused dequant 各自除以 FP16 基线——实测标注“待补测”，表先备好，数字后填。两个数并排之后，取舍才有得谈：快 2 倍、误差 5% 的方案可能没法上线；快 1.2 倍、误差 0.5% 的方案可能就上线了。这两个例子里的数字是“可能”的举例，不是本周的实测结论——本周的实测结论要等第 4 节的表填满。取舍的判断标准也可以先定下来：误差的容忍线由下游任务定（分类任务与生成任务的容忍线不一样），提速比的及格线由部署定（省下来的时间值不值一次上线评审）。标准先定，数字后填，填完再下结论——顺序不要反过来。
-
-更新 Roofline 图：把 INT8 matmul 与 fused dequant 的点标上去，并写一句话——它们离 Roofline 有多远、差在哪。
-
-标图的时候，八个点一次标全，免得漏掉对照组：
-
-| 点 | 形状 | 算术强度（FLOP/字节） | 区间 | 顶 |
+| 点 | 形状 | 算术强度（FLOP/字节） | 区间 | 峰值 |
 |---|---|---|---|---|
 | FP16 matmul | M=32 | 约 31.5 | 访存受限 | 312 TFLOPS |
 | INT8 matmul | M=32 | 约 62.5 | 访存受限 | 624 TOPS |
@@ -1322,13 +1310,31 @@ fused 点与 INT8 点在 M=32 时几乎重合（62.1 对 62.5），这个重合�
 | FP16 matmul | 4096³ 方阵 | 约 1365.3 | 计算受限 | 312 TFLOPS |
 | INT8 matmul | 4096³ 方阵 | 约 2048.0 | 计算受限 | 624 TOPS |
 
-“离 Roofline 有多远”那句话，实测之前只能写一半：点的横坐标（算术强度）是算出来的，纵坐标（实测算力）要等第 4 节的表。横坐标先标上去，纵坐标待补测——图上先有位置，后有高度。差在哪的判断也分两档写：访存受限的三个点（M=32），差在搬运量与带宽利用率；计算受限的五个点，差在 tensor core 利用率与 tile 配置。第 4 节的实测数字填进来之后，这句话才能写完。
+这些算术强度按“每个矩阵只读一次”的理想缓存模型算；真实 kernel 的权重可能被多个 M tile 重复读，L2 能兜住多少要看 tile 顺序与权重面板大小，实测 DRAM 流量用 ncu 看。M=32 时三个矩阵加起来不到 34.1 MB，L2 是 40 MB，理想模型接近成立；更大的形状要靠分块调度逼近这个假设，偏差用 ncu 的 DRAM 流量核对。
 
-把本周的检查清单并进总清单，加两条：“scale 的粒度与误差上界能手算吗”“dequant 融合的收益在什么形状下成立、什么形状下收窄”。
+M=32 的三个点（31.5、62.5、62.1）都在脊点左边，访存受限：INT8 与 fused 都把权重搬运减半，时间上限接近 2 倍；两者的搬运只差激活那一项（fused 的激活是 fp16 0.26 MB，INT8 的是 int8 0.13 MB，总搬运 17.30 MB 对 17.17 MB，差 0.8%），所以 Roofline 上几乎重合，差别在精度：fused 的激活没有量化误差，INT8 有。
 
-这两条检查项各对应本周的一次手算。第一条对应第 1 节的离群值例子：不看笔记，能不能现场算出 per-tensor 的 scale 约 0.079、0.1 的误差 21%、per-channel 的误差上界 0.0005？算不出来，说明粒度的直觉还没长在手上。第二条对应第 3 节的 Roofline 预测：能不能说出 M=32 时融合省时间（算术强度 31.5 → 62.1，仍在平衡点左边）、M=1024 时收益收窄（算术强度 682.7 → 1024，已在平衡点右边）？说不出来，说明融合的判断还停留在“感觉融合更快”的层面。两条都过，本周才算收拢。
+M=1024 的三个点（682.7、1170.3、1024.0）都在脊点右边，计算受限：INT8 靠峰值翻倍把计算时间减半；fused 的峰值仍是 312 TFLOPS，省下的 16.78 MB 换算不成时间，dequant 的 ALU 反而多花，所以 fused 在这个形状上只能持平或更慢。方阵 4096³ 同理，INT8 靠 624 TOPS，fused 没有收益。
 
-**产出**：更新后的 Roofline 图 + 一张“相对误差 vs 提速比”对照表。相对误差一列来自第 2 节（手算约 1.47%，预期 1% 量级）；提速比一列来自第 4 节（待补测）。
+权重占搬运的比例决定量化能省多少：M=32 时 FP16 总搬运 34.08 MB 里权重 33.55 MB，占 98.5%，INT8 把总搬运压到 17.17 MB（0.504 倍）；M=1024 时权重占 66.7%，INT8 总搬运 29.36 MB（0.583 倍）；方阵时权重占 33.3%，INT8 总搬运 67.11 MB（0.667 倍）。权重占比从 98.5% 降到 66.7% 再到 33.3%，量化的省法从“几乎减半”退到“省三分之一”。量化最划算的形状是权重占主导的形状，decode 就是这样的形状——不是因为它小，是因为它的搬运里权重占九成八。
+
+代价是精度。22.2 的相对误差是本章唯一能量化精度的口径：预期在 1% 量级，不是实测；完整的质量表在第 12 章，本章不重复。把误差与提速比并排放：
+
+| 指标 | 来源 | 状态 |
+|---|---|---|
+| 相对误差（INT8 路径） | 22.2 的检查代码 | 预期 1% 量级，待补测 |
+| 相对误差（fused 路径） | 只量化权重，预期小于 INT8 | 待补测 |
+| 提速比（M=32 / M=1024） | 22.4 的配置-耗时表 | 待补测 |
+| 峰值算力 | A100 公开规格，稠密 | 312 TFLOPS / 624 TOPS |
+
+误差的容忍线由下游任务定，提速比的及格线由部署定；标准要在跑之前写下来，跑完对照标准做决定。快 2 倍、误差 5% 的方案可能不能上线；快 1.2 倍、误差 0.5% 的方案可能能上线——这两个数是举例，不是本章的结论。
+
+更新 Roofline 图：横坐标是上表的算术强度，纵坐标是 22.4 的实测算力。实测之前只能标横坐标，纵坐标待补测；点的位置先回答“该看哪一侧”，实测的高度再回答“离上限有多远”。访存受限的三个点，差在带宽利用率与程序块数量；计算受限的点，差在 tensor core 利用率与 tile 配置。
+
+量化方案本身省的是搬运量：权重每元素 2 字节变 1 字节，算术强度向右移。INT8 路径另外把 tensor core 的峰值从 312 TFLOPS 抬到 624 TOPS，这是硬件路径的账，不改变 matmul 的 FLOPs 数量；fused 路径没有这笔，只省搬运。代价是精度：激活也量化时误差更大，只量化权重时误差小、省得也少。形状决定哪一笔兑现：权重占搬运九成八的 decode 是量化的主场，计算受限的 prefill 与方阵只能吃峰值那一笔。
+
+**延伸**：[Triton 矩阵乘教程](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html)（分组排序、autotune 与 `do_bench` 用法）、[`tl.dot` 文档](https://triton-lang.org/main/python-api/generated/triton.language.dot.html)（输入类型与累加器）、[`do_bench` 文档](https://triton-lang.org/main/python-api/generated/triton.testing.do_bench.html)（warmup/rep 与返回值）、[NVIDIA A100 数据表](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf)（稠密与稀疏规格）、[PTX ISA 的 mma 指令](https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-instructions-mma)（INT8 m16n8k32）。
+
 ## 第 23 章 · FlashAttention 2/3 与 CUTLASS：读工业级实现
 
 第 21 章写出的 fused attention 在数学上是对的：Q 的一块常驻，K/V 分块流式读入，用 online softmax 维护运行最大值、归一化因子和输出累加器，不物化 S、P 两个 N×N 矩阵。同一套数学搬进工业实现，性能却可能差出一大截。FlashAttention-2 的论文给过一个直接读数：FlashAttention 1 在 A100 上只跑到理论峰值 FLOPs 的 25–40%，而调好的 GEMM 能到 80–90%。差的不是推导，是推导之外的决定：一个 block 算多少行、一个 warp 算哪一块、搬运和计算怎么重叠、针对哪一代 GPU 编哪条指令、哪些块可以整块跳过。
