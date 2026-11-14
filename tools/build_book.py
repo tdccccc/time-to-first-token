@@ -26,11 +26,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site-src"
 
 PART_TITLES = {
-    1: "用算术强度与脊点判断瓶颈在算力、带宽还是启动开销，再手算 batch、prefill 与 KV 如何改写上限。",
-    2: "TTFT、ITL、吞吐、排队深度各量一件事；只报均值会藏住长尾，分位数还要配样本量。",
-    3: "先分清 CPU 与 GPU 两条时间线：是 kernel 在跑、在等数据，还是在等 CPU 发下一步。",
-    4: "把首 token 延迟、token 间延迟与吞吐固化成脚本：条件固定，数字才可比。",
-    5: "第一份基线要回答三件事：拐点在哪、长尾多长、瓶颈更像算力还是带宽。",
+    1: "基础与度量",
+    2: "推理框架",
+    3: "算子优化",
+    4: "国产芯片适配",
+    5: "综合项目",
 }
 PART_CN = {1: "第一部分", 2: "第二部分", 3: "第三部分", 4: "第四部分", 5: "第五部分"}
 PART_LEDES = {
@@ -131,7 +131,7 @@ CHAPTER_SUMMARIES = {
     25: "国产芯片先画软件栈地图：四面墙判断能不能跑，插件与统一算子层决定覆盖，每格标核实日期。",
     26: "CANN 分五层；算子经定义、编译、注册、调用四环才到 vLLM，读懂最小算子并会定位失败比背 API 有用。",
     27: "同一模型在 Ascend 上跑通，难点在版本矩阵、插件 hook 与踩坑记录。",
-    28: "算子覆盖分析要拿 profiler 的真实清单逐条对照，不靠猜。",
+    28: "用一次推理的算子清单，按个数、调用次数、耗时加权三种口径算覆盖率，再判断瓶颈在算子覆盖还是调度/显存。",
     29: "用小引擎和 L2_04 讲移植：把每一条 CUDA 假设换成 Ascend 上可验证的检查项。",
     30: "同一模型、同一评测集在两边各跑一遍：量精度、量性能、归因到算子，写成带版本日期的可复现报告。",
     31: "综合项目的重点是同一套条件、可追溯的数据和明确的证据等级：把同一模型在两套硬件上的差异做两遍并写清楚。",
@@ -156,6 +156,7 @@ CHAPTER_FIGURES = {
     25: ("chip-stack.svg", "国产芯片软件栈：驱动与固件、SDK/运行时、算子库、框架插件、推理引擎", "从下往上看五层软件栈，再检查同一模型经过哪些层。结论：跑通和性能问题都要按层定位，不能只归因到芯片本身。"),
     26: ("cann-op-chain.svg", "左侧是 CANN 分层（驱动与固件、运行时、算子库、图引擎与框架适配），右侧是一个算子从 AscendC 源码、编译、注册到被 vLLM 调用的四环；先自下而上找层，再沿四环找断点。结论：症状与根因常不在同一层，定位要按链路走", "先看左侧的软件栈分层，再沿右侧四环看一个算子从源码到调用的路径；任何一环没接上，症状都可能出现在别处。结论：定位要按层与链路走，不能只看报错所在的那一层。"),
     27: ("chip-stack.svg", "vllm-ascend 插件在芯片软件栈中的位置：接入引擎与算子库之间", "先找插件层，再看它向上接 vLLM、向下接 CANN 与算子实现。结论：版本矩阵、插件 hook 和算子覆盖要分别验证，不能互相替代。"),
+    28: ("coverage-attribution.svg", "覆盖矩阵归因：横轴为耗时加权执行覆盖率，纵轴为 Top 3 耗时占比；四个象限分别指向补算子、补长尾、查热点实现和查调度/显存/通信。", "先看覆盖率落在低/高哪一侧，再看 Top 3 是否集中；结论：低覆盖且热点集中才补算子，高覆盖仍慢则查调度、显存与通信。"),
 }
 
 TERM_GLOSSARY = [
@@ -221,7 +222,8 @@ TERM_GLOSSARY = [
     {"id": "nsys", "aliases": ("nsys",), "en": "NVIDIA Nsight Systems", "zh": "NVIDIA 系统级性能分析器", "desc": "采集 CPU、GPU、拷贝与同步时间线的系统级 profiler"},
     {"id": "tbe", "aliases": ("TBE",), "en": "Tensor Boost Engine", "zh": "张量加速引擎", "desc": "昇腾 CANN 中较早的算子开发框架，用 DSL 描述算子计算"},
     {"id": "rope", "aliases": ("RoPE",), "en": "Rotary Position Embedding", "zh": "旋转位置编码", "desc": "通过旋转 query/key 表示注入相对位置信息的编码方法"},
-    {"id": "rag", "aliases": ("RAG",), "en": "Retrieval-Augmented Generation", "zh": "检索增强生成", "desc": "先从外部知识库检索相关文档，再把结果交给模型生成"},
+    {"id": "rag", "aliases": ("RAG",), "en": "Retrieval-Augmented Generation", "zh": "检索增强生成", "desc": "先从外部知识库检索相关文档，再把结果交给模型生成"
+},
 ]
 
 CHAPTER_FIGURE_PLACEMENT = {
@@ -243,6 +245,7 @@ CHAPTER_FIGURE_PLACEMENT = {
     25: (2, 1),   # 25.2 software stack layers
     26: (4, 1),   # 26.4 operator chain
     27: (3, 1),   # 27.3 plugin position in the stack
+    28: (5, 6),   # 28.5 after the threshold paragraph
 }
 
 M1_WEEK_TO_CH = {
@@ -1467,7 +1470,7 @@ def build_progress_page(parts: dict[int, Part]) -> None:
     ]
     for part in parts.values():
         out.append('  <section class="progress-part">')
-        out.append(f'    <h2>{PART_CN[part.num]} {part.title}</h2>')
+        out.append(f'    <h2 id="part-{part.num}">{PART_CN[part.num]} {part.title}</h2>')
         for ch in part.chapters:
             opt = '<span class="progress-opt">选读</span>' if ch.optional else ""
             out.append(
