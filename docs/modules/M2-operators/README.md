@@ -425,9 +425,10 @@ def softmax(x):
 
 正确性检查与 `torch.softmax(x, dim=-1)` 对比，留 `atol=1e-5`。容限是必须的：两个 kernel 的求和树不一样，FP32 舍入落在不同位置，逐 bit 相等不该指望；官方教程对 1823 × 781 的随机矩阵用默认 `torch.allclose` 就能过，1e-5 比它还宽松。误差到 10⁻² 量级就不是舍入了：先查 mask 与 `other`，再查 BLOCK 是否盖住了整行。
 
-计时用 `triton.testing.do_bench`，口径要写清（参数名与默认值随版本变，以当前版本文档为准）：`warmup=25`、`rep=100` 的单位是毫秒，不是次数。它先跑一次估出单次耗时，再按 warmup ÷ estimate 与 rep ÷ estimate 算出热身次数与重复次数；每次重复用一对 CUDA event 计时；每次重复前把一个缓冲区清零，把 L2 冲掉，所以量到的是冷 L2 的数，小张量会因此偏慢。默认 `return_mode="mean"` 返回均值，要中位数就传 `return_mode="median"`（或 `quantiles=[0.5]`）。
+计时用 `triton.testing.do_bench`，口径要写清（参数名与默认值随版本变，以当前版本文档为准）：`warmup=25`、`rep=100` 的单位是毫秒，不是次数。它先跑一次估出单次耗时，再按 warmup ÷ estimate 与 rep ÷ estimate 算出热身次数与重复次数；每次重复用一对 CUDA event 计时；每次重复前把一个缓冲区清零，把 L2 冲掉，所以量到的是冷 L2 的数，小张量会因此偏慢。默认 `return_mode="mean"` 返回均值，要中位数就传 `return_mode="median"`（或 `quantiles=[0.5]`）。如果 kernel 套了 autotune，第一次调用会先扫一遍配置，这次耗时同样落在热身里，不计入结果。
 
 ```python
+# 在 softmax() 里：n_rows、n_cols、BLOCK、y 都已经算好
 ms = triton.testing.do_bench(
     lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK)
 )
