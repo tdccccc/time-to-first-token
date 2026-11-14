@@ -1393,158 +1393,233 @@ TPOT 的预期可以算出来，因为 decode 阶段每步要读的 KV 变了。
 
 ### 第 14 章：解耦式服务与 Kubernetes
 
-**重点。** 第 1 周的 prefill/decode 不对称变成一种架构，再加上运行它的运维层。
+**本章目标。** 把 prefill 与 decode 的瓶颈差算成干扰时间，判断解耦的收益能否盖过 KV 传输成本；再把两池部署到 Kubernetes，用排队深度而不是 CPU 驱动扩缩容。
 
-**形式。** 解耦式部署以视频为主；Kubernetes 以文字为主，它变化太快，视频跟不上。
+一台 H100 上，1000 token 的 prefill 在 50% 算力利用率下要 65 ms，跑满稠密峰值也要 32.5 ms；decode 生成一个 token 只要 4.8 ms。两个请求同时在场，decode 的下一个 token 就得等 prefill 算完；每输出一个 token 的时间预算通常只有几十毫秒，一次 prefill 就能吃掉大半。把两个阶段拆到不同的卡上，干扰没有了，但 prefill 算出的 KV 要跨机搬：4000 token 的 KV 走 400 Gb/s InfiniBand 要 10.5 ms。这笔传输税比干扰便宜吗？便宜多少？拆开之后，两池又该怎么部署、按什么信号扩缩容？
 
-**产出。** 你的服务跑在 Kubernetes 上，用排队深度而不是 CPU 驱动自动扩缩容。
+三个问题共用一套数：模型是 Llama-3.1-8B，卡是 H100 SXM，算力利用率假设 50%。GB 按 10⁹ 字节算，KV 用 KiB。第 1 章的 A100 脊点是 156，方法与这里相同；换 H100 是因为解耦部署的目标硬件是 H100 与 A100 两代混布。
 
 #### 第 1 节 · 从 Roofline 到解耦：为什么 prefill 与 decode 要拆开
 
-**目标**：用第 1 周的 Roofline（屋顶线模型）把 prefill/decode 的不对称算出来，讲清“互相干扰”在数字上长什么样；读完 DistServe 的报告，能说出 goodput（有效吞吐，在延迟约束内能服务的最大请求速率）为什么要代替裸吞吐做优化目标。
+先把 Roofline 的尺子定下来。H100 SXM（80GB 版）的 FP16 稠密算力是 494.7 TFLOPS，HBM 带宽 3.35 TB/s。NVIDIA 规格表上的 989 TFLOPS 是带稀疏（sparsity）的口径，本章不用稀疏，所有算力账都按稠密峰值算——拿 989 再乘 50% 的利用率，等于把稠密峰值当成满负荷，那个数不成立。脊点（ridge point，峰值算力与峰值带宽的比）是 494.7 ÷ 3.35 ≈ 148 FLOP/byte：算术强度（arithmetic intensity，每读 1 字节做的浮点运算数）高于 148 的算子受计算限制，低于 148 的受带宽限制。脊点是硬件给的，模型与阶段决定你落在哪一边。
 
-**怎么做**：
+模型取第 8 章部署过的 Llama-3.1-8B：8.03B 参数，FP16 权重 16.06 GB；32 层、8 个 KV 头、head 维 128。每个 token 的 KV 是 2 × 32 × 8 × 128 × 2 = 131,072 字节，即 128 KiB。这个数已经是 GQA（分组查询注意力，多个 query 头共享一组 KV 头）压缩后的结果：32 个 query 头共享 8 个 KV 头，KV 只有全存时的四分之一；不共享要乘 4。
 
-先算一笔账，这笔账就是整周的出发点。取 H100 SXM（80GB 版）：FP16 算力峰值 989 TFLOPS，显存带宽 3.35 TB/s。Roofline 的拐点（ridge point，算力线与带宽线的交点）是 989 ÷ 3.35 ≈ 295 FLOPs/byte：一个算子的算术强度（arithmetic intensity，每读一个字节能做的浮点运算数）高于 295，它受计算限制；低于 295，它受带宽限制。拐点是硬件给的，模型与阶段决定你落在哪一边。
+1000 token 的 prefill：计算量约 2 × 8.03 × 10⁹ × 1000 ≈ 1.61 × 10¹³ FLOPs；访存是权重读一遍 16.06 GB，加写 1000 个 token 的 KV 131 MB，共 16.19 GB。算术强度 1.61 × 10¹³ ÷ 1.619 × 10¹⁰ ≈ 992，是脊点的 6.7 倍，prefill 落在计算侧。时间按 50% MFU（model FLOPs utilization，模型算力利用率，实际算力占峰值的比例）算：1.61 × 10¹³ ÷ (494.7 × 10¹² × 0.5) ≈ 65 ms；就算跑到 100% 稠密峰值，也要 32.5 ms。
 
-模型取第 2 周跑过的 Llama-3.1-8B：8.03B 参数，FP16 权重 16.06 GB；32 层、8 个 KV 头（key/value head，分组查询注意力里共享键值的头）、head 维 128。每个 token 的 KV（键值缓存）是 2 × 32 × 8 × 128 × 2 字节 = 131,072 字节，即 128 KiB。注意这个 128 KiB 是 GQA（分组查询注意力）压缩后的结果：32 个 query 头共享 8 个 KV 头，KV 只有 query 头全存时的四分之一。没有 GQA，这笔账要再乘 4。
+decode 一步只生成 1 个 token：计算量约 2 × 8.03 × 10⁹ ≈ 1.61 × 10¹⁰ FLOPs；访存同样要把 16.06 GB 权重读一遍，再加读 1000 token 的 KV 131 MB，共 16.19 GB。算术强度 1.61 × 10¹⁰ ÷ 1.619 × 10¹⁰ ≈ 0.99，约为脊点的 1/150，decode 落在带宽侧。步时 16.19 GB ÷ 3.35 TB/s ≈ 4.8 ms，单序列上限约 207 token/s。同一个模型、同一块卡，两个阶段的算术强度差约 1000 倍（992 对 0.99）：prefill 等计算，decode 等显存。
 
-prefill（预填充，一次性算完整个 prompt）先算。prompt 长 1000 token，计算量约 2 × 参数量 × token 数 = 2 × 8.03 × 10⁹ × 1000 ≈ 1.61 × 10¹³ FLOPs；访存是权重读一次 16.06 GB，加写 1000 个 token 的 KV（1000 × 128 KiB ≈ 128 MB），共约 16.19 GB。算术强度是 1.61 × 10¹³ ÷ 1.619 × 10¹⁰ ≈ 992 FLOPs/byte，远高于拐点 295——prefill 是计算限制的。换句话说，prefill 的时间花在算上，显存带宽对它来说绰绰有余。
+干扰的大小就是一次完整 prefill 的时间。一个正在 decode 的请求，如果与一次完整 prefill 同批、或排在它后面，它的下一个 token 要多等 32.5–65 ms。TPOT（time per output token，每输出一个 token 的时间）的预算通常只有几十毫秒；一次 prefill 吃掉大半，连续几个 prefill 就能让 TPOT 翻几倍。这是 DistServe 说的 prefill-decode 干扰：它不是平均意义上的慢，是把尾延迟拉长。
 
-decode（解码，一次生成一个 token）正好反过来。每步只生成 1 个 token，计算量是 2 × 参数量 ≈ 1.61 × 10¹⁰ FLOPs；访存却是权重又要完整读一次 16.06 GB（每个 token 的生成都要把全部权重过一遍），再加读 1000 个 token 的上下文 KV（128 MB），共约 16.19 GB。算术强度是 1.61 × 10¹⁰ ÷ 1.619 × 10¹⁰ ≈ 0.99 FLOPs/byte，不到拐点的零头——decode 是带宽限制的。同一个模型、同一块卡，两个阶段的算术强度差了 1000 倍（992 对 0.99）。第 1 周的结论在这里有了数字形状：prefill 等计算，decode 等显存。
+分块 prefill（chunked prefill，把 prompt 的 prefill 切成小块，与 decode 步交错执行）把一次干扰摊成多次，代价是权重被重复读：切成 n 块，权重就读 n 遍。这里按每块单独执行来算代价；实际调度里块与 decode 同批，权重读取由同批请求分摊，时间会比这个上界小一些，但“块越小、每 token 分摊的权重读取越多”的方向不变。1000 token 的 prefill 切 4 块（每块 250 token），每块计算量 4.02 × 10¹² FLOPs，访存 16.06 GB 权重加 32 MB KV，算术强度约 250；仍高于 148，还在计算侧，但余量从 6.7 倍缩到 1.7 倍。切到 8 块（每块 125 token），算术强度约 125，跌破 148，落到带宽侧：可达到的算力上限是 3.35 TB/s × 125 ≈ 419 TFLOPS，约为稠密峰值的 85%，再想靠提高 MFU 补回来就没有空间。切到 16 块（每块 63 token），权重要读 16 遍，共 257 GB，光搬权重就要 76.7 ms，超过 50% MFU 下 65 ms 的计算时间——分块本身开始拖长总 prefill 时间。
 
-“互相干扰”也可以算出来。decode 一步的时间由带宽定：16.19 GB ÷ 3.35 TB/s ≈ 4.8 ms，单序列的 token 生成速度上限就是 1 ÷ 4.8 ms ≈ 207 token/s。1000 token 的 prefill 在 50% MFU（模型算力利用率，实际达到的算力占峰值的比例）下要 1.61 × 10¹³ ÷ (989 × 10¹² × 0.5) ≈ 32.5 ms；就算跑到峰值也要 16.2 ms。一个正在 decode 的请求，如果排在一个完整 prefill 后面，它的下一个 token 要多等 16–33 ms——TPOT（time per output token，每输出一个 token 的时间）的预算通常只有几十毫秒，一次 prefill 就能把它吃掉大半。prefill 与 decode 拼在同一批 GPU 上，decode 的延迟就被 prefill 的计算量随机拖拽，这就是 DistServe 论文开头说的干扰。
+| 每块 token 数 | 块数 | 单块步时（50% MFU） | 算术强度 | 位置 |
+|---|---|---|---|---|
+| 1000 | 1 | 65 ms | 992 | 计算侧 |
+| 500 | 2 | 32.5 ms | 498 | 计算侧 |
+| 250 | 4 | 16.2 ms | 250 | 计算侧，距脊点 1.7 倍 |
+| 125 | 8 | 8.1 ms | 125 | 带宽侧，MFU 上限 85% |
+| 63 | 16 | 4.8 ms（带宽兜底） | 63 | 带宽侧，MFU 上限 43%，总时间约 77 ms |
 
-分块 prefill（chunked prefill，把一个 prompt 的 prefill 切成小块，与 decode 步交错执行）是同机部署下的缓解，不是根治。256 token 一块，在 50% MFU 下是 8.3 ms；512 token 一块是 16.6 ms。块越小，单次干扰越小，但代价也能量出来：切成 4 块，权重就要读 4 遍，prefill 的算术强度从 992 掉到约 250，反而跌破了拐点 295——prefill 自己从计算限制变成了带宽限制。切成 2 块（512 token）时算术强度约 498，还在拐点之上。所以分块大小是个权衡：干扰与 prefill 效率各让一步，512 token 左右是个有数字支撑的折中，不是随意设定的默认值。
+表里的“位置”按理想峰值下的算术强度分类；50% MFU 的步时仍按计算时间算，因为 50% 低于带宽允许的上限。到 63 token 时上限降到 43%，50% MFU 不再成立，步时改由带宽兜底。
 
-再看一个常见的想法：加大 batch 能不能把 decode 也推成计算限制？算术强度随 batch 上升，但它有天花板。batch 为 B 时，权重只读一次，KV 却要读 B 份，算术强度是 B × 1.61 × 10¹⁰ ÷ (16.06 GB + B × 128 MB)。上下文 1000 token 时，B 趋向无穷大，算术强度的极限是 1.61 × 10¹⁰ ÷ (1000 × 128 KiB) ≈ 122.5，永远到不了拐点 295——长上下文的 decode 不可能靠加大 batch 变成计算限制。上下文 128 token 时极限是 957，但要 batch 427 才越过拐点；上下文 512 token 时则永远越不过。结论是结构性的：decode 的带宽属性写在 KV 的大小里，不是调参能调掉的。
+分块的下界由 decode 自己的步时定。块小到约 74 token 时，块的计算时间降到 4.8 ms，与 decode 的带宽时间持平；这时算术强度约 74，正好是 148 的一半，50% MFU 就是带宽允许的上限，再往下切，步时不再下降，50% MFU 本身也不成立，只会多读权重。上界由 TPOT 预算定：512 token 一块的干扰是 32.5 ms，250 token 一块是 16.2 ms；在几十毫秒的 TPOT 预算下，512 已经吃掉大半。中间还要看算术强度：250 token 一块的 250 仍在计算侧；125 token 一块的 125 跌破脊点，MFU 上限被带宽压到 85%；63 token 一块的 63 只允许约 43% MFU，总 prefill 时间从 65 ms 涨到约 77 ms。在这组数下，250 token 左右是干扰与效率的折中点。512 不是默认优选，250 也不是通用常数——换卡、换 TPOT 预算，折中点会移动；判断顺序不变：先用 TPOT 预算定单次干扰上限，再检查块大小的算术强度离脊点还有多少余量。
 
-类比一下：prefill 像批量印刷，一次印完整本书，瓶颈是印刷机的速度；decode 像逐字口述，每说一个字都要把整本字典翻一遍，瓶颈是翻字典的速度。两个工人共用一台机器，一个要算力、一个要带宽，抢的是同一块 GPU 的时间片。第 1 周你是在一张 Roofline 图上看到这件事，第 8 周你要把它变成架构：既然两个阶段要的东西不一样，就让它们住在不同的 GPU 上，各自按自己的瓶颈优化。
+再看加大 batch 能不能把 decode 推成计算限制。batch 为 B 时，权重只读一遍，KV 要读 B 份，算术强度是 B × 1.61 × 10¹⁰ ÷ (16.06 GB + B × L × 128 KiB)，L 是上下文长度。B 趋向无穷时，极限是 1.61 × 10¹⁰ ÷ (L × 128 KiB)。
 
-DistServe 的回答分三层：拆开消除干扰；按应用的 TTFT（time to first token，首 token 延迟）与 TPOT 要求，分别为两阶段协同优化资源分配与并行策略；按集群带宽放置两阶段，最小化拆分带来的通信。优化目标也换了：goodput——在 TTFT 与 TPOT 约束内能服务的最大请求速率。它与裸吞吐的区别在于，超了延迟约束的请求不算数：一个系统可以靠无限排队把吞吐刷得很高，同时让一半请求超时，goodput 把这种刷法排除在外。论文宣称的关键数字（多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍，同时 90% 以上请求满足延迟约束）见下方论文精读块，那里是原文照搬。
+| 上下文 L | 算术强度上限（B→∞） | 越过 148 所需 batch |
+|---|---|---|
+| 128 | 957 | 约 175 |
+| 512 | 239 | 约 388 |
+| 828 | 148 | 无穷大 |
+| 1000 | 122.5 | 不可能 |
 
-一个常见的误解：“拆开就免费了”。拆开的税是 KV 传输：prefill 算出的 KV 得搬到 decode 那边去。这笔税有多大，周三会算；先把结论放在这里：同机内拆，税可以忽略；跨机拆，税是 TTFT 里一个看得见的零头。解耦不是消灭成本，是把一种成本（干扰）换成另一种成本（传输），再证明后者更小。
+上下文 1000 token 的 decode 无论 batch 多大都到不了计算侧；512 token 在 batch 约 388 时能越过；临界点在 1.61 × 10¹⁰ ÷ (148 × 128 KiB) ≈ 828 token：上下文超过约 828 token，加多少 batch 都没用。长上下文 decode 的带宽属性写在 KV 大小里，不是调参能调掉的。
 
-**阅读**：[DistServe at OSDI 2024](https://www.youtube.com/watch?v=WwJvecXOeUA)（Yinmin Zhong，报告人）；[论文](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)（选读，核心内容见下方总结）。
+DistServe 的回答分三层：把两阶段拆到不同 GPU，消除干扰；按应用的 TTFT（time to first token，首 token 延迟）与 TPOT 要求，分别优化两阶段的资源分配与并行策略；按集群带宽放置两阶段，减少拆分带来的通信。优化目标从裸吞吐换成 goodput（有效吞吐，在 TTFT 与 TPOT 约束内能服务的最大请求速率）：超了延迟约束的请求不算数，靠无限排队刷出来的吞吐被排除在外。举个例子，10 req/s 的吞吐里只有 8 req/s 满足约束，goodput 是 8 而不是 10。
 
-**产出**：一页推导笔记，写下拐点 295、prefill 算术强度 992、decode 算术强度 0.99、一次完整 prefill 对 decode 的干扰 16–33 ms，以及分块 256 token 时 prefill 跌破拐点的计算，并用一句话回答“为什么 prefill 与 decode 要拆开”。
+论文宣称，在 A100 集群（跨节点 25 Gbps）、OPT 13B–175B 模型、聊天/代码/摘要三类负载下，DistServe 最多多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍，同时 90% 以上请求满足延迟约束。这是论文宣称、未独立复现；7.4 倍是这组实验里的上界，换模型、换负载形状、换 SLO 都会变。
+
+拆开不是免费。prefill 算出的 KV 要搬到 decode 那边；同机走 NVLink 便宜，跨机走 InfiniBand 就要在 TTFT 里加一笔。14.3 把这笔税算清楚：解耦的本质是换成本，用 KV 传输换掉干扰与硬件错配，再证明换得过来。换不过来时，同机部署加更好的调度仍然是答案——分块 prefill 就是同机路线上的缓解手段。
 
 #### 第 2 节 · Splitwise：decode 为什么不需要 H100
 
-**目标**：讲清“按阶段拆硬件”的逻辑：decode 用便宜卡不是降级，是纠正硬件错配；读完 vLLM 解耦式 prefill 的文档，知道引擎层面怎么把两个阶段拆成两个实例。
+先看 decode 换卡的数字。decode 一步的瓶颈是 16.19 GB 访存。A100 80GB 的 FP16 稠密算力 312 TFLOPS、HBM 带宽约 2 TB/s：同样一步要 16.19 GB ÷ 2 TB/s ≈ 8.1 ms，比 H100 的 4.8 ms 慢 1.68 倍。算力用掉多少？1.61 × 10¹⁰ FLOPs ÷ 8.1 ms ≈ 2.0 TFLOPS，是 A100 峰值的 0.64%；H100 上 3.3 TFLOPS，占 494.7 TFLOPS 的 0.67%。两个数都在个位数 TFLOPS，卡上有几百 TFLOPS。
 
-**怎么做**：
+Splitwise（Microsoft，ISCA 2024）从这个错配出发：先做表征，证明 decode 用不满最新 GPU 的算力；再把 prefill 放高算力卡、decode 放降功耗的便宜卡；KV 用集群现成的背板互联传；最后按吞吐、成本、功耗三个目标设计集群。论文宣称，相比当时的同构集群，吞吐高 1.4 倍的同时成本低 20%；或者在同样的成本与功耗预算下，吞吐高 2.35 倍。这两个数是论文宣称、未独立复现；条件是其事件驱动模拟器加生产 trace，性能模型在 DGX-A100 与 DGX-H100 上测过，九项 P50/P90/P99 延迟 SLO 全部满足，基线是同构 A100/H100 集群；硬件实现只在两对 DGX 上验证了 KV 传输。1.4 倍与 2.35 倍都是“最高”值，不是每个负载都能拿到。
 
-先看数字。周一算过，decode 一步在 H100 上要 4.8 ms，瓶颈是 16.19 GB 的访存。换成 A100 80GB（FP16 312 TFLOPS，显存带宽约 2 TB/s），同样一步要 16.19 GB ÷ 2 TB/s ≈ 8.1 ms，只慢了 1.68 倍。再看算力用掉了多少：decode 一步的计算量是 1.61 × 10¹⁰ FLOPs，8.1 ms 内做完只需要约 2.0 TFLOPS——A100 有 312 TFLOPS，只用掉了 0.64%；H100 上是 4.8 ms 做完约 3.3 TFLOPS，占 989 TFLOPS 的 0.34%。decode 对算力的需求是个位数 TFLOPS 量级，卡上的算力有几百 TFLOPS。给 decode 配 H100，等于请一位大厨来剥蒜：手艺用不上，工钱照付。
+延迟与吞吐要分开算。单请求看步时：A100 8.1 ms 对 H100 4.8 ms，慢 1.68 倍。单卡吞吐看带宽：2 TB/s 对 3.35 TB/s，比是 0.6。系统总吞吐取决于同样预算能买多少卡：便宜卡单卡慢，但同预算卡多，并行度补上单卡差距。比较单位不是“一块卡”，是“同样预算或同样功耗下整个集群能吐多少 token”。
 
-Splitwise（Microsoft，ISCA 2024）的逻辑就是从这个错配出发的，顺序是表征先行、再拆硬件：论文先做了大量实测，证明 decode 阶段用不满最新 GPU 的算力；然后把 prefill 放在高算力卡（H100）上，把 decode 放在降功耗的便宜卡（A100）上；拆开的代价是 KV 要跨机器传，用 GPU 集群里现成的高速背板互联来传；最后按吞吐、成本、功耗三个目标设计集群。论文宣称的结论是吞吐 1.4 倍、成本低 20%——这两个数字的深总结在第 8 周（续）里，这里只讲它在解耦思路里的位置：它是“按阶段拆硬件”这条线的源头，证明了解耦的收益首先来自硬件错配的纠正，不只是调度。
+vLLM 把拆法做进了引擎。PD 解耦（prefill-decode disaggregation，把两阶段放到不同实例或硬件池）里，prefill 实例与 decode 实例是两个独立进程：请求先到 prefill 实例算 prompt、产出 KV；KV 通过 KV 连接器（KV Connector，引擎里负责跨实例搬运 KV 的组件）搬到 decode 实例；decode 实例逐 token 生成。两个实例各自扩缩容：prompt 变长加 prefill，输出变长加 decode。连接器后端可换，具体配置以当前文档为准。
 
-这里要分清两个容易混的量：延迟与吞吐。decode 在 A100 上一步 8.1 ms、H100 上 4.8 ms，这是延迟的账：单个请求的 token 间隔确实变长了 1.68 倍。吞吐的账看带宽：A100 2 TB/s 对 H100 3.35 TB/s，单卡 decode token 吞吐比是 0.6。系统总吞吐能不能上去，取决于省下来的钱能不能多买卡——便宜卡单卡慢，但同样预算能买更多卡，并行度补上单卡的差距，总吞吐反而上去。这正是 Splitwise 按成本与功耗配集群的原因：比较的单位从来不是“一块卡”，是“同样预算/同样功耗下整个集群能吐多少 token”。成本低 20% 是论文实验配置下的系统级结论，读作论文宣称，不是单卡价格对比；单卡价格随市场变，论文的配置锚点不变。
+两池配比随负载形状翻转。形状 A：prompt 2000 token、输出 200 token。prefill 2 × 8.03 × 10⁹ × 2000 ÷ (494.7 × 10¹² × 0.5) ≈ 129.9 ms；decode 200 步，每步读 16.06 GB 权重加 2000 token 的 KV 0.262 GB，约 4.87 ms，共 974.5 ms；decode 占的时间是 prefill 的 7.5 倍。形状 B：prompt 4000、输出 20。prefill ≈ 259.7 ms；decode 20 步 × 4.95 ms ≈ 99.0 ms；prefill 反过来是 decode 的 2.6 倍。同一个服务，从“短问长答”变成“长问短答”，瓶颈从 decode 池挪到 prefill 池。绑在一个实例里，配比只能按一种形状定；拆开之后两池按各自排队扩缩，配比跟着负载走。
 
-vLLM 把同样的拆法做进了引擎。解耦式 prefill（disaggregated prefill）里，prefill 实例与 decode 实例是两个独立的 vLLM 进程：请求先到 prefill 实例，只算 prompt、产出 KV；KV 通过传输层搬到 decode 实例；decode 实例接手后逐 token 生成，prefill 实例空出来接下一个 prompt。两个实例各自独立扩缩容：prompt 突然变长，加 prefill 实例；输出突然变长，加 decode 实例。文档里这套传输机制叫 KV 连接器（KV Connector），后端可换——传什么（KV）、怎么传（走哪种互联）、两端怎么约定位，引擎都替你包好了，你要配的是“谁是 prefill、谁是 decode”以及它们之间的地址。读文档时抓住这个结构就行：拆分本身不新鲜，新鲜的是引擎把“跨实例传 KV”做成了可配置的基础设施，而不是每个团队自己写一遍。
+“便宜卡等于降级”是误解。decode 的体验由步时与 KV 大小决定，步时由显存带宽定：A100 2 TB/s 对 H100 3.35 TB/s，差距 1.68 倍；batch=1 时算力档位几乎用不到。边界在 batch 变大之后：batch 越大，decode 的算术强度越高，计算占比上升，A100 的 312 TFLOPS 会先于 H100 的 494.7 TFLOPS 成为瓶颈。上下文越短，越少的 batch 就能把 decode 推到计算侧，A100 的算力差距也就越早出现。“decode 不需要 H100”成立的条件是 decode 仍然带宽受限——batch 不大、上下文不短。条件变了，换卡的理由也就变了。
 
-两池的配比会随负载形状翻转，这正是“各自独立扩缩容”存在的理由。拿两个形状算一下，模型仍是 Llama-3.1-8B、H100、50% MFU。形状 A：prompt 2000 token、输出 200 token。prefill 是 2 × 8.03 × 10⁹ × 2000 ÷ (989 × 10¹² × 0.5) ≈ 65.0 ms；decode 是 200 步，每步读 16.06 GB 权重加 2000 token 上下文 KV，约 4.9 ms 一步，共约 974.5 ms——一个请求占 decode 池的时间是 prefill 池的 15.0 倍。形状 B：prompt 4000 token、输出 20 token。prefill 约 129.9 ms；decode 是 20 步、每步约 5.0 ms，共约 99.0 ms——比值翻过来，prefill 占的时间是 decode 的 1.3 倍（129.9 ÷ 99.0）。同一个服务，负载从“短问长答”变成“长问短答”，瓶颈就从 decode 池挪到了 prefill 池。如果两阶段绑在同一个实例里，配比只能按一种形状定，换个形状就一半资源闲置、一半排队；拆开之后两池按各自的排队情况扩缩，配比跟着负载走。这就是解耦在运维层面的收益：它把“一个固定配比”变成了“两个独立旋钮”。
+降功耗（power capping，把功耗墙调低）压的主要是算力峰值。decode 在 batch=1 时只用掉 0.64% 的 A100 算力，功耗墙往下压，步时由带宽定，几乎不受影响；prefill 是计算受限，压功耗就直接拉长 TTFT。同一个动作在 decode 侧省成本，在 prefill 侧伤性能。边界还是同一条：batch 大到 decode 开始吃算力时，降功耗就会伤到 decode。
 
-一个常见的误解：“便宜卡等于降级服务”。降级的意思是用户体验变差，而 decode 的体验由两样东西决定：带宽（步时）与 KV 大小。卡的算力档位对 decode 步时几乎没有影响，影响步时的是显存带宽——A100 的 2 TB/s 对 H100 的 3.35 TB/s，这才是要比较的数。把“算力档位”当成“服务档位”，是把训练时代的直觉搬到了推理上；推理的 decode 阶段，算力档位基本是摆设。
-
-“降功耗 A100”这个细节也值得停一下：降功耗（power capping，把卡的功耗墙调低）压的主要是算力峰值，decode 的瓶颈在带宽不在算力，decode 一步只用掉 0.64% 的算力，功耗墙往下压，decode 的步时几乎不受影响——步时由显存带宽定，算力再降也降不到 0.64% 以下。这正是 Splitwise 敢在 decode 侧降功耗的原因：它降的是 decode 根本用不上的东西，省下来的是实打实的功耗与成本。反过来，prefill 侧不敢降功耗：prefill 是计算限制，功耗墙一压，算力峰值下来，TTFT 直接变长。同一张卡，降功耗在 decode 侧是白捡的节省，在 prefill 侧是直接的伤害——“能不能降功耗”这个问题的答案，取决于这个阶段受什么限制，又回到了周一的 Roofline。
-
-另一个误解：“拆硬件就是 Splitwise 的全部”。拆开之后 KV 跨机器走，传输与放置才是新问题：KV 走哪条链路、走多快、prefill 与 decode 实例放多远，这些决定了拆开划不划算。周一算过干扰的账，周三算传输的账，两笔账加起来才是“拆还是不拆”的完整答案。
-
-**阅读**：（选读）[Splitwise](https://arxiv.org/abs/2311.18677)（Microsoft，ISCA 2024），核心内容见第 8 周（续）的总结；然后读 [vLLM 解耦式 prefill](https://docs.vllm.ai/en/latest/features/disagg_prefill/)。
-
-**产出**：一段话讲清“为什么 decode 用 A100 不亏”（用 0.64% 与 1.68 倍这两个数），加一张文字版的最小拓扑图：请求 → prefill 实例 → KV 传输 → decode 实例 → token 流，并标出两个实例各自独立扩缩容。
+拆硬件不是 Splitwise 的全部。拆开之后 KV 跨机器走，传输与放置成为新问题：走哪条链路、多快、两池放多远，决定拆开划不划算。14.1 算了干扰，14.3 算传输，两笔账合起来才是“拆还是不拆”的答案。
 
 #### 第 3 节 · Mooncake 与 SGLang：KV 传输的三种方式
 
-**目标**：比较 DistServe、vLLM、SGLang、Mooncake 各自怎么拆分 prefill 与 decode；把 KV 传输这笔税算清楚，知道它什么时候可以忽略、什么时候会反超。
+先算传输税。prompt 4000 token，KV 是 4000 × 128 KiB = 524 MB。同机走 NVLink 4：双向合计 900 GB/s，单向约 450 GB/s，524 MB 要 1.17 ms；跨机走 400 Gb/s InfiniBand（约 50 GB/s）要 10.5 ms。同一个 prompt 的 prefill 在 50% MFU 下要 259.7 ms，跨机传输占 TTFT 的 10.5 ÷ 259.7 ≈ 4.0%。1000 token 的 prompt 也一样：KV 131 MB，NVLink 0.29 ms、InfiniBand 2.6 ms，prefill 65 ms，跨机占比还是 4.0%。
 
-**怎么做**：
+占比与 prompt 长度无关：传输时间与 KV 量成正比，prefill 计算时间与 token 数成正比，两者一除，长度消掉。传输占比 = 每 token KV × 算力峰值 × MFU ÷ (2 × 参数量 × 带宽)。代入这组数：131072 × 494.7 × 10¹² × 0.5 ÷ (2 × 8.03 × 10⁹ × 50 × 10⁹) ≈ 4.0%。式子说明税什么时候变重：网络有效带宽降到 10 GB/s，传输 52.4 ms，占比 20%；prefill 的 MFU 翻倍或改用 FP8，计算时间减半，占比翻到 8.1%；前缀命中（prefix hit，请求的前缀与缓存里已有的 KV 相同）让 prefill 只算一半，占比同样翻倍。互联带宽与算力的比值决定解耦划不划算，架构图决定不了。
 
-先算传输税。prompt 长 4000 token，KV 是 4000 × 128 KiB = 524 MB。同一台机器内走 NVLink（900 GB/s），搬它要 0.58 ms；跨机器走 400 Gb/s InfiniBand（约 50 GB/s），要 10.5 ms。同一个 prompt 的 prefill 计算在 50% MFU 下要 2 × 8.03 × 10⁹ × 4000 ÷ (989 × 10¹² × 0.5) ≈ 129.9 ms，跨机传输占 TTFT 的比例是 10.5 ÷ 129.9 ≈ 8.1%。1000 token 的 prompt 也一样：KV 131 MB，NVLink 0.15 ms、InfiniBand 2.6 ms，prefill 32.5 ms，占比同样是 8.1% 左右。为什么占比与 prompt 长度无关？传输时间与 prompt 长度成正比（KV 量 ∝ L），prefill 计算时间也与 prompt 长度成正比（FLOPs ∝ L），两者一除，L 消掉了。传输占比只取决于硬件配比：KV 大小 × 算力 × MFU ÷ (2 × 参数量 × 带宽)。这个式子告诉你税什么时候会反超：网络更慢（有效带宽 10 GB/s 时传输要 52 ms，占 TTFT 的 40%），或者 prefill 更快（FP8 或更高 MFU 把 prefill 压到 65 ms，传输占比翻倍）。解耦划不划算，最终是“互联带宽”与“算力”这两样硬件的比值说了算，不是架构图说了算。
+KV 从 prefill 到 decode 有三条路：同机 NVLink、跨机 RDMA（remote direct memory access，网卡绕过 CPU 直接读写对端内存）与共享 KV 池。代价各不相同：
 
-三种姿势的差别不在“拆不拆”，而在“KV 当什么”。DistServe（论文路线）把 KV 当成一次性的货物：prefill 实例算完，KV 点对点搬到 decode 实例，搬完两清；放置按集群带宽来，离得近的放一起，税就小。vLLM 的解耦式 prefill 也是点对点：prefill 实例与 decode 实例之间用 KV 连接器传，引擎负责传的动作，KV 本身不留存、不共享。SGLang 的 PD 解耦（PD disaggregation）同样是两个实例加传输，按文档，SGLang 设一个 bootstrap 服务在两端之间交换传输所需的协调信息——谁传给谁、往哪个地址传，两端先对上暗号再动手。三者的共同点是 KV 的生命周期等于一次请求：算出来、搬过去、用完即弃。
+| 方式 | 带宽 | 单次延迟（524 MB，算例） | 显存/存储代价 | 适用边界 |
+|---|---|---|---|---|
+| 同机 NVLink 点对点 | 450 GB/s（单向；双向合计 900 GB/s） | 1.17 ms | 两端发送/接收缓冲占显存 | 同一节点内 |
+| 跨机 RDMA | 400 Gb/s 线速，约 50 GB/s | 10.5 ms | 网卡队列、GPU Direct、对端缓冲；拥塞时低于线速 | 跨节点 |
+| 共享 KV 池 | 池的聚合带宽，单请求受池读写路径限制 | DRAM 池按 20 GB/s 估约 26 ms；SSD 池按 3 GB/s 估约 175 ms | KV 常驻 DRAM/SSD，容量与淘汰有成本 | 前缀重复率高 |
 
-Mooncake 换了一个出发点：KV 不是一次性货物，是集群共享的资产。prefill 和 decode 拆到不同的集群；GPU 服务器里闲置的 CPU、DRAM、SSD 拼成一个集群范围的分布式 KV 缓存池（Mooncake Store）；调度器围着 KV 的位置和取回成本做决策。差别体现在前缀命中（prefix hit，请求的前缀与缓存里已有的 KV 相同）上：点对点方案里，前缀命中省的是 prefill 计算；Mooncake 里，前缀命中还改变放置——调度器会把请求送到已有这段前缀的节点，命中率本身成了放置策略的一部分。数字上，50% 前缀命中时，4000 token 的 prefill 只算 2000 token，时间从 129.9 ms 降到 65.0 ms，省下的不只是计算，还有随之缩短的 TTFT。拿一个具体的共享场景走一遍：系统提示词 2000 token，10 个请求各带 2000 token 新内容。没有共享池，prefill 总量是 10 × 4000 = 40000 token，在 50% MFU 下约 1299 ms；系统提示词的 KV 只算一次、后面 9 个请求复用，prefill 总量是 10 × 2000 = 20000 token，约 650 ms，省了一半。省下的 649 ms 是纯计算，不含传输——前缀越长、共享的请求越多，省得越多。这就是共享池的收益模型：它把“每个请求都算一遍的公共部分”变成“算一次、大家复用”，收益与前缀的共享程度成正比。反过来，前缀几乎不重复的负载（每个请求都是全新的长 prompt），池子省不下什么，还多了维护成本——共享池不是对所有负载都划算，它的适用条件是前缀重复率高：系统提示词、多轮对话、RAG（检索增强生成）里反复出现的检索片段，都是典型的高重复场景。Mooncake 已在 Kimi 生产使用，深总结（Conductor 的 TTFT 估算式、256 token 的 KV 块、热块复制与传输引擎细节）在第 8 周（续）里，这里只讲它在解耦思路里的位置：它是 KV 缓存中心学派的开山之作，把 KV 缓存从引擎内部的优化变成了集群一级的共享基础设施。
+DistServe 与 vLLM 的解耦式 prefill 走前两条路：KV 是一次性货物，点对点搬完两清。SGLang 的 PD 解耦也是点对点，另设一个 bootstrap 服务交换传输所需的协调信息——谁传给谁、往哪传。Mooncake 走第三条：KV 是集群共享资产，prefill 与 decode 拆到不同集群，GPU 服务器闲置的 CPU、DRAM、SSD 拼成 Mooncake Store，调度器围着 KV 的位置与取回成本转。
 
-对照表把四种姿势收在一起：
+共享池的收益模型是前缀复用。系统提示词 2000 token，10 个请求各带 2000 token 新内容：没有池，prefill 总量 10 × 4000 = 40000 token，50% MFU 下约 2.60 s；系统提示词的 KV 只算一次、后 9 个请求复用，prefill 总量 10 × 2000 = 20000 token，约 1.30 s，省一半。这 1.30 s 是纯计算；池的代价是把 2000 token 的 KV（262 MB）写一次、读 10 次，共约 2.9 GB，按 50 GB/s 要 58 ms。58 ms 换 1.30 s，划算；但这是前缀重复率高的场景。前缀几乎不重复时，池省不下计算，只多出读写与容量成本。系统提示词、多轮对话、反复出现的检索片段，都是高重复场景；每个请求都是全新长 prompt 的负载，不适合共享池。
 
-| 方案 | KV 当什么 | 传输方式 | 调度围着什么转 |
+Mooncake 还把前缀命中变成放置决策：命中率不只决定省多少计算，还决定请求该送到哪个节点。前缀在哪个节点，请求就往哪里放；热块复制、冷块淘汰，都围着这个目标。论文报告它已在 Kimi 生产使用；具体数字与实验条件见第 15 章。
+
+四种方案的差别可以收成一张表：
+
+| 方案 | KV 的生命周期 | 传输方式 | 调度围着什么转 |
 |---|---|---|---|
 | DistServe | 一次性货物 | 点对点，按带宽放置 | TTFT 与 TPOT 约束 |
-| vLLM 解耦式 prefill | 一次性货物 | 点对点，KV 连接器 | 两池各自独立扩缩容 |
-| SGLang PD 解耦 | 一次性货物 | 点对点，bootstrap 服务协调 | 两池各自独立扩缩容 |
+| vLLM 解耦式 prefill | 一次性货物 | 点对点，KV 连接器 | 两池各自扩缩容 |
+| SGLang PD 解耦 | 一次性货物 | 点对点，bootstrap 协调 | 两池各自扩缩容 |
 | Mooncake | 集群共享资产 | 进出共享 KV 池 | KV 位置与取回成本 |
 
-表里 vLLM 与 SGLang 看起来像，但“像”的是拆分形状，不是实现：两家引擎的传输后端、配置方式与调度细节各不相同，读文档时要按各自的文档来，不要把一家的配置项套到另一家头上。共同点只有一个：它们都把“跨实例传 KV”做成了引擎功能，而不是让用户自己搭。
+表里 vLLM 与 SGLang 形状像，实现不同：传输后端、配置方式、调度细节各按各的文档，不要把一家的配置套到另一家。共同点只有一个：跨实例传 KV 是引擎功能，不是用户自己搭。
 
-有两个常见误解。第一，“KV 传输是免费的”：上面算了，跨机是 TTFT 的 8.1%，网络一慢就到 40%；同机内拆税小，是因为 NVLink 快，不是因为传输本身免费。第二，“前缀命中只省计算”：在 Mooncake 这类以 KV 为中心的系统里，前缀命中还决定请求去哪——命中率从“省了多少算力”变成了“调度器往哪送请求”的输入。这就是为什么 Mooncake 的调度器要围着 KV 转：KV 在哪，请求就该去哪。
+把长度与带宽两档代入，传输时间与占 TTFT 的比例是：
 
-**阅读**：（选读）[Mooncake](https://arxiv.org/abs/2407.00079)（FAST 2025 最佳论文），核心内容见第 8 周（续）的总结，以 KV 缓存为中心，已在 Kimi 生产使用；然后读 [SGLang PD 解耦](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)。比较每个引擎怎么拆分这两个阶段。
+| prompt token | KV | NVLink 450 GB/s（单向） | InfiniBand 50 GB/s | 10 GB/s |
+|---|---|---|---|---|
+| 1000 | 131 MB | 0.29 ms（0.45%） | 2.6 ms（4.0%） | 13.1 ms（20%） |
+| 4000 | 524 MB | 1.17 ms（0.45%） | 10.5 ms（4.0%） | 52.4 ms（20%） |
+| 32000 | 4.19 GB | 9.3 ms（0.45%） | 83.9 ms（4.0%） | 419 ms（20%） |
 
-**产出**：一张四方案拆分方式对照表（KV 当什么、传输方式、调度围着什么转），加一张“prompt 长度 × 带宽 → 传输时间占 TTFT 比例”的速算表（用传输占比公式，至少覆盖 NVLink 与 InfiniBand 两档带宽）。
+表里的比例按 50% MFU 的 prefill 计算时间算，且只算权重项，未计 attention 的平方项；prompt 越长，attention 项越不可忽略，实际比例会略低。
+
+两个常见误解。第一，KV 传输免费：跨机是 TTFT 的 4.0%，网络慢到 10 GB/s 就是 20%；同机税小是因为 NVLink 快，不是传输本身不花钱。第二，前缀命中只省计算：在 Mooncake 这类系统里，命中还决定请求去哪，命中率是放置策略的输入，不只是计算账的折扣。
 
 #### 第 4 节 · 用 Helm 把服务装进 Kubernetes
 
-**目标**：用 vLLM production-stack 的 Helm chart 把解耦服务部署到 Kubernetes 上；分清在 kind（本地轻量集群）上能验证什么、不能验证什么。
+到这一步，服务不再是一个进程：prefill 池、decode 池、路由、监控。手工起进程管不过来：进程挂了谁重启、新副本的配置从哪来、流量怎么分到两池。Kubernetes（容器编排系统，按声明的期望状态管理容器）回答的是期望状态（desired state）：声明“2 个 prefill 副本、4 个 decode 副本”，控制循环把现实拧成声明的样子。pod（容器组，Kubernetes 里最小的部署单位）挂了，控制器按声明拉起；要扩容，改副本数。
 
-**怎么做**：
+Helm chart（Helm 包）把一组 Kubernetes 对象——Deployment（管 pod 副本与更新）、Service（管 pod 发现与负载均衡）、ConfigMap（管参数）——写成模板，改 values 就能换模型、副本数与镜像。vLLM production-stack 是官方维护的这套模板。当前文档的最小流程：
 
-先回答为什么需要 Kubernetes。到这一步，服务不再是一个进程，是 prefill 池、decode 池、路由与监控拼起来的一套东西。手工起进程管不过来：进程挂了谁重启？新副本的配置从哪来？流量怎么分到两个池？Kubernetes 回答的是“期望状态”（desired state）：你声明“要 2 个 prefill 副本、4 个 decode 副本”，控制循环负责把现实拧成声明的样子。pod（容器组，Kubernetes 里最小的部署单位）挂了，控制器按声明把它拉起来；要扩容，改声明里的副本数，控制器去拉新 pod。类比一下：vLLM 的调度器管请求，Kubernetes 的调度器管进程——同一层思想，不同对象。周五的自动扩缩容就是在这个声明上再加一层：副本数不再由人改，由指标改。
+```bash
+git clone https://github.com/vllm-project/production-stack.git
+cd production-stack
+helm repo add vllm https://vllm-project.github.io/production-stack
+helm repo update
+helm install vllm vllm/vllm-stack -f values.yaml
+```
 
-Helm chart（Helm 包）是把这套声明打包成可复用的模板：一组 Kubernetes 对象——Deployment（部署，管 pod 的副本与更新）、Service（服务，管 pod 的发现与负载均衡）、ConfigMap（配置，管参数）——写成模板，改几个值（values）就能换模型、换副本数。vLLM production-stack 就是 vLLM 官方给的这套模板：它把“跑一个 vLLM 服务要哪些对象、对象之间怎么连”固化下来，你不用从零写 YAML（Kubernetes 的声明文件格式）。部署的流程是：起一个集群（托管集群或 kind），用 Helm 把 chart 装上去，看 pod 状态，确认 Service 通了之后从入口打一个请求验证。流程本身不长，难的是分清每一步在验证什么。你要改的值无非四样：哪个模型、几个副本、每副本几块卡、用什么镜像——先把这四个值想清楚再装 chart，装完出了问题也知道先查哪一个。
+values.yaml 里至少要定四样：模型、副本数、每副本几块 GPU、镜像 tag。一个 8B 的最小片段：
 
-容量先算一笔账，免得配额写错。8B 模型 FP16 权重 16.06 GB，H100 单卡 80 GB，扣掉权重剩 63.9 GB 给 KV；每 token KV 128 KiB，上限约 48.8 万 token 的 KV。这是个粗略上限：实际还要扣 CUDA graphs（CUDA 图，预先录好的 kernel 发射序列）与碎片等开销，以实测为准。结论是单卡一个副本的配置（申请 `nvidia.com/gpu: 1`，即一块 GPU）对 8B 模型够用；70B 才需要多卡或张量并行。配额写错的典型症状是 pod 一直 Pending（挂起，调度器找不到满足资源申请的节点）——先看申请的 GPU 数是不是超过了单节点的卡数，再看节点上有没有打污点（taint，节点上“别来”的标记）。
+```yaml
+servingEngineSpec:
+  modelSpec:
+    - name: llama8b
+      repository: vllm/vllm-openai
+      tag: "latest"  # 生产环境换成固定版本
+      modelURL: meta-llama/Llama-3.1-8B-Instruct
+      replicaCount: 2
+      requestGPU: 1
+      requestCPU: 10
+      requestMemory: 64Gi
+      pvcStorage: 100Gi
+      vllmConfig:
+        maxModelLen: 16384
+        gpuMemoryUtilization: 0.9
+```
 
-kind 的边界要诚实地说清楚。kind（Kubernetes in Docker，把整个集群跑在 Docker 容器里的本地工具）默认没有 GPU：vLLM 的 pod 申请 `nvidia.com/gpu`，调度器在 kind 里找不到带 GPU 的节点，pod 会一直 Pending，推理跑不起来。这不是你配错了，是 kind 的能力边界。kind 上能验证的是控制面：Helm 模板本身有没有错、Deployment 与 Service 建不建得起来、路由通不通、周五的 HPA（Horizontal Pod Autoscaler，水平自动扩缩容）对象建不建得起来。真正跑推理要上带 GPU 节点的托管集群。第 1 周也说了，只有两节课必须用 H100，第 8 周的解耦部署是其中之一——“部署验证”与“性能验证”是两件事，前者在 kind 上就能做，后者必须上真卡。把两者分开，是本周最重要的工程习惯：验证通过的东西，要写清是在哪种环境下通过的。
+装完看 `kubectl get pods`，Ready 1/1 之后从 Service 打一个请求。字段名取自当前 chart；chart 改版会动 values，以当前文档为准。
 
-有两个常见误解。第一，“Helm chart 是部署脚本”：脚本是过程，一步步执行；chart 是声明，描述终态。脚本跑两遍可能出两样结果（第二遍可能报错说已存在），声明应用两遍结果一样——这叫幂等（idempotent），是 Kubernetes 能做自愈的前提。第二，“kind 上跑通了等于生产就绪”：kind 验证的是控制面，不是推理面；它能证明你的 chart 没写错，证明不了你的服务在真卡上能扛住流量。后者要上托管集群、挂上第 3 周的监控、跑第 5 周的压测才算数。
+两池解耦也在这个 chart 里。当前文档的 PD 示例用两个 modelSpec：一个 prefill、一个 decode，各带 `lmcacheConfig` 的 `kvRole: kv_producer` / `kv_consumer`、`enablePD: true` 与 NIXL 的 peer 地址；router 的 `routingLogic` 设为 `disaggregated_prefill`，并用 `--prefill-model-labels` / `--decode-model-labels` 指向两个池的标签。router 那一段是：
 
-声明式还有一个手工部署给不了的东西：滚动更新（rolling update）与回滚。Deployment 更新镜像或配置时，不是一把关掉旧 pod 再起新 pod，是先起一个新 pod、等它的健康检查（readiness probe，就绪探针，告诉 Kubernetes 这个 pod 能不能接流量）通过，再把流量切过去、停掉一个旧 pod，如此逐个替换。更新中途服务不断；新版本有问题，改回旧的声明，控制器就按旧声明把 pod 换回来。回滚不是“重新部署一遍”，是“把期望状态改回上一版”，剩下的事控制循环会做。prefill 池与 decode 池是两个独立的 Deployment，各自有自己的 Service 与副本数，更新也可以分开做：先升 decode 池、验证没问题，再升 prefill 池——两个池的发布节奏不用绑在一起，这又是拆开带来的一个运维收益。
+```yaml
+routerSpec:
+  routingLogic: disaggregated_prefill
+  enablePD: true
+  extraArgs:
+    - "--prefill-model-labels"
+    - "llama-prefill"
+    - "--decode-model-labels"
+    - "llama-decode"
+```
 
-排障时先看 pod 处在哪个状态，它本身就是诊断。Pending 是调度问题：申请的 GPU 数超过单节点卡数、节点打了污点、镜像拉不下来都会停在这里，先查事件（event）而不是先改配置。CrashLoopBackOff（反复崩溃重启）是启动问题：启动命令、模型路径、显存不足都长这样，先看日志的最后几行。Running 但 Service 不通，多半是标签选择器（label selector，Service 靠标签找到它要代理的 pod）对不上：Service 选的标签与 pod 身上的标签差一个字符，流量就进不来。这三类状态覆盖了部署阶段的大多数问题，定位时按“调度 → 启动 → 连通”这个顺序查，比漫无目的地翻日志快。
+命令是在克隆下来的仓库里装本地 chart：`helm install pd helm/ -f values-pd.yaml`。这段配置版本相关：传输后端（NIXL）与 KV 管理（LMCache）的字段、镜像 tag 都会变，照当前文档抄，不要照本章抄。
 
-部署完的验证分三层，每层验证的东西不一样。第一层看 pod：是不是 Running、Ready 是不是 1/1——Ready 不是 1/1，说明容器起来了但还没准备好接流量，先查日志与事件。第二层看连通：从 Service 或 Ingress 打一个请求，看模型能不能回 token——这一步验证的是路由与配置，不验证性能。第三层看指标：回来的响应里 TTFT 与 TPOT 是不是正常量级，`num_requests_running` 是不是动了——第 3 周搭的 Prometheus 在这里派上用场：服务跑起来之后，第一件事就是确认监控能看到它。三层都过了，部署才算完成；只过了前两层，等于只验证了一半。
+容量先算，免得配额写错。8B 的 FP16 权重 16.06 GB；H100 80 GB 按 0.9 的显存利用率留 72 GB，扣掉权重剩约 55.9 GB 给 KV 与激活。每 token 128 KiB，上限约 42.7 万 token；按 8192 的上下文，最多约 52 条序列的 KV。不扣利用率是 48.8 万 token，差别就是那 10% 的余量。实际还要扣执行图捕获（graph capture，预先录好的 kernel 发射序列）、激活与碎片，以实测为准。8B 单卡一个副本够用；70B 才需要多卡或张量并行（tensor parallelism，把矩阵切到多张卡上算）。配额写错的典型症状是 pod 一直 Pending（挂起，调度器找不到满足资源申请的节点）：先看申请的 GPU 数是否超过单节点卡数，再看节点有没有污点（taint，节点上“别来”的标记）。
 
-**阅读**：[vLLM production stack](https://github.com/vllm-project/production-stack)，用它的 Helm chart 部署，在托管集群或 `kind` 上。
+kind（Kubernetes in Docker，把集群跑在 Docker 容器里的本地工具）默认没有 GPU：pod 申请 `nvidia.com/gpu`，调度器找不到带 GPU 的节点，pod 一直 Pending。这不是配错，是 kind 的能力边界。kind 上能验证控制面：`helm template` 能不能渲染、Deployment/Service/ConfigMap 建不建得起来、Service 与标签选择器（label selector，Service 靠标签找 pod）是否配对（`kubectl get endpoints`）、装了 KEDA（Kubernetes Event-driven Autoscaling，事件驱动扩缩容）之后 ScaledObject（扩缩容对象）与 HPA（Horizontal Pod Autoscaler，水平 Pod 自动扩缩容）对象建不建得起来。router 本身是 CPU 服务，能在 kind 上起来；vLLM 后端没有 GPU，端到端请求打不通，这是预期结果。真正跑推理要上带 GPU 节点的托管集群。部署验证与性能验证是两件事；验证通过的东西要写清是在哪种环境下通过的。
 
-**产出**：跑在 Kubernetes 上的服务（kind 上是控制面验证、托管集群上是完整验证），加一份清单写清“kind 上验证了什么、没验证什么”，以及单副本的 GPU 配额与 KV 上限速算。
+Helm chart 不是部署脚本，是声明：脚本跑两遍可能出两样结果，声明应用两遍结果一样（幂等，idempotent），这是自愈与滚动更新的前提。Deployment 更新镜像或配置时，先起一个新 pod、等就绪探针（readiness probe，告诉 Kubernetes 这个 pod 能不能接流量）通过，再把流量切过去、停一个旧 pod，逐个替换。新版本有问题，把声明改回上一版，控制器按旧声明换回来。prefill 池与 decode 池是两个 Deployment，各自有 Service 与副本数，可以分开发布：先升 decode、验证，再升 prefill。
+
+排障先看 pod 状态。Pending 是调度问题：GPU 数超过单节点卡数、节点有污点、镜像拉不下来；先查事件（event）。CrashLoopBackOff 是启动问题：启动命令、模型路径、显存不足；先看日志最后几行。Running 但 Service 不通，多半是标签选择器对不上：差一个字符，流量就进不来。按“调度 → 启动 → 连通”的顺序查。
+
+验证分三层：pod 是否 Running、Ready 是否 1/1；从 Service 或 Ingress（集群入口）打一个请求，看能不能回 token（验证路由与配置，不验证性能）；看指标——TTFT/TPOT 是否正常量级，`vllm:num_requests_running` 是否在动。第 9 章搭的 Prometheus 在这里用得上：服务起来后第一件事是确认监控能看到它。三层都过，部署才算完成。
 
 #### 第 5 节 · 用排队深度扩缩容：为什么 CPU 是错的信号
 
-**目标**：讲透 `num_requests_waiting`（等待中的请求数）这个指标；算清在 GPU 服务上按 CPU 扩缩容错在哪；配出按排队深度驱动的自动扩缩容。
+扩缩容的信号必须与瓶颈同向变化。GPU 服务上，CPU 不是这样的信号。正向：vLLM 的 CPU 只做分词、调度这些轻活，GPU 满了 CPU 可能长期低位；按 CPU 扩，HPA 等不到触发条件，队列越排越长。反向：突发分词、metrics 抓取、日志刷盘能把 CPU 拉高，而 GPU 在等请求；按 CPU 扩，新副本起来还是空转。CPU 利用率与排队深度没有稳定的单调关系——没有单调关系的指标不能做控制信号。
 
-**怎么做**：
+正确的信号是 `vllm:num_requests_waiting`（排队中的请求数）。第 9 章已经用它做看板：`vllm:num_requests_running` 是正在跑的，`vllm:num_requests_waiting` 是排队等 GPU 的；后者涨，说明 GPU 忙不过来。指标前缀是 `vllm:`，Prometheus 查询里写全名。
 
-用利特尔法则（Little's law，系统中平均请求数 = 到达速率 × 平均停留时间）算一笔账。设请求到达速率是 4 req/s，单个副本的服务能力是 2 req/s：每秒净增 2 个请求进队列，30 秒后 `num_requests_waiting` = 60；平均每个请求要排队 60 ÷ 4 = 15 秒。队列在涨，GPU 早满了，CPU 呢？vLLM 的 CPU 只做分词、调度这些轻活，瓶颈在 GPU 上时 CPU 利用率可以长期停在低位——信号与现实脱节：该扩的时候它说“还闲着”。按 CPU 扩缩容，HPA（Horizontal Pod Autoscaler，水平自动扩缩容）永远等不到触发条件，队列越排越长，用户等到超时，系统还在“一切正常”地运转。这就是原表格里那句“在 GPU 服务上按 CPU 扩缩容，正是这节课要防止的错误”。
+设到达 4 req/s，单副本服务能力 2 req/s：每秒净增 2 个排队，30 秒后等待 60 个。第 30 秒到达的请求前面排着 60 个，按 2 req/s 要等 30 秒才开始服务；这 30 秒内到达的请求，队列从 0 线性涨到 60，平均排 30 个，按 2 req/s 平均等 15 秒。队列在涨、GPU 满了，CPU 还在低位。
 
-反方向也错。CPU 冲高的时候 GPU 可能正闲着：突发的大批量分词、metrics（监控指标）抓取、日志刷盘都能把 CPU 拉上去，而这时 GPU 在等请求。按 CPU 扩容，等于给空转的 GPU 再加卡——新副本起来还是空转，钱花了，排队一点没少。两个方向合起来看：CPU 利用率与排队深度没有单调关系——一个指标如果和你要控制的量没有单调关系，它就不配做控制信号。控制信号的第一要求不是“好采集”，是“与瓶颈同向变化”。
+HPA 的公式是：期望副本数 = 向上取整（当前副本数 × 当前指标 ÷ 目标指标）。把 30 秒当作一次观测窗口（真实 HPA 会在更早的阈值处动手），目标是每个副本平均 10 个等待；当前 1 个副本、等待 60 个，平均值就是 60：向上取整（1 × 60 ÷ 10）= 6。先假设排空期间不再缩容：6 个副本的服务能力 12 req/s，到达 4 req/s，每秒净排掉 8 个，60 个存量 7.5 秒排完。排空开始时到达的请求排在 60 个后面，按 12 req/s 要等 5 秒；60 个存量请求平均排在第 30 位，平均等 2.5 秒。
 
-正确的信号是 `num_requests_waiting`：排队中的请求数，GPU 忙不过来的第一手证据。这个量在第 3 周就认识了：vLLM 指标设计文档里的 `num_requests_running`（运行中的请求数）、`num_requests_waiting` 和延迟直方图，第 3 周搭的 Prometheus（监控数据采集）一直在采它。扩缩容的算法是 HPA 的标准公式：期望副本数 = 向上取整（当前副本数 × 当前指标值 ÷ 目标指标值）。设目标是每个副本 10 个等待请求，当前 1 个副本、等待 60 个：期望副本数 = ceil(1 × 60 ÷ 10) = 6。KEDA（Kubernetes Event-driven Autoscaling，事件驱动的扩缩容工具）的 ScaledObject 或 Prometheus Adapter（把 Prometheus 指标翻译给 HPA 的适配器）把这个指标喂给 HPA，HPA 按公式改 Deployment 的副本数——周四声明的期望状态，第一次由指标而不是由人来改。参考做法见 RedHat 那篇 KServe（Kubernetes 上的模型服务框架）结合 KEDA 给 vLLM 做自动扩缩容的文章，链接在下方。
+稳态需要几个副本？4 ÷ 2 = 2 个。6 个是用超配换排空速度：2 个副本的服务能力正好等于到达速率，存量排不掉，只是不再变长。真实负载有波动，2 个副本只是临界点，实际会落在 2–3 个副本之间。排空后 HPA 按缩容窗口慢慢缩回 2 个附近。缩容窗口太短会来回晃：刚扩上来、队列刚排空就缩，下一波突发又排起来。
 
-扩上去之后，再算一笔：队列多久能排空。6 个副本的服务能力是 6 × 2 = 12 req/s，到达还是 4 req/s，每秒净排掉 12 − 4 = 8 个，60 个等待排空要 60 ÷ 8 = 7.5 秒。这个 7.5 秒是排空存量，不是新请求的等待：排空期间新到的请求也要排队，排在队尾的那个要等前面 60 个先走完——按 12 req/s 的服务能力，它要等 60 ÷ 12 = 5 秒，再加上它自己的服务时间。反过来也可以验算利特尔法则的另一面：排空的那 7.5 秒里，系统里平均有 (60 + 0) ÷ 2 = 30 个请求在排队，平均停留 7.5 秒，30 ÷ 7.5 = 4 req/s，正好是到达速率——法则在动态过程里也成立，不只是稳态。
+目标值 10 个等待/副本是从“排队多久算太久”倒推的：单副本 2 req/s，10 个等待排完要 5 秒。用利特尔法则（Little's law，系统中的平均请求数 = 到达速率 × 平均停留时间）验一遍稳态：2 个副本、每个平均 10 个等待加 1 个在算，共 22 个请求在系统里；4 req/s 的到达速率下，平均停留 22 ÷ 4 = 5.5 秒，正好是 5 秒排队加 0.5 秒服务。这个式子只在稳态成立：扩容瞬间 1 个副本、60 个等待，系统不在稳态；扩容前第 30 秒到达的请求要等 30 秒，不能用 60 ÷ 4 = 15 秒当它的等待时间——15 秒是那 30 秒内到达请求的平均值，不是队尾的等待。
 
-还有一个数值得算：稳态到底需要几个副本。到达 4 req/s、单副本 2 req/s，稳态只需要 4 ÷ 2 = 2 个副本。HPA 按等待 60 个算出 6 个，是在用超配换排空速度：6 个副本 7.5 秒排空，2 个副本的服务能力正好等于到达速率，存量一个也排不掉，只是不再变长。超配是花钱买时间，排空之后 HPA 会按稳定窗口慢慢缩回 2 个。要是缩容窗口设得太短，副本刚起来、队列刚排空，HPA 立刻缩回 2 个，下一波突发又排起来，扩缩之间来回晃——这就是缩容也要慢的算术原因：扩容买的是排空速度，缩容省的是闲置成本，两边的窗口不能一样。
+阈值与窗口按负载定。扩容要看持续值：副本拉起要拉镜像、加载 16 GB 权重；按 1 GB/s 读要 16 秒，镜像拉取另算，几秒的尖峰不值得扩。缩容更要慢：刚起来的副本还没热身就缩掉，而且缩掉的是正在服务的副本，排队会立刻反弹。Kubernetes 的稳定窗口（stabilization window，防抖窗口）就是干这个的；扩容快、缩容慢，两边窗口不一样。本机的阈值要在第 11 章的压测数据上定，这里写待补测：先把机制配通，再拿压测定数字。
 
-这笔账也可以反过来验 HPA 的目标值：目标是 10 个等待请求/副本，6 个副本时系统允许的总等待就是 60 个——正好是触发扩容时的那个数。目标值不是凭感觉定的，是从“排队多久算太久”倒推出来的：10 个等待、单副本 2 req/s，队尾要等 10 ÷ 2 = 5 秒，5 秒就是这套配置默认能容忍的排队上限，超过就扩。目标值定下来，容忍的等待时间也就定下来了。
+vLLM production-stack 的 chart 从 v0.1.11 起集成了 KEDA。当前文档的配法：
 
-细节在阈值与窗口上。扩容要看持续值不是瞬时尖峰：一个 5 秒的突发不值得拉 5 个副本，副本拉起来要拉镜像、加载权重，16 GB 的模型光加载就要时间，突发过去了副本还在启动——扩了个寂寞。HPA 有稳定窗口（stabilization window，防抖窗口）防的就是这个：指标要持续超过阈值一段时间才动手。缩容更要慢：刚扩上来的副本还没热身就缩掉，等于白扩；而且缩容缩掉的是正在服务的副本，排队会立刻反弹。所以扩容看“排队持续超过阈值”，缩容看“排队持续低于阈值”，阈值与窗口都要按自己的负载调，没有通用数：本机的阈值要在第 5 周的压测数据上定，这里写待补测——先把机制配通，再拿压测定数字，顺序不能反。
+```yaml
+servingEngineSpec:
+  modelSpec:
+    - name: llama8b
+      # 模型与资源配置同上
+      keda:
+        enabled: true
+        minReplicaCount: 1
+        maxReplicaCount: 6
+        pollingInterval: 15
+        cooldownPeriod: 360
+        triggers:
+          - type: prometheus
+            metadata:
+              serverAddress: http://vllm-kube-prometheus-stack-prometheus:9090
+              metricName: vllm:num_requests_waiting
+              query: vllm:num_requests_waiting
+              threshold: "10"
+```
 
-有两个常见误解。第一，“排队深度高就该扩”：要分清持续排队与瞬时突发，前者扩，后者等；不分清就扩，等于拿真金白银去追噪声。第二，“指标越多越好”：扩缩容只要一个与瓶颈单调相关的信号，多了反而互相打架——CPU 说扩、排队说不扩，HPA 听谁的？一个信号、一个目标值、一个窗口，简单才可靠。
+装 KEDA、`helm upgrade` 之后，`kubectl get scaledobjects` 能看到 ScaledObject，`kubectl get hpa` 能看到它生成的 HPA。不走这个 chart 时，用 Prometheus Adapter（把 Prometheus 指标接成 Kubernetes 自定义指标的适配器）把 `vllm:num_requests_waiting` 接给 HPA，公式相同。KEDA 与 chart 的字段随版本变，以当前文档为准。
 
-回头看整周：第 1 周的 Roofline 说 prefill 等计算、decode 等显存；第 8 周把这个不对称变成了架构（拆开）、变成了部署（两个池进 Kubernetes）、变成了运维（按排队深度扩缩容）。架构、部署、运维是同一条链：不对称决定拆分，拆分决定拓扑，拓扑决定扩缩容的信号。信号选错，前面全白搭——这就是为什么扩缩容的信号不是 CPU，是排队深度。
+两个误解。第一，排队高就扩：要分持续排队与瞬时尖峰，前者扩，后者等；不分就扩，是拿钱追噪声。第二，指标越多越好：扩缩容只要一个与瓶颈单调相关的信号；CPU 说扩、排队说不扩，HPA 听谁的？一个信号、一个目标值、一个窗口。
 
-**阅读**：用 `num_requests_waiting` 这个自定义指标做扩缩容，[而不是 CPU](https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda)。
-
-**产出**：一份按 `num_requests_waiting` 驱动的 HPA 配置（目标值先写 10 个等待请求/副本，待压测校准），加一次手动压测验证：把到达速率推过单副本服务能力，看等待数上涨后副本数是否跟着涨。
-
-**缓冲**（补课用，不加新内容）：把生态图谱补上：[PyTorch 解耦式推理](https://pytorch.org/blog/disaggregated-inference-at-scale-with-pytorch-vllm/)、[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo)、[llm-d](https://llm-d.ai)。
+回到整章的主线：第 1 章的 Roofline 说 prefill 等计算、decode 等显存；这个不对称决定了拆分，拆分决定了拓扑，拓扑决定了扩缩容信号。信号选错，前面的账都白算——这就是为什么扩缩容的信号不是 CPU，是排队深度。
 
 #### 第 6 节 · 论文选读
 
-**DistServe（OSDI 2024）**——问题：prefill 与 decode 拼在同一批 GPU 上会互相干扰（prefill 的大计算拖慢 decode 的逐 token 生成），且两者的资源分配与并行策略被绑在一起；应用对两阶段的延迟要求不同（TTFT 与 TPOT），旧系统只能顾一头或过度配资源。核心思想：把 prefill 与 decode 拆到不同 GPU 上，消除干扰；按应用的 TTFT 与 TPOT 要求，分别为两阶段协同优化资源分配与并行策略；按集群带宽放置两阶段，最小化拆分带来的通信。关键指标：goodput——在 TTFT 与 TPOT 约束内能服务的最大请求速率，而不是裸吞吐。关键数字：同等条件下比当时最先进的系统多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍，同时 90% 以上请求满足延迟约束。为什么重要：第 8 周解耦架构的起点；它把“第 1 周的 prefill/decode 不对称”变成了一套可部署的架构，也是后边 Mooncake、vLLM 与 SGLang 解耦功能的对照。原文选读：[OSDI 2024](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)。
+三篇论文回答三个不同的问题：DistServe 回答要不要拆，Splitwise 回答拆到哪种硬件上，Mooncake 回答 KV 放在哪里。三者的数字都是论文宣称，未独立复现；条件不同，不能相乘。
 
-Splitwise 与 Mooncake 的总结在下一节“第 8 周（续）”的“本周论文精读”里（那里的版本更深，含 Conductor 的 TTFT 估算式、256 token 的 KV 块、热块复制与传输引擎细节），这里不再重复。
+- **DistServe（OSDI 2024）。** 问题：prefill 与 decode 拼在同一批 GPU 上会互相干扰，资源分配与并行策略被绑在一起；应用对 TTFT 与 TPOT 的要求不同，旧系统只能顾一头或过度配置。做法：拆到不同 GPU；按 TTFT/TPOT 分别优化两阶段的资源与并行；按集群带宽放置，减少通信。指标：goodput。数字：在 A100 集群（4 节点 32 卡，跨节点 25 Gbps）、OPT 13B–175B 模型、聊天/代码/摘要三类负载、90% SLO 达成率下，最多多服务 7.4 倍请求，或把 SLO 收紧 12.6 倍；论文宣称，未独立复现，7.4 倍是上界。为什么重要：它是本章架构的起点，也是后面所有 PD 方案的对照。
+
+- **Splitwise（Microsoft，ISCA 2024）。** 问题：decode 用不满最新 GPU 的算力，用同一档卡跑两阶段是硬件错配。做法：prefill 放高算力卡、decode 放降功耗的便宜卡，KV 走背板互联，按吞吐/成本/功耗设计集群。数字：吞吐高 1.4 倍且成本低 20%，或同成本同功耗下吞吐高 2.35 倍；论文宣称，未独立复现；条件是其模拟器加生产 trace、DGX-A100/H100 的性能模型与九项 P50/P90/P99 SLO。为什么重要：它把“按阶段拆硬件”从直觉变成可设计的集群方案；细节见第 15 章。
+
+- **Mooncake（FAST 2025）。** 问题：长上下文下 KV 巨大，prefill 要算力、decode 要带宽，合在一起互相拖累；拆开之后 KV 要跨节点搬。做法：prefill/decode 分集群；CPU、DRAM、SSD 拼成集群 KV 池（Mooncake Store）；调度器按 KV 位置与取回成本做准入与放置。数字：论文宣称模拟场景满足 SLO 的吞吐最高提升 525%，真实负载下 Kimi 多处理 75% 的请求；未独立复现；条件（16 个 8 卡节点、回放 trace、前缀命中 40–66%、只统计被接纳的请求）见第 15 章。为什么重要：它把 KV 从引擎内部优化变成集群级共享资产。
+
+三篇论文的阅读顺序：先 DistServe 建立“为什么要拆”的判断，再 Splitwise 看“拆到哪种硬件”，最后 Mooncake 看“KV 放在哪里、怎么复用”。收益不能相乘：DistServe 的 7.4 倍、Splitwise 的 1.4 倍、Mooncake 的 525% 各自有前提，叠在一起没有意义。
+
+**延伸**：[DistServe（OSDI 2024）](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin)、[Splitwise（ISCA 2024）](https://arxiv.org/abs/2311.18677)、[Mooncake（FAST 2025）](https://arxiv.org/abs/2407.00079)、[vLLM 解耦式 prefill 文档](https://docs.vllm.ai/en/latest/features/disagg_prefill/)、[SGLang PD 解耦文档](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)、[vLLM production stack](https://github.com/vllm-project/production-stack)。
 
 ### 第 15 章：大规模集群 PD 优化
 
