@@ -33,7 +33,7 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <text x="112" y="104" class="tick" text-anchor="end">高</text>
 
 <text x="490" y="386" class="small" text-anchor="middle">耗时加权执行覆盖率 C_time →</text>
-<text x="42" y="220" class="small" text-anchor="middle" transform="rotate(-90 42 220)">Top 3 耗时占比 H3 →</text>
+<text x="40" y="88" class="small">纵轴：Top 3 耗时占比 H3 ↑</text>
 
 <text x="145" y="132" class="label" fill="#b45309">补算子</text>
 <text x="145" y="157" class="small" fill="#92400e">低覆盖 + 热点集中</text>
