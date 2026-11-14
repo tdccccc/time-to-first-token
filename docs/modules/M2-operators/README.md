@@ -716,7 +716,7 @@ regs/thread ≈ (Br·Bc + 1.5·Br·d + 2·Br) / (32·num_warps)
 
 取 `d = 64` 算两行：`64×64`、4 个 warp（128 线程）时 `(4096 + 1.5×4096 + 128) / 128 = 81`；`128×128`、8 个 warp（256 线程）时 `(16384 + 1.5×8192 + 256) / 256 = 113`。`256×64` 到 162，`256×128` 到 226；每个线程最多 255 个寄存器，后两组加上编译器的临时量很容易溢出，溢出会把值放到 local memory，延迟和带宽都变差。
 
-寄存器总量也要算。每个 SM 有 64K 个 32 位寄存器；一个 block 的寄存器用量是 `线程数 × regs/thread`。`64×64`、4 warp、81 regs/thread 时是 128×81 = 10,368 个，64K ÷ 10,368 ≈ 6.3，最多 6 个 block；但 shared 那一侧只允许 5 个（164 ÷ 32），所以 shared 先顶到天花板。双缓冲 48 KB 时 shared 只允许 3 个。`128×64`、8 warp、81 regs/thread 时是 256×81 = 20,736 个，64K ÷ 20,736 ≈ 3.2，最多 3 个；双缓冲 64 KB 时 shared 只允许 2 个。`128×128`、8 warp、113 regs/thread 时是 28,928 个，最多 2 个；双缓冲 112 KB 时 shared 只允许 1 个。
+寄存器总量也要算。每个 SM 有 64K 个 32 位寄存器；一个 block 的寄存器用量是 `线程数 × regs/thread`。`64×64`、4 warp、81 regs/thread 时是 128×81 = 10,368 个，64K ÷ 10,368 ≈ 6.3，最多 6 个 block；但 shared 那一侧只允许 5 个（164 ÷ 32），所以 shared 先顶到天花板。双缓冲 48 KB 时 shared 只允许 3 个。`128×64`、8 warp、81 regs/thread 时是 256×81 = 20,736 个，64K ÷ 20,736 ≈ 3.2，最多 3 个；双缓冲 64 KB 时 shared 只允许 2 个。`128×128`、8 warp、113 regs/thread 时是 28,928 个，最多 2 个；双缓冲 112 KB 时 shared 只允许 1 个。`256×64` 是 256×162 = 41,472 个，寄存器只允许 1 个，shared 单缓冲却允许 2 个，实际按 1 个算。
 
 把这些数并排看：
 
@@ -726,7 +726,7 @@ regs/thread ≈ (Br·Bc + 1.5·Br·d + 2·Br) / (32·num_warps)
 | 128×64 | 48 KB | 64 KB | 3 / 2 |
 | 64×128 | 56 KB | 88 KB | 2 / 1 |
 | 128×128 | 80 KB | 112 KB | 2 / 1 |
-| 256×64 | 80 KB | 96 KB | 2 / 1 |
+| 256×64 | 80 KB | 96 KB | 1 / 1 |
 | 256×128 | 128 KB | 160 KB | 1 / 1 |
 
 H100 的 228 KB 宽一些：`64×64` 单/双是 7/4，`128×64` 是 4/3，`128×128` 是 2/2，`256×128` 还是 1/1。驻留数不是越高越好：每个 block 都要搬自己的 K/V，驻留多意味着更多 block 争同一份 L2 与带宽；但驻留太少，延迟藏不住。这个取舍要用实测定。
@@ -1007,6 +1007,8 @@ qk = tl.where(keep, qk, -float("inf"))
 **延伸**：[Triton `tl.dot` 文档](https://triton-lang.org/main/python-api/generated/triton.language.dot.html)：输入精度、`out_dtype` 与 `input_precision` 的语义。
 
 **延伸**：[PyTorch SDPA 文档](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)：`is_causal` 与后端选择。
+
+**延伸**：[Triton `do_bench` 源码](https://github.com/triton-lang/triton/blob/release/3.6.x/python/triton/testing.py)：`return_mode` 的默认值与每次计时前的 L2 清缓存实现。
 
 ## 第 22 章 · 量化 Matmul 深讲：量化方案本身
 
