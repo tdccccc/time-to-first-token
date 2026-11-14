@@ -335,31 +335,25 @@ cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, gemm_tiled_2x2, 256, 0);
 
 ## 第 20 章 · Triton 入门：用 Python 写 kernel
 
-> 硬件：**本周无需 GPU**。Triton Puzzles 用解释器跑；跑性能对比时再上 GPU。计时方法用 `triton.testing.do_bench`（见第 3 节），它与第 1 周的 CUDA Events 是同一回事：热身、多次重复、取中位数。
->
-> 第 1 周用 CUDA 手写了四版 GEMM。这一周换 Triton：同样的分块、融合，代码量少一个量级，编译器替你管线程和访存。代价是控制粒度变粗——什么时候够用、什么时候必须回 CUDA，是本周最后一节的判断题。
->
-> 本周主线：同一套分块与融合，换一身衣服——第 1 周你手算的分块、亲手管的访存，这一周变成三件事：block 怎么分、mask 怎么写、访存账怎么算。
+第 19 章的 GEMM 阶梯里，每改一次分块大小，线程下标、shared memory 声明、边界判断与同步都要跟着改一遍。想验证一个更小的想法——把 `add` 与 `relu` 融成一个 kernel 能不能省掉一半访存——也要先铺满这套模板代码，才能上卡量。时间花在组织线程上，不在算法上。
+
+Triton 换掉的就是这一层：你写一个程序处理一整块数据，线程怎么分、shared memory 怎么搬、加载要不要向量化，交给编译器。代码短了，控制粒度也粗了——线程映射、shared memory 布局、warp 级同步不再由你写。这一章把“粗到什么程度”量出来：先写向量加法与三类谜题，再写 fused softmax，然后把每个结构翻译回 CUDA，最后收成一张判断表。
+
+**本章目标。** 能写出 block 粒度的 Triton kernel（`program_id`、`arange`、mask、`tl.load/store`、`tl.dot`），能算出融合省下多少访存，能把一个优化需求判到 Triton 或 CUDA/CUTLASS 那一边。
+
+20.1 讲语法与 block 编程模型，并算第一笔访存账；20.2 用 Triton Puzzles 的三类题（逐元素与广播、归约、矩阵乘）读出访存图；20.3 写 fused softmax，把数值稳定性、`do_bench` 的计时口径与 autotune 一起写清；20.4 把这一章写过的结构翻译回 CUDA，标出编译器替你做了哪些决定；20.5 给出取舍表与检查清单。20.1 与 20.2 能在解释器里做完，不需要 GPU；20.3 的计时必须上卡。
 
 ### 第 1 节 · Triton 语法与 block 编程模型
 
-**目标**：写出第一个能跑的 Triton kernel，理解 block 编程模型与 CUDA 的区别。
+eager 模式的代价先算成一笔账。取 N = 10⁶ 个 fp32 元素，一个张量占 10⁶ × 4 字节 = 4 MB。写 `y = relu(x + 1)`：eager 模式先算加法，读 4 MB、写 4 MB；再算 relu，读 4 MB、写 4 MB，一共 16 MB。融合成一个 kernel 之后只读 4 MB、写 4 MB，一共 8 MB，访存减半。加法和 relu 各做 10⁶ 次，一次没少——省掉的是中间结果在显存上的一趟往返，外加一次 kernel 启动。8 MB 是下限，不含中间张量的分配与启动收尾的开销；真实差距只会比一倍大，不会更小。
 
-**怎么做**（60 分钟，无 GPU 可读、可写；运行需 GPU 或留到第 2 节的解释器环境）：
+Triton 的核心是按 block 编程：一个程序处理一整块数据，对应 CUDA 里的一个线程块（block）。`tl.program_id(0)` 告诉你现在是第几个程序，相当于 `blockIdx.x`；`tl.arange(0, BLOCK)` 生成一块连续下标，相当于把 `threadIdx` 变成向量。CUDA 里每个线程用 `blockIdx.x * blockDim.x + threadIdx.x` 算出一个标量下标；Triton 里 `pid * BLOCK + tl.arange(0, BLOCK)` 是一整块向量下标，这 BLOCK 个元素怎么分给 32 × num_warps 个线程，由编译器决定。
 
-先说 Triton 是来干什么的。PyTorch eager 模式下每个算子都是一次 kernel 启动、一次 global memory 往返，融合不了；CUDA 什么都能干，但线程、shared memory、同步全要自己管。第 1 周的四版 GEMM 就是这个代价。Triton 是中间层：你用 Python 写 block 程序，编译器把它降成 CUDA——线程组织、shared memory 搬运、向量化加载都由编译器管，你只管“哪个程序处理哪块数据”。
+拿一组数把分工落到实处。向量长 n = 10000、BLOCK = 1024：程序数是 ⌈10000 / 1024⌉ = 10，0–8 号程序各处理 1024 个元素，9 号程序只剩 10000 − 9 × 1024 = 784 个有效元素，另外 240 个位置是凑数的。grid 里填的就是这个 10，也就是 `triton.cdiv(n_elements, BLOCK)` 的值。换一组：n = 15、BLOCK = 16，只启动 1 个程序，15 个位置有效、1 个位置凑数。
 
-把 eager 模式的代价算成一笔账，就知道中间层省的是什么。取 N = 10^6 个 fp32 元素，一个张量占 10^6 × 4 字节 = 4 MB。写 `y = relu(x + 1)` 这样的两步链：eager 模式先算加法，读 4 MB、写 4 MB，再算 relu，读 4 MB、写 4 MB，一共 16 MB 的访存；融合之后只读 4 MB、写 4 MB，一共 8 MB，访存直接减半。算术量呢？加法与 relu 的次数一个没少。省掉的是中间结果在 global memory 里打的那个来回，外加一次 kernel 启动本身的固定开销。这一周的每一节都在算同一笔账的不同版本：第 3 节的 softmax 会把这笔账算到 3 倍。
+`BLOCK` 必须是 2 的幂，这是硬限制：[`tl.arange`](https://triton-lang.org/main/python-api/generated/triton.language.arange.html) 的 start 与 end 都要求是 2 的幂，长度上限 2²⁰ = 1,048,576，block 的每个维度也按 2 的幂组织；官方 fused softmax 教程把它写成“each block must have a power-of-two number of elements”。BLOCK 取 1000 会在编译时报错。这条规则不是风格偏好：编译器按固定宽度切向量通道、排布 shared memory，2 的幂是切得齐的前提。
 
-Triton 的核心思想是按 block 编程：你写一个程序，它处理一整块数据。一个程序对应 CUDA 里的一个 block。`tl.program_id(0)` 告诉你现在是第几个程序，相当于 `blockIdx`；`tl.arange(0, BLOCK)` 生成一块连续的下标，相当于向量化了的 `threadIdx`。
-
-对照 CUDA 看这行：CUDA 里你要自己算 `blockIdx * blockDim + threadIdx`，得到一个标量下标；Triton 里 `pid * BLOCK + tl.arange(0, BLOCK)` 是同一回事，只是从标量变成了向量。`offsets` 是一整块向量下标，不是单个数字——这就是 block 编程模型和线程编程模型的区别。
-
-拿一组数把“哪个程序处理哪块”落到实处。向量长 n = 10000，BLOCK = 1024：程序数是向上取整的 10000 / 1024 = 10 个，0–8 号程序各处理满满的 1024 个元素，9 号程序只剩 10000 − 9 × 1024 = 784 个有效元素，剩下 240 个位置是凑数的。程序数一共 10 个，这个 10 就是 `grid` 里要填的数，也是 `triton.cdiv(n_elements, BLOCK)` 算出来的数。换一组更小的数：向量长 15、BLOCK = 16，只启动 1 个程序，15 个位置有效、1 个位置凑数——第 4 节复述 mask 时用的就是这个例子。
-
-`tl.arange(0, BLOCK)` 还有一条硬性要求：长度必须是 2 的幂。BLOCK 取 1024、512、256 都没问题，取 1000 这样的数会在编译时报错——第 5 节的检查清单里“BLOCK 是不是 2 的幂”说的就是这一条。2 的幂不是风格偏好，是向量化与对齐的前提：编译器要把一块下标切成固定宽度的向量通道，长度不是 2 的幂就切不齐。
-
-写出向量加法（[Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials) `01-vector-add` 的写法，`BLOCK` 是编译期常量）：
+向量加法写成 Triton，用的是官方教程 `01-vector-add` 的结构（`BLOCK` 是编译期常量）：
 
 ```python
 import torch
@@ -384,71 +378,55 @@ def add(x, y):
     return output
 ```
 
-有三个细节值得注意。`mask` 处理尾巴：元素数不是 BLOCK 整数倍时，多余的位置不读写——读了可能是越界，写了会 corrupt 内存，mask 掉的位置直接跳过。`BLOCK: tl.constexpr` 表示编译期常量：编译器要根据 BLOCK 特化生成代码（循环展开、shared memory 大小、向量宽度），改它会重新编译——这也是第 3 节 autotune 能工作的前提，它就是换 BLOCK 重编一遍再测。`grid` 是个 lambda：`triton.cdiv` 是向上取整除法，grid 写成函数是因为 autotune 可能改 BLOCK，程序数要跟着重算。
+三处细节各有代价。`mask` 处理尾巴：元素数不是 BLOCK 整数倍时，多余的位置不读也不写——读了可能越界，写了会写坏邻居张量的内存。`BLOCK: tl.constexpr` 表示编译期常量：编译器要按 BLOCK 特化生成代码（循环展开、shared memory 大小、向量宽度），改它会重新编译；autotune 能工作的前提就是这一点，它换 BLOCK 重编一遍再测。`grid` 写成 lambda 而不是固定元组：`triton.cdiv` 是向上取整除法，autotune 换了 BLOCK，程序数要跟着重算；写死成 `(10,)` 之后，BLOCK 从 1024 换成 256 时程序数还是按 1024 算的，后面七成多的数据没人处理。
 
-mask 值得再展开一层，因为它是本周出现频率最高的 bug 来源。注意 `tl.load` 和 `tl.store` 共用同一个 mask：读的那一边，mask 掉的位置不产生真实访存；写的那一边，mask 掉的位置不写回。两边必须同进同退——只给 load 加 mask、不给 store 加 mask，凑数的 lane 就会把垃圾写进输出张量的尾巴；只给 store 加 mask、不给 load 加 mask，读的那一边仍可能越界。上面 n = 10000 的例子里，9 号程序的 240 个凑数 lane 就是这样被两边同时挡住的。一个常见的疑问是：为什么不干脆把张量 padding 到 BLOCK 的整数倍，省掉 mask？padding 要改形状、多占内存，还要保证下游算子认这个新形状——mask 是在原形状上解决问题的办法，代价只是一次比较。
+mask 是这一章最容易写错的地方，两边必须同进同退。只给 load 加 mask、不给 store 加：凑数的 lane 把读到的垃圾写进输出张量的尾巴。只给 store 加、不给 load 加：读的那一边仍可能越界。上面 n = 10000 的例子里，9 号程序的 240 个凑数 lane 就是被同一个 mask 在两边同时挡住的。常见的替代方案是把张量 padding 到 BLOCK 的整数倍，省掉 mask；代价是改形状、多占内存、下游算子都要认这个新形状。mask 的代价只是一次比较，原形状上就能解决。
 
-`constexpr` 的另一面是编译时机。`@triton.jit` 修饰的函数在第一次调用时才编译，BLOCK 的取值在那一刻定下来写进生成的代码；之后用同样的 BLOCK 再调用，命中编译缓存，不再重编；改 BLOCK 则重新编译一次。编译发生在第一次调用、而不是 import 时——所以第 3 节计时要先热身：第一次跑的耗时里混着编译，量出来的不是 kernel 的真实速度。`grid` 写成 lambda 也是同一个道理的延伸：如果 grid 写死成固定的元组，autotune 把 BLOCK 从 1024 换成 256 时，程序数还是按 1024 算的，尾巴就丢了；写成函数，程序数跟着 BLOCK 重算，autotune 才能放心地换配置。
+编译发生在第一次调用，不在 import 时。`@triton.jit` 的函数在第一次调用时编译，BLOCK 的取值在那一刻写进生成的代码；之后同样的 BLOCK 命中编译缓存，改 BLOCK 则重编一次。所以计时前必须先热身，第一次跑的耗时里混着编译，量出来的不是 kernel 的速度（20.3 的 `do_bench` 把这件事包了进去）。这个 kernel 里 `tl.load` 没有给 `other`：被 mask 掉的 lane 读进来是未定义值，但它们只参与同样被 mask 掉的写，不影响结果；softmax 那种“读进来要参与 max 与求和”的场合就必须给 `other`。
 
-正确性检查照第 1 周的办法：与 `x + y` 的 PyTorch 结果做 `torch.allclose` 对比。这里顺带说清一个容易混淆的点：逐元素加法里，每个输出元素都是一次独立的 IEEE 浮点加法，kernel 与 PyTorch 算的是同一个加法，逐 bit 相等本来就该成立，`allclose` 在这里只是顺手沿用第 1 周的检查习惯。真正的容限问题到第 3 节才出现——那里的求和顺序不一样，舍入不一样，逐 bit 相等才不该指望。检查方法相同，背后的理由不同，分清楚这两层，`allclose` 就不会被当成万能膏药。
+正确性照第 19 章的办法：与 `x + y` 的 PyTorch 结果做 `torch.allclose`。逐元素加法的每个输出都是一次独立的 IEEE 浮点加法，kernel 与 PyTorch 算的是同一个加法，逐 bit 相等本来就该成立，这里的 `allclose` 只是沿用检查习惯。容限真正成为问题要等到两处：20.2 的 `tl.dot` 在 fp32 下默认走 TF32，20.3 的归约求和顺序不同。检查方法一样，背后的理由不一样。
 
-三个误解值得在动手前先拆掉。第一个是“Triton 是 Python 写的，所以慢”：`@triton.jit` 装饰的函数会被编译成机器码，Python 只在编译与启动时跑，kernel 执行时 Python 早就不在场了，慢的从来不是“Python”这个标签。第二个是“BLOCK 越大越快”：BLOCK 大了，每个程序的活多了、寄存器占用高了，并行跑的程序数反而可能掉下来，快慢要量出来才知道，第 3 节的 autotune 就是量这个的工具。第三个是“mask 只是防崩溃”：mask 防的不只是越界崩溃，还有静默 corrupt——写坏了邻居张量的尾巴不报错，只会在很久以后以一个完全无关的错误爆出来。
-
-对照笔记可以写成一张小表，第 5 节的取舍判断就是从这张表长出来的：
+CUDA 与 Triton 的分工可以写成一张表，20.5 的取舍判断就是从这里长出来的：
 
 | 维度 | CUDA | Triton |
 |---|---|---|
 | 写的单位 | 一个线程算一个元素 | 一个程序算一整块 |
 | 下标 | 标量 `blockIdx * blockDim + threadIdx` | 向量 `pid * BLOCK + tl.arange(0, BLOCK)` |
-| 线程与访存 | 自己组织、自己同步 | 编译器组织、编译器管搬运与向量化 |
-| 能调的东西 | 线程、shared memory、同步、流水线 | BLOCK、num_warps、访存顺序 |
-| 够不着的东西 | —— | warp 级同步、shared memory 精确布局 |
+| 线程与访存 | 自己组织、自己同步 | 编译器组织，编译器管搬运与向量化 |
+| 能调的旋钮 | 线程、shared memory、同步、流水线 | BLOCK、num_warps、num_stages、访存顺序 |
+| 够不着的 | —— | warp 级同步、shared memory 精确布局、异步流水线的分工 |
 
-**产出**：第一个能跑的 Triton kernel（或无卡时先写好代码、标注待 GPU 验证），加一页 CUDA vs Triton 对照笔记。
+旋钮只有两个是常调的：`BLOCK`（一个程序处理多少元素）与 `num_warps`（一个程序用多少个 warp，blockDim = 32 × num_warps）。BLOCK 越大，每程序要扛的寄存器越多，压不住就 spill 到 local memory（溢出量实际落在显存里），反而更慢——“BLOCK 越大越快”不成立，快慢要量。`@triton.jit` 的函数编译成机器码，Python 只在编译与启动时跑，kernel 执行时 Python 早就不在路径上，慢的从来不是“Python”这个标签。mask 防的也不只是越界崩溃：写坏邻居张量的尾巴不会立刻报错，只会在很久以后以另一个错误爆出来。
 
-### 第 2 节 · 谜题 1–3：逐元素、归约、矩阵乘
+### 第 2 节 · 三类谜题：逐元素、归约、矩阵乘
 
-**目标**：用解释器做完 Triton Puzzles 的前三道题，理解 Triton 里“访存模式决定一切”。
+Triton Puzzles 用 Triton 的解释器跑，不需要 GPU：本地设 `TRITON_INTERPRET=1` 走解释器，notebook 里用 triton-viz 的 tracer，启动方式以仓库 README 与 notebook 顶部说明为准。解释器在 CPU 上逐元素模拟，速度没有参考价值，它的用处是把每个程序读了哪块、写了哪块画出来。谜题编号会随仓库更新，本节按当前版本写的是 1 Constant Add、2 Constant Add Block、3 Outer Vector Add、7 Long Sum、11 Matrix Multiplication；编号对不上时按标题找，以仓库当前版本为准。
 
-**怎么做**（60 分钟，**无需 GPU**）：
+谜题 1 是 `z_i = 10 + x_i`，块大小 B0 等于向量长度 N0，一个程序盖满整条向量。这道题要看的只有一件事：一个程序读的是不是一段连续地址、写的是不是同一段。以 1024 个连续的 fp32 为例，一共 4096 字节，相邻 lane 读相邻地址，硬件一次搬运能覆盖整块；让相邻 lane 去读相隔很远的地址，同样是 1024 次读取，搬运次数要翻几倍。元素个数没变、算术没变，变的是地址的排列。
 
-这三道题不用 GPU 也能做：[Triton Puzzles](https://github.com/gpu-mode/Triton-Puzzles)基于 [TileLens（原 Triton-Viz）](https://github.com/Deep-Learning-Profiling-Tools/tilelens)，用 Triton 解释器跑。解释器模式由环境变量 `TRITON_INTERPRET=1` 开启，notebook 顶部有完整说明；按仓库 README 的说明启动就行。轻量替代：[Triton-Puzzles-Lite](https://github.com/SiriusNEO/Triton-Puzzles-Lite)（最小环境配置即可玩）。
+谜题 2 让 B0 小于 N0，用 program_id 沿输入铺开。这就是 20.1 的 n = 10000 那张图：10 个程序各读一段，9 号程序的 240 个凑数 lane 被 mask 挡在图外。看图时查两件事——相邻程序读的地址是否相邻，尾巴有没有被挡住。这两件事对了，kernel 的访存骨架就对了。
 
-解释器真正的价值不是“无卡能跑”，是它把访存可视化了：每个程序读了哪块、写了哪块，一目了然。在 Triton 里访存模式就是程序本身——你写的 block 划分和 load/store 顺序，直接决定编译器能不能合并访存、向量化加载。看不懂访存图，kernel 就是碰运气。
+谜题 3 是 `z[j, i] = x_i + y_j`，两条一维向量生成二维输出。写法是 `x[None, :] + y[:, None]`，两个方向各广播一次，得到一个 B1 × B0 的块。这个形状是矩阵乘 tile 的雏形：一个程序负责输出矩阵的一块，读 A 的一行段与 B 的一列段。
 
-先把“访存模式决定一切”翻译成一句能对照着图检查的话：同样的数学，换一种读写的顺序，速度可以差出几倍，原因不在算术。向量加法里，0 号程序连续读 1024 个 fp32，也就是连续的 4 KB——相邻 lane 读相邻地址，硬件一次搬运能覆盖整块；如果反过来让相邻 lane 去读相隔很远的地址，同样是 1024 次读取，硬件就要拆成很多次搬运。元素个数没变、算术没变，变的是地址的排列。解释器的图就是把这个排列画出来：每个程序的读写落在哪一段地址上，是连续的一段还是东一块西一块，看一眼就知道。
+归约题（Long Sum，7）对一批向量做行内求和：输入是 N0 行、每行 T 个元素，每个程序负责其中几行，沿 T 方向以 B1 为块循环，每块用 `tl.sum(x, axis=1)` 得到块内部分和，累加成整行的和。`tl.sum` 只在 block 内做：一个程序内部的线程可以同步、可以交换寄存器里的数；程序与程序之间没有会合点，Triton 没有 grid 级 barrier，一个程序没法等另一个程序。要把 10⁶ 个数分给多个程序各算一段，就得再开一层：第一轮每个程序算局部和，977 个程序（BLOCK 1024）得到 977 个部分和，共 977 × 4 = 3908 字节；第二轮一个程序读这 3908 字节收尾。第二轮的活不到第一轮的千分之一。
 
-谜题 1（逐元素操作）：把第 1 节的向量加法换成谜题形式做一遍，重点看解释器给出的访存可视化——每个程序读了哪块、写了哪块。这一题的要点不在写出代码——代码第 1 节已经写过了——而在学会读图：确认每个程序读写的是一段连续地址，确认尾巴程序的 mask 把多余 lane 挡在图外。读图的能力是后两题的基础：第 3 节的 fused softmax、第 3 周的 fused attention，判断对错的第一步都是看访存图是不是预期的形状。
+block 内的树可以拆开看。`tl.sum` 对 1024 个数求和是两两相加的树，每轮减半，log₂ 1024 = 10 轮收完。树怎么排是编译器定的，两个 kernel 的树不一样，FP32 的舍入就不一样——这一条在 20.3 的容限里兑现。
 
-谜题 2（归约）：一个 block 内把一整块数据加成一个数。关键是 `tl.sum(x, axis=0)`——归约是 block 内的操作，不需要跨程序通信。跨程序的归约是另一回事：程序之间没有同步机制（Triton 里没有 grid 级 barrier），只能用原子操作或二次归约（先算局部和，再开一个 kernel 合并），留到第 3 周。
+矩阵乘题（Matrix Multiplication，11）用 `tl.dot(a, b)`，两个输入是二维或三维 block（三维时第一维是 batch），内维对齐；这道题用三个 program id 轴分别管 batch、行、列，K 方向以 B_MID 为块循环。`tl.dot` 最终落到 tensor core 的 MMA 指令，MMA 的最小分片是 16 行 × 8 列这个量级（Ampere 上 fp16 是 `m16n8k16`，fp32/TF32 是 `m16n8k8`），所以 tile 的 M、N、K 一般从 16 起；比这个尺寸小的 `tl.dot` 不会被降到 MMA，要么退回逐元素 FMA 的路径，要么在编译期报错，具体行为以当前版本为准。读入 tile 有两种写法：手动算指针加 mask（`a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak`），每一维的地址都算在明处；`tl.make_block_ptr` 把指针、形状、步长、边界打包，越界由它兜底，写得短。先把一种写通。
 
-为什么 `tl.sum` 只能在 block 内？一个程序内部有固定的一组线程，彼此可以同步、可以交换寄存器里的数；程序与程序之间没有约定的会合点——程序的启动顺序、驻留顺序都不保证，一个程序没法等另一个程序，更没法读另一个程序寄存器里的中间结果。所以 block 内归约是一次调用解决的事，跨程序归约必须换一种组织方式：先让每个程序算出自己的局部和，写回 global memory，再开第二个 kernel 把这些局部和加起来。拿数算一遍就知道第二步有多轻：N = 10^6、BLOCK = 1024 时，第一轮启动 ceil(10^6 / 1024) = 977 个程序，产出 977 个部分和，只占 977 × 4 字节 = 3908 字节；第二轮一个程序读这 3908 字节就收尾了。第一轮是 10^6 个数的活，第二轮是 977 个数的活——分层的意义就在于第二轮的量小到可以忽略。
+1024 × 1024 的矩阵乘可以先手算一遍。取 BLOCK_M = BLOCK_N = BLOCK_K = 32：M、N 各切出 32 块，程序数是 32 × 32 = 1024 个；每个程序沿 K 走 32 步，每步从 A 读一块 32 × 32 × 4 字节 = 4096 字节、从 B 读同样一块，共 8 KB；每程序 32 × 8 KB = 256 KB，1024 个程序合计读约 268 MB。A 与 B 各约 4 MB，各被读了 32 遍——重复读的量由 tile 尺寸决定。算术强度 = 2 × 1024³ FLOP ÷ 268 MB ≈ 8 FLOP/字节，正好等于 BLOCK ÷ 4，与第 19 章分块 GEMM 的算式一致；BLOCK 从 32 提到 64，搬运量减半、算术强度翻到 16。
 
-block 内的归约本身也值得拆开看。`tl.sum` 对 1024 个元素求和，硬件上是两两相加的树：第一轮 1024 个数配成 512 对，第二轮 512 个变 256 个，每轮减半，log₂(1024) = 10 轮收完。这个树形结构解释了第 3 节的一个细节：求和顺序是编译器排布的，不是你写代码的顺序——两个 kernel 的树排得不一样，FP32 舍入就不一样，`allclose` 才需要容限。归约的顺序问题，根子就在这棵树上。
+fp32 的 `tl.dot` 还有一条精度边界：`input_precision` 的默认值是 `"tf32"`，只在设备有 tensor core、输入是 f32 时生效。TF32 的尾数只有 10 位（加上符号与 8 位指数共 19 位），官方文档还提醒 f32 输入可能被直接截断而不带舍入。与 PyTorch 的 fp32 矩阵乘逐项对比时，差的往往不是分块错，是精度模式：要么把容限放到 TF32 的量级，要么 `input_precision="ieee"`（慢），要么把 PyTorch 侧也开成 TF32 再比。不写清这一条，“矩阵乘结果差一点”会被当成 bug 查很久。
 
-谜题 3（矩阵乘）：用 `tl.dot(a, b)` 做分块矩阵乘。`tl.dot` 要求输入是 2D block，且最小尺寸有限制（一般不小于 16×16）——因为它最终要降到 tensor core 的 MMA 指令上，而 MMA 操作的最小分片就是 16×16 起。`tl.load` 时用 `tl.make_block_ptr` 或手动算指针 + mask 两种写法，先会一种：`make_block_ptr` 把指针、形状、步长、边界包在一起，越界由它兜底；手动算指针更贴近第 1 周的 CUDA 写法，看得更清楚。
+这几道题的验收标准与第 19 章相同：与 PyTorch 参考实现逐项对比，数值对上才算过。对比点要选得靠近边界：尾巴 mask 的错在规模小时看不出来，规模一大就露馅；分块边界的错在中间几行几列全对，边界行列才露馅。
 
-16×16 这个下限可以换算成更直观的说法：一个 `tl.dot` 最少也要一次吃进 16 × 16 = 256 个元素，低于这个尺寸，tensor core 的一次 MMA 指令都喂不饱。分块矩阵乘的算术也可以先在纸上走通：1024×1024 的矩阵乘，取 BLOCK_M = BLOCK_N = BLOCK_K = 32，M 和 N 方向各切出 1024 / 32 = 32 块，程序数是 32 × 32 = 1024 个；每个程序沿 K 方向走 32 步，每步从 A 读一块 32×32、从 B 读一块 32×32——每块 32 × 32 × 4 字节 = 4 KB，每步 8 KB，32 步下来一个程序读 256 KB。1024 个程序、每程序 256 KB，这就是分块矩阵乘的访存骨架；第 1 周 CUDA 版 GEMM 的 shared memory 分块算的是同一笔账，只是那里的搬运要自己写，这里的搬运由编译器接手。
+### 第 3 节 · Fused softmax：融合的账、数值稳定性、计时与 autotune
 
-两种 load 写法选哪一种，先看你要练什么。`make_block_ptr` 把指针、形状、步长、边界条件打包成一个对象，越界由它兜底——写起来短，出错面小，适合先把矩阵乘跑通；手动算指针要自己写 `a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak` 这样的二维下标，再配 mask——写起来长，但每一步对应第 1 周 CUDA 里亲手算过的地址，看得更清楚。本周的要求是先会一种：跑通优先，选 `make_block_ptr`；想把地址算清楚，选手动指针。两种写法算出的访存图是一样的，解释器会告诉你选对了没有。
+softmax 拆开算是六遍。max 读一遍；减 max 再 exp 读一遍、写一遍；求和读一遍；除法读一遍、写一遍——读 4 遍、写 2 遍。一行 1024 个 fp32 是 4096 字节：拆开是 4 × 4096 读 + 2 × 4096 写 = 24 KB，融合版只读一遍写一遍 = 8 KB，3 倍。行变长倍数不变：4096 列的一行是 16 KB，拆开 96 KB，融合 32 KB。
 
-三道题合起来讲的是同一句话：Triton 里你写的不是算术，是访存。逐元素操作里，block 划分决定了谁读哪段连续地址；归约里，block 边界决定了求和树能长多大、跨程序时必须分层；矩阵乘里，tile 尺寸决定了 `tl.dot` 能不能喂饱 tensor core、每步要搬多少 KB。算术式子三道题都不难，难的是让访存落在硬件喜欢的形状上——这也是第 1 周 Roofline 分析的延续：瓶颈在访存时，改访存模式比改算术管用。
+这个 6 遍把“减 max 与 exp”算成了一步。PyTorch 的朴素写法会把 `x - x_max` 物化成一个中间张量，那就是读 5 遍、写 3 遍，共 8 遍，官方教程按这个口径算出的加速比约 4 倍。两个数都对，差别只在遍数怎么数；引用倍数时把遍数一起写出来，别让两组数对不上。放到整个矩阵上：4096 × 4096 的 fp32 矩阵占 67,108,864 字节 ≈ 67 MB，8 遍 ≈ 537 MB，6 遍 ≈ 403 MB，融合版 2 遍 ≈ 134 MB；本章按 6 遍的口径，省下约 269 MB 的显存往返。exp 与除法的次数一次没少，省的全是搬运。
 
-每道题的验收标准与第 1 周相同：与 PyTorch 参考实现逐项对比，数值对上才算过。逐项对比的意思是不要只看“整体误差不大”：矩阵乘先对角线、再对随机抽的几行几列，归约先对小规模、再对大规模——错在尾巴 mask 上时，小规模过了、大规模才露馅；错在分块边界上时，中间对了、边界行列才露馅。对照点选得越靠近边界，越容易抓住这类错。
-
-**产出**：3 道谜题通过（或无 GPU 时解释器版通过），加一句话：Triton 里归约和矩阵乘的“分块”与 CUDA shared memory 分块是同一回事，只是编译器帮你管了。
-
-### 第 3 节 · Fused softmax 与数值稳定性 + Autotune
-
-**目标**：写一个 fused softmax，理解“融合省的是访存”，并学会用 autotune 与 `do_bench` 计时。
-
-**怎么做**（60 分钟，无 GPU 可写，跑起来需 GPU 或解释器）：
-
-先把“融合”算清楚。把 softmax 按算子拆开：max 读一遍、减 max 再 exp 读一遍写一遍、求和读一遍、除法读一遍写一遍——同一行读 4 遍、写 2 遍。融合版只读 1 遍、写 1 遍，中间结果全在寄存器里。省的是访存次数，不是计算量：exp 和除法的 FLOPs 一点没少，省掉的是把中间结果写回 global memory 再读回来的往返。
-
-这笔账值得落到字节上，因为“读 4 遍写 2 遍”听起来抽象，换成 KB 就有了轻重。取一行 N = 1024 个 fp32 元素，一行是 1024 × 4 字节 = 4 KB。拆开算：max 读 4 KB；减 max 再 exp 读 4 KB、写 4 KB；求和读 4 KB；除法读 4 KB、写 4 KB——读 4 遍是 16 KB，写 2 遍是 8 KB，一共 24 KB。融合版只读 4 KB、写 4 KB，一共 8 KB。24 KB 对 8 KB，3 倍。行变长时倍数不变：N = 4096 的一行是 16 KB，拆开算是 96 KB，融合版是 32 KB，还是 3 倍。放大到整个矩阵更直观：4096×4096 的 fp32 矩阵占 4096² × 4 字节 = 64 MiB，拆开算要走 6 遍、384 MiB，融合版走 2 遍、128 MiB——省下来的是 256 MiB 的 HBM 往返。计算量呢？exp 做了 N 次、除法做了 N 次，拆开与融合完全一样。融合省的是搬运，不是算术——这句话的证据就是上面这组数：FLOPs 不动，字节数从 384 MiB 掉到 128 MiB。
-
-做法是一行一个程序，整行一次性读进来，在寄存器里算完 softmax 再写回去。写出 fused softmax（Triton 官方教程 `02-fused-softmax` 的写法）：
+做法是一行一个程序，整行读进寄存器，算完写回：
 
 ```python
 @triton.jit
@@ -474,116 +452,131 @@ def softmax(x):
     return y
 ```
 
-`BLOCK = triton.next_power_of_2(n_cols)` 是关键：整行要放进一个 block，所以 BLOCK 取大于等于列数的最小 2 的幂。一行放不进一个 block 时怎么办——第 3 周讲 fused attention 时会遇到，那时的解法是把行切块、online 更新。
+这段结构与官方教程 `02-fused-softmax` 的循环体一致；当前教程版本还按占用率算出程序数、在 kernel 外套一层 `tl.range` 让一个程序处理多行，并用 `num_stages` 让行循环流水起来。作用相同，写法以当前版本文档为准。
 
-“整行放进一个 block”有个直接的代价：行越长，一个程序要扛的寄存器越多。n_cols = 1000 时 BLOCK 取 1024，一行 1024 个 fp32 占 4 KB，扛在寄存器里没问题；n_cols = 512 时 BLOCK 取 512，刚好 2 KB；n_cols = 513 时 BLOCK 跳到 1024，513 个有效元素配 511 个 mask 掉的 lane——多 1 列，BLOCK 翻一倍，这就是 2 的幂取整的代价。n_cols = 1025 时 BLOCK 取 2048，一行占 8 KB。再往上走，n_cols = 1,048,576 时 BLOCK 得取 2^20，一行 4 MB——寄存器无论如何扛不住，“一行一个程序”这条路就走死了。第 3 周的 online softmax 就是为这个局面准备的：行切块、每块维护运行最大值与运行和，最后拼起来。这一节的 fused softmax 是单块版，第 3 周是分块版，两版是同一个公式的两种情况，不是两种算法。
+`BLOCK = triton.next_power_of_2(n_cols)` 是硬要求：整行要放进一个 block，BLOCK 取大于等于列数的最小 2 的幂。代价是寄存器：1024 列时一行占 4096 字节，扛在寄存器里没问题；513 列时 BLOCK 跳到 1024，513 个有效元素配 511 个 mask 掉的 lane；1025 列时 BLOCK 取 2048，一行 8 KB；1,048,576 列时 BLOCK 得取 2²⁰，一行约 4 MB，寄存器扛不住，而 2²⁰ 已经是 `tl.arange` 的长度上限——“一行一个程序”这条路走到头了。第 21 章的 online softmax 是它的分块版：行切块、每块维护运行最大值与运行和，最后拼起来。单块版与分块版是同一个公式的两种情况，不是两种算法。
 
-再看数值稳定性。`row - tl.max(row)` 这一步不是优化，是正确性。softmax 对整体平移是不变的：exp(x_i - m) / Σexp(x_j - m) 里，分母分子的 exp(-m) 约掉了，结果和不减 max 完全一样。但不减 max，`tl.exp` 在大输入下会溢出：FP32 最大约 3.4e38，x 超过 89 左右 exp(x) 就溢出成 inf，整个结果全毁。减了 max 之后 exp 的输入全 ≤ 0，exp 的结果全 ≤ 1，溢出不可能发生。`other=-float('inf')` 是同一逻辑的另一半：mask 掉的位置读进来是 -inf，既赢不了 max（任何数都比 -inf 大），exp 之后又是 0，不参与求和。
+`row - tl.max(row)` 不是优化，是正确性。softmax 对整体平移不变：exp(x_i − m) / Σ exp(x_j − m) 里分子分母的 exp(−m) 约掉，结果与不减 max 完全一样。不减 max，FP32 下 x 超过 88.72 就溢出：FP32 最大约 3.4028235 × 10³⁸，ln 它约 88.72；exp(88) ≈ 1.65 × 10³⁸ 还在范围内，exp(89) ≈ 4.49 × 10³⁸ 已经超过上限，成 inf。fp16 更早：最大 65504，ln 它约 11.09，exp(11) ≈ 59874 还在，exp(11.1) ≈ 66171 已经超了。本章的 softmax 输入是 fp32；第 22–23 章碰到 fp16 kernel 时这个数会再用上。
 
-“约 89”这个数可以自己验：ln(3.4×10^38) ≈ 88.72，所以 exp 的输入一过 88.72 就超过 FP32 能表示的最大值。exp(88) ≈ 1.65×10^38，还在范围内；exp(89) ≈ 4.49×10^38，已经超过 3.4×10^38，溢出成 inf。阈值卡在 88 与 89 之间，“约 89”就是这么来的。平移不变性也可以拿数验：x = [0, 1, 2]，减 max 得 [-2, -1, 0]，exp 得 [0.1353, 0.3679, 1]，求和 1.5032，softmax 是 [0.0900, 0.2447, 0.6652]；把整行平移 1000，x = [1000, 1001, 1002]，减 max 还是 [-2, -1, 0]，softmax 还是 [0.0900, 0.2447, 0.6652]——两个数一组，一个数都没变。反过来，不减 max 直接算 exp([1000, 1001, 1002])：exp(1000) 远远超过 3.4×10^38，三个全是 inf，inf / inf 得 NaN，整行全毁。减 max 之前与之后，差别就是“整行 NaN”与“完全正确”。
+拿数验一遍平移不变性。x = [0, 1, 2]，减 max 得 [−2, −1, 0]，exp 得 [0.1353, 0.3679, 1]，和 1.5032，softmax 是 [0.0900, 0.2447, 0.6652]。整行加 1000，x = [1000, 1001, 1002]，减 max 还是 [−2, −1, 0]，结果一模一样；不减 max 直接算 exp([1000, 1001, 1002])，三个都是 inf，inf / inf 得 NaN，整行全毁。
 
-同一笔账换到 fp16 更吓人：fp16 能表示的最大值是 65504，ln(65504) ≈ 11.09，exp 的输入一过 11.09 就溢出——exp(11) ≈ 59874 还在范围内，exp(11.1) ≈ 66171 已经超过 65504。也就是说，fp16 下输入超过 11 就危险，而 FP32 下要到 89 才危险。减 max 的保护在 fp16 下更关键：第 2 周的 softmax 输入是 fp32，这个数先记下来，第 4–5 周碰到 fp16 kernel 时会再用上。
+`other=-float('inf')` 是同一逻辑的另一半，两个作用落在两行代码上。max 那一步：mask 掉的位置读进来是 −inf，任何有限数都比它大，−inf 赢不了最大值。求和那一步：exp(−inf) = 0，mask 掉的位置对分母的贡献是 0。漏掉 `other` 时，文档只说被 mask 的位置是“未定义值”，没有承诺是 0：如果恰好是 0，整行全负时 0 会赢过真实的最大值，exp(0) = 1 又会污染分母；如果不是 0，错得更没规律。两种都错，排查时却只看到一个“结果不对”。
 
-`other=-float('inf')` 的两个作用也可以分开验。第一，max 那一步：mask 掉的位置读进来是 -inf，任何有限数都比 -inf 大，所以 -inf 赢不了 max，最大值一定落在真实元素里。第二，求和那一步：exp(-inf) = 0，mask 掉的位置对分母的贡献是 0，不参与求和。两个作用靠的是同一个 -inf，但发生在两行不同的代码上——`tl.max` 那行靠它保最大值，`tl.sum` 那行靠它保分母。写的时候如果把 `other` 漏了，mask 掉的位置读进来的是 0：0 可能赢过真实的最大值（整行全是负数时），exp(0) = 1 又会污染分母——两个地方一起错，排查时却只看到一个“结果不对”。
+正确性检查与 `torch.softmax(x, dim=-1)` 对比，留 `atol=1e-5`。容限是必须的：两个 kernel 的求和树不一样，FP32 舍入落在不同位置，逐 bit 相等不该指望；官方教程对 1823 × 781 的随机矩阵用默认 `torch.allclose` 就能过，1e-5 比它还宽松。误差到 10⁻² 量级就不是舍入了：先查 mask 与 `other`，再查 BLOCK 是否盖住了整行。
 
-正确性检查：与 `torch.softmax(x, dim=-1)` 做 `torch.allclose` 对比（注意浮点误差容限，`atol=1e-5` 左右）。容限是必须的：两个 kernel 的求和顺序不一样，FP32 舍入不一样，逐 bit 相等本来就不该指望。求和顺序不一样，根子在第 2 节讲过的那棵树上：`tl.sum` 是两两相加的树形归约，PyTorch 的求和排的是另一棵树，同一组数按不同顺序加，FP32 的每次舍入都落在不同的位置上，最后的结果差在 10^-5 这个量级是正常的——`atol=1e-5` 容限的依据就在这里。反过来，如果差到 10^-2 量级，那就不是舍入，是真的错了：先查 mask，再查 `other`，最后查 BLOCK 是不是盖住了整行。
-
-计时用 `triton.testing.do_bench`，它与第 1 周的 CUDA Events 是同一回事：热身、多次重复、取中位数：
+计时用 `triton.testing.do_bench`，口径要写清（参数名与默认值随版本变，以当前版本文档为准）：`warmup=25`、`rep=100` 的单位是毫秒，不是次数。它先跑一次估出单次耗时，再按 warmup ÷ estimate 与 rep ÷ estimate 算出热身次数与重复次数；每次重复用一对 CUDA event 计时；每次重复前把一个缓冲区清零，把 L2 冲掉，所以量到的是冷 L2 的数，小张量会因此偏慢。默认 `return_mode="mean"` 返回均值，要中位数就传 `return_mode="median"`（或 `quantiles=[0.5]`）。如果 kernel 套了 autotune，第一次调用会先扫一遍配置，这次耗时同样落在热身里，不计入结果。
 
 ```python
+# 在 softmax() 里：n_rows、n_cols、BLOCK、y 都已经算好
 ms = triton.testing.do_bench(
     lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK)
 )
+ms_median = triton.testing.do_bench(
+    lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK),
+    return_mode="median",
+)
 ```
 
-取中位数而不是平均数是有原因的：单次测量会被时钟波动、系统中断、第一次运行的冷缓存拖偏，均值会被这些异常值拉走，中位数不会。热身的道理和第 1 周一样——第一次跑有编译和缓存的冷启动，不算数。
+均值与中位数的差别可以拿一组数看：五次测量 [10.2, 10.1, 10.3, 45.7, 10.2] 毫秒，45.7 是某次系统中断拖出来的异常值。均值 (10.2 + 10.1 + 10.3 + 45.7 + 10.2) ÷ 5 = 17.3 毫秒，被一个异常值拉高 7 毫秒；中位数是排序后中间的那个，10.2 毫秒，异常值对它没有影响。一次中断就让均值偏了约 70%。热身解决的是另一件事：第一次调用要编译，编译是毫秒到秒级，一次 softmax 执行在微秒到毫秒级，不把第一次排除掉，量到的主要是编译。
 
-中位数与均值的差别可以拿一组数看清楚：五次测量 [10.2, 10.1, 10.3, 45.7, 10.2] 毫秒，其中 45.7 是某次系统中断拖出来的异常值。均值是 (10.2 + 10.1 + 10.3 + 45.7 + 10.2) / 5 = 17.3 毫秒，被一个异常值拉高了 7 毫秒；中位数是排好序后中间的那个数，10.2 毫秒，异常值对它没有影响。五次里混进一个异常值，均值就偏了 70%——这就是计时取中位数的原因。热身的道理也可以算出来：第一次调用要编译，编译的开销与 kernel 执行本身不在一个量级上（编译是毫秒到秒级的事，一次 softmax 执行是毫秒级以下的事），不把第一次排除掉，量出来的主要是编译时间。`do_bench` 的热身就是干这个的：先跑几遍把编译与缓存预热掉，再开始记数。
-
-再加 autotune：给 kernel 套一层 `@triton.autotune`，让 Triton 自动扫配置：
+再套一层 `@triton.autotune`，让 Triton 自己扫配置。这个 kernel 的 BLOCK 由 n_cols 决定（必须 ≥ 列数才能算对），真正能扫的只有 num_warps：
 
 ```python
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK': 128}, num_warps=4),
-        triton.Config({'BLOCK': 256}, num_warps=4),
-        triton.Config({'BLOCK': 1024}, num_warps=8),
+        triton.Config({}, num_warps=2),
+        triton.Config({}, num_warps=4),
+        triton.Config({}, num_warps=8),
     ],
     key=['n_cols'],
 )
 @triton.jit
 def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
                    n_cols, BLOCK: tl.constexpr):
-    # 与上面第 3 节相同的 kernel 体；autotune 只改 BLOCK 与 num_warps 的取值
+    # 与上面相同的 kernel 体：autotune 只改 num_warps，BLOCK 由调用方传
     row_idx = tl.program_id(0)
+    ...
 ```
 
-`key` 是“输入形状变化时重新调优”的依据：n_cols 变了，最优配置可能也变了，autotune 会重新扫一遍；同一形状下只在第一次调用时扫一遍，后面直接用最优配置。调优是自动的，但调什么是你定的：BLOCK 大小与 num_warps 就是你要理解的两个旋钮。BLOCK 是分块大小——一个程序处理多少数据，越大则程序越少、每个程序的活越多、寄存器占用越高；num_warps 是一个程序里的并行度——warp 越多，能同时跑的 warp 越多，但每个 warp 都要寄存器，给多了会 spill。这两个旋钮的权衡，和第 1 周调 block 大小与寄存器上限是同一回事。
+`key` 是重新调优的依据：n_cols 变了，最优配置可能也变，autotune 会重新扫一遍；同一形状下只在第一次调用时扫，后面直接用记下来的配置。候选集里放什么由你定。对 BLOCK 可以自由取的 kernel（逐元素、矩阵乘），两个旋钮的配平可以先手算：一个 warp 是 32 个线程，num_warps = 4 是 128 个线程，num_warps = 8 是 256 个线程；BLOCK 个元素分给这些线程，每线程扛 BLOCK ÷ (32 × num_warps) 个。BLOCK = 128 配 4 个 warp，每线程 1 个元素；BLOCK = 1024 配 8 个 warp，每线程 4 个；BLOCK = 1024 配 4 个 warp，每线程 8 个，寄存器压力翻倍，压不住就 spill。
 
-两个旋钮可以先在纸上配平，再让 autotune 去量。一个 warp 是 32 个线程，num_warps = 4 就是 128 个线程，num_warps = 8 就是 256 个线程。BLOCK = 128 配 4 个 warp，每个线程分 128 / 128 = 1 个元素；BLOCK = 256 配 4 个 warp，每个线程 2 个元素；BLOCK = 1024 配 8 个 warp，每个线程 1024 / 256 = 4 个元素。为什么 BLOCK = 1024 那档要配 8 个 warp 而不是 4 个？BLOCK = 1024 配 4 个 warp 时每个线程要扛 1024 / 128 = 8 个元素，寄存器压力翻倍，容易 spill 到 local memory——spill 的意思就是寄存器放不下，溢出来的数据要去 global memory 里暂存，本来在寄存器里的东西走了 HBM 一趟，快不起来。autotune 的 3 个配置就是 3 个不同的配平点：小 BLOCK 配少 warp、大 BLOCK 配多 warp。它只在第一次调用时扫一遍：3 个配置各跑几遍、取中位数、挑最快的记下来，后面同一形状直接用记下来的配置，不再重扫。`key=['n_cols']` 的作用正在这里：n_cols 从 1024 变成 4096 时，一行变长 4 倍，原来最优的 BLOCK 未必还最优，autotune 认出 key 变了，重新扫一遍；n_cols 不变时，一次调优管全程。
+autotune 只挑最快的，不检查正确性：候选集里放一个 BLOCK 小于列数的配置，它算出来是错的，而不是慢的。softmax 这类“块必须盖住整行”的 kernel，候选集要么把 BLOCK 固定住、只扫 num_warps（如上），要么用 `prune_configs_by` 把不合法配置先剪掉（参数以当前版本为准）。
 
-**产出**：一个 fused softmax（与 PyTorch 版数值对齐）+ 一份 autotune 扫出来的最优配置记录。注意：这个 softmax kernel 先把它存好——M3 第 5 周的移植案例最终选了第 6 周的 SiluAndMul，softmax 可留作备用对照。
+写一个与 PyTorch 对齐的 fused softmax，再留一份 autotune 记录：哪个 n_cols 选了哪个配置、各自多少毫秒。第 21 章的 online softmax 是它的分块版；第 24 章接回引擎的练习用的是 SiluAndMul，这个 softmax 留作对照。
 
-### 第 4 节 · 中文讲解对照
+### 第 4 节 · 把 kernel 翻译回 CUDA 语义
 
-**目标**：把本周的概念用中文复述一遍，补上英文教程里没讲透的背景。
+写得出 Triton 不代表知道它变成了什么。把这一章写过的 kernel 逐行翻译回 CUDA，能标出两件事：编译器替你做了哪些决定，哪些决定它替你做不了。前者是 Triton 省下的工作，后者就是 20.5 的边界。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+| Triton 里的写法 | 编译后大致对应什么 | 谁做这个决定 |
+|---|---|---|
+| `tl.program_id(0)` | `blockIdx.x` | 你定 grid 大小 |
+| `pid * BLOCK + tl.arange(0, BLOCK)` | `blockIdx.x * blockDim.x + threadIdx.x` 加循环或展开 | 编译器：哪个 lane 算哪个元素 |
+| `BLOCK`、`num_warps` | `blockDim = 32 × num_warps`，每线程扛 BLOCK ÷ blockDim 个元素 | 你给数，编译器给映射 |
+| `tl.load(ptr, mask=mask, other=...)` | 带谓词的 `ld.global`；相邻地址合并成 128 字节事务 | 编译器：合并与向量化 |
+| `tl.store(ptr, v, mask=mask)` | 带谓词的 `st.global` | 编译器 |
+| `tl.max`、`tl.sum(axis=0)` | warp 内 shuffle 归约 + 跨 warp 的 shared memory 暂存与同步 | 编译器：树的形状与缓冲 |
+| `tl.dot(a, b)` | `ldmatrix` 取数 + `mma.sync`（Hopper 上是 `wgmma`）+ shared memory 暂存 | 编译器：流水线与排布 |
+| `tl.constexpr` | 模板参数，每个取值生成一份特化代码 | 你定特化点 |
+| `@triton.autotune` | 编译多份、各测一遍、按 key 缓存 | 你定候选集 |
 
-读 [Datawhale《大模型算法与系统教程》Part 03 Triton 部分](https://github.com/datawhalechina/llm-algo-leetcode)（15 节，中文 Notebook，可运行）。它是目前最成体系的中文 Triton 教程：PyTorch → Triton 的递进设计与本模块一致。
+20.1 的向量加法翻译成 CUDA 是这样（示意，只保留与 Triton 版对应的部分）：
 
-读完别停在“看懂了”——用中文复述一遍。复述是检验理解的办法：能用自己的话讲出来，才算真的会了；只能照着英文念，说明还没过手。一份合格的复述有三件东西：定义、为什么、一个例子。拿 mask 举例：定义是“越界的位置不读写”，为什么是“读了可能越界、写了会 corrupt 内存”，例子是“向量长 15、BLOCK 16 时多出来的那个位置”。
+```cuda
+__global__ void add_kernel(const float* x, const float* y, float* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = x[i] + y[i];
+}
+// 启动：add_kernel<<<(n + 127) / 128, 128>>>(x, y, out, n);
+```
 
-“看懂了”和“会了”之间的距离，可以用第 1 节的向量加法量出来。看懂的意思是：顺着代码读下来，每行都知道在干什么。会了的意思是：把代码盖住，能自己写出 `pid * BLOCK + tl.arange(0, BLOCK)`，能说出 n = 10000、BLOCK = 1024 时为什么启动 10 个程序、9 号程序为什么有 240 个 lane 被 mask 掉，能说出 grid 为什么写成 lambda 而不是固定元组。复述就是逼自己做这个检查：定义、为什么、例子，三件东西缺了哪一件，缺口就标在那里。只能照着英文念的人，缺的通常是“为什么”——知道 `mask = offsets < n_elements` 这行存在，不知道没有它时读的那一边可能越界、写的那一边会 corrupt 内存。
+两版逐项对上：Triton 的 `mask` 就是这里的 `if (i < n)`，`tl.load` 与 `tl.store` 的谓词来自同一个 mask；`grid` 是 `<<<...>>>` 的第一个参数，`num_warps` 换成了 `blockDim = 128`（默认 4 个 warp）。逐元素 kernel 两边差不多长——Triton 省下的不是行数，是“哪个线程算哪个元素”这个决定：CUDA 版由你写出 `i`，Triton 版由编译器把 BLOCK 个元素分给 32 × num_warps 个 lane。
 
-对照官方教程，把这三个概念用中文写下来：block 编程模型（程序 vs 线程）、mask 与越界（为什么尾巴要处理）、融合（省的是访存次数，不是计算量）。写的时候对照第 3 节算过的账：融合省了几遍读写，写进复述里，数字比形容词有说服力。
+分块矩阵乘就差得多了。Triton 的 K 循环是 `for k in range(0, tl.cdiv(K, BLOCK_K))`，每轮两次 `tl.load`、一次 `acc += tl.dot(a, b)`；同样的循环用 CUDA 写，要自己声明 shared memory、自己把 tile 搬进去、在每轮首尾插 `__syncthreads()`、自己处理 K 不是 BLOCK_K 整数倍的尾巴。Triton 把 shared memory 暂存与 MMA 指令的排布交给编译器，这是它在矩阵乘上省下一个量级代码量的地方。
 
-三个概念各配一套“定义、为什么、例子”，写的时候直接套用本周已经算过的数。block 编程模型：定义是“一个程序处理一整块数据，对应 CUDA 里的一个 block”；为什么是“标量下标换成向量下标之后，线程组织、搬运、向量化都由编译器接手，你只管哪个程序处理哪块”；例子是“n = 10000、BLOCK = 1024 时 10 个程序的分工，9 号程序 784 个有效元素、240 个 mask 掉的位置”。mask 与越界：定义是“越界的位置不读写”；为什么是“读的那一边可能越界、写的那一边会 corrupt 内存，而且两边必须共用同一个 mask”；例子是“向量长 15、BLOCK 16 时多出来的那 1 个位置”。融合：定义是“多个算子合成一个 kernel，中间结果留在寄存器里”；为什么是“省掉中间结果在 global memory 里的往返”；例子是“第 3 节算过的账：N = 1024 的一行，拆开算读 4 遍写 2 遍、24 KB，融合版读 1 遍写 1 遍、8 KB，3 倍——计算量一分没少，省的全是搬运”。数字写进复述里，复述就有了刻度：别人读你的笔记，能直接拿 24 KB 对 8 KB 去验算，而不是只看到“快了很多”这样的形容词。
+翻译不出来的部分，正好是编译器替你决定、也替你锁住的部分：
 
-英文教程里没讲透的背景，中文复述要补上的主要是术语的来历。`constexpr` 这个词在官方教程里出现时默认你已经知道“编译期常量”是什么意思；`grid` 写成 lambda 默认你已经知道 autotune 会换 BLOCK；`other=-float('inf')` 默认你已经知道 mask 掉的位置要填一个既赢不了 max、exp 之后又是 0 的值。中文复述的任务就是把这些默认的前提摊开：每个术语第一次出现时给一句中文 gloss，每个“默认你知道”的地方补一句为什么。本周的复述笔记写完之后应当能直接给没读过英文教程的人讲明白：为什么 Triton 比 CUDA 好写、又比 PyTorch 快——好写是因为编译器接手了线程与访存，快是因为融合省掉了中间结果的 HBM 往返，两句话各有本周算过的数撑着。
+- shared memory 布局：你能说“这个 block 读哪块”，说不了“这块在 shared memory 里按什么 stride 摆、要不要 padding”。第 19 章用 padding 解 bank conflict，那一步在 Triton 里没有对应的旋钮。
+- warp 级同步与 warp 分工：`__syncwarp()`、`__shfl_sync()` 没有对应写法；归约内部用它们，但不暴露给你。FlashAttention 第 3 代那类“一部分 warp 搬、一部分 warp 算”的排布也没有对应写法（截至当前版本，以文档为准）。
+- 异步拷贝流水线：`cp.async`、TMA、多级 double buffer 由编译器排；`num_stages` 只给级数，哪一级搬哪块、什么时候发出去，不由你定。
+- 寄存器分配：只能通过 BLOCK 与 num_warps 间接影响，没有逐变量的控制。
 
-复述还有一层长远的用处：它练的是“把英文技术内容讲成中文”的能力，第 3 周读 FlashAttention、第 5 周读 FA2/FA3 时还要用，M3 移植国产芯片时更要用到——那时要讲的是 CANN 与 AscendC 的概念，面对的同样是英文文档与中文讲解之间的落差。本周的一页笔记就是那个能力的第一次练习：写得越具体，下周复用得越顺手。
+编译产物可以拿来核对这张表。编译后的 kernel 对象带着 IR 与 PTX（`CompiledKernel.asm`，键名随版本变；也可以设 `TRITON_KERNEL_DUMP=1` 把中间产物写到磁盘，环境变量名以当前版本文档为准）。在 PTX 里搜 `ld.global`、`bar.sync`、`mma.sync`，表里的每一行都能落到一条指令上：`tl.load` 是带谓词的 `ld.global`，多 warp 时 `tl.sum` 会引入 block 内的同步（`bar.sync`），`tl.dot` 是 `mma.sync`（Hopper 上是 `wgmma`）。搜不到的行，要么表写错了，要么那一行被优化掉了。
 
-注意 Datawhale 教程的边界：它的 Part 04（CUDA 与系统优化）与 Part 05（综合项目）仍在建设中，且全书基于 NVIDIA——国产芯片的部分不在它的覆盖范围内，那是 M3 的事。边界要写进笔记里，免得以后翻笔记时误以为“中文教程里都讲了”：Part 03 的 15 节覆盖的是 Triton 本身，够本周用；国产芯片的算子抽象、插件架构与移植案例，从 M3 第 1 周起另有材料，中文复述的对照物到时也要换。
+拿 20.3 的 softmax 做这个练习：逐行写它的 CUDA 对应，写不出来的行标出来。标出来的那些，就是 20.5 判断表里“回 CUDA”那一列。
 
-复述写完之后要自检，办法是盖住原文再讲一遍。自检的锚点就是本周的数字：不看笔记，能不能凭记忆复现 24 KB 对 8 KB 的融合账、n = 10000 时 9 号程序的 240 个 mask 掉的位置、BLOCK = 1024 配 8 个 warp 时每个线程 4 个元素——复现不出来，对应的概念就还没过手，只是在纸上抄过一遍。另一个自检是讲给别人听：对方听完能不能把“好写是因为编译器接手了线程与访存，快是因为融合省掉了 HBM 往返”这两句话复述回来；复述不回来，缺的往往不是例子，是定义与为什么之间的那根线。
+### 第 5 节 · Triton 什么时候够用，什么时候必须回 CUDA
 
-术语的中文 gloss 可以先从本周出现过的词练起：`constexpr` 译作“编译期常量”——取值在编译时定下来、改它要重编；autotune 译作“自动调优”——给几个配置、挨个量、挑最快的记下来；grid 译作“程序排布”——多少个程序、各处理哪块。gloss 的标准是：中文读者第一次见这个词，凭 gloss 就能猜出它在代码里是干什么的。Datawhale 的 15 节比本周的 5 节粒度更细，读的时候不用逐节对号入座——把它当作背景材料，遇到本周概念的另一种讲法时对照着看，讲法不一样、算出来的数应该一样。
-
-**产出**：一页中文复述笔记，能向别人讲清“为什么 Triton 比 CUDA 好写、又比 PyTorch 快”。
-
-### 第 5 节 · 小结：Triton 什么时候够用，什么时候必须回 CUDA
-
-**目标**：写出取舍判断，而不是“哪个更好”的站队结论。
-
-**怎么做**（60 分钟，无 GPU 可做）：
-
-对照本周的三个 kernel（向量加法、fused softmax、矩阵乘），填这张表：
+判断标准只有一条，分两面说：优化能用 block 语言说清——“哪个程序读哪块、按什么顺序读”——就留在 Triton；必须说到“哪个 warp 干什么、哪个 bank、流水线的第几级”，就回 CUDA。道理不复杂：Triton 抽象掉的正是线程、warp、shared memory 的管理，而硬件细节的优化要调的恰恰是这些东西，抽象藏住了你需要控制的对象。
 
 | 场景 | 选什么 | 原因 |
 |---|---|---|
-| 逐元素、归约、简单融合 | Triton | 代码短、编译器管访存与向量化，够快 |
-| 需要精确控制 shared memory 布局、warp 级同步 | CUDA | Triton 抽象掉了这些，控制不到 |
-| 要榨干最后一滴性能（比如 FlashAttention 3 级别） | CUDA / CUTLASS | 需要 warp specialization、手写流水线 |
-| 快速验证一个融合想法 | Triton | 写起来快，解释器还能无卡跑 |
+| 逐元素、归约、简单融合 | Triton | 优化的全部内容是访存模式，编译器接手了线程与向量化 |
+| 需要精确控制 shared memory 布局或 warp 级同步 | CUDA | 这两样在 Triton 的抽象层里没有对应写法 |
+| 要榨到接近硬件上限（FlashAttention 3 那个级别） | CUDA / CUTLASS | warp specialization 与异步流水线要逐级排布 |
+| 快速验证一个融合想法 | Triton | 解释器无卡可跑，改一版只动 BLOCK 与 mask |
 
-这张表有 4 行，背后其实只有一条判断标准，分两面说。判断标准就一条：瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA。道理很简单：Triton 抽象掉的正是线程、warp、shared memory 的管理，而硬件细节优化要调的恰恰是这些东西——抽象藏住了你需要控制的东西。换个说法：能把优化说成“哪个 block 读哪块、按什么顺序读”，Triton 够用；必须说到“哪个 warp 干什么、哪个 bank、流水线的第几级”，就回 CUDA。第 3–5 周会在这个判断上继续加码。
+把这套标准套到本章的三个 kernel 上。向量加法的全部内容是“10 个程序各读哪段、尾巴怎么挡”，矩阵乘是 tile 尺寸与 K 方向的步进，softmax 是“6 遍变 2 遍”——三个都能用 block 语言说完，所以这一章没有一道题必须回 CUDA。这不是 Triton 万能，是这三道题还没碰到边界。
 
-把这条标准套到本周的三个 kernel 上，看它是怎么落地的。向量加法：优化的全部内容就是“10 个程序各读哪段连续地址、尾巴怎么 mask”，一句话能说清，全是 block 语言——Triton 够用。fused softmax：优化的全部内容是“读 4 遍写 2 遍变成读 1 遍写 1 遍”，算的是访存账，还是 block 语言——Triton 够用。矩阵乘：分块尺寸、K 方向的步进、每步 8 KB 的搬运，也都是 block 语言——Triton 够用，而且 `tl.dot` 直接降到 tensor core，算力也没丢。三个 kernel 没有一个需要说到 warp 一级，所以这一周没有一道题必须回 CUDA——这不是 Triton 万能，是本周的题还没碰到它的边界。
+边界长什么样，可以对着表里的第 2、3 行看。shared memory 布局与 padding 是第 19 章解 bank conflict 的手段，Triton 里能说“这个 block 读哪块”，说不了“这块在 shared memory 里怎么摆”。warp 级同步与 warp specialization 是 FlashAttention 3 的工程核心，一部分 warp 专职搬运、一部分专职计算，流水线的第几级在干什么都要排好，这些在 Triton 里没有对应写法。异步拷贝的级数能通过 `num_stages` 给，但“谁搬、谁算、什么时候发”给不了。手写 CUDA 能调到最细；CUTLASS 把流水线与分块做成可复用的模板，站在模板上改比从零手写省事。
 
-边界长什么样，可以拿表里的第 2、3 行对照着看。需要精确控制 shared memory 布局时：Triton 里你能说的是“这个 block 读哪块”，说不了“这块数据在 shared memory 里按什么布局放、哪个 bank 放什么”——第 1 周讲过的 bank conflict 恰恰要调的就是这个：两个线程同时访问同一个 bank 的不同地址会串行化，解法是改布局、改 padding，而布局与 padding 在 Triton 的抽象层里是摸不到的。需要 warp 级同步时：Triton 里程序之间没有 grid 级 barrier，程序内部也没有暴露给你的 warp 级同步原语；FlashAttention 3 级别的优化要的是 warp specialization——一部分 warp 专职搬运、一部分 warp 专职计算，流水线的第几级在干什么都要排布好——这些在 Triton 里没有对应的旋钮。表里的“CUDA / CUTLASS”写的是两条路：手写 CUDA 能调到最细，CUTLASS 把流水线与分块做成了可复用的模板，站在模板上改比从零手写省事。
+工作流是两条道接力，不是二选一。想法先在 Triton 里跑通：解释器无卡也能验正确性，访存图能看对，BLOCK 改一版只是改个数。profile 说瓶颈还在访存模式，就继续在 Triton 里调 BLOCK 与 num_warps；profile 说瓶颈已经下沉到硬件细节，再把验证过的 Triton 版当参照物搬到 CUDA——两个版本对同一组输入给出同样的数，移植引入的错就只剩性能问题。
 
-“快速验证一个融合想法”这一行值得单独说一句，因为它决定了你平时的工作流。有一个融合想法时，先用 Triton 在解释器里跑通、把访存图看对、把正确性对上——无卡也能做，半天就能验证一个想法值不值得继续；只有当 profile 告诉你瓶颈已经不在访存模式、而在硬件细节时，再把验证过的想法搬到 CUDA 里细调。Triton 是验证想法的快车道，CUDA 是榨干性能的慢车道，两条道接力，而不是二选一。
+选错方向的代价可以提前算。简单的融合想法用 CUDA 起手，访存账不会因为换了语言而变（24 KB 对 8 KB 还是 3 倍），多花的是手写线程、shared memory 与同步的时间；需要 warp 级控制的 kernel 用 Triton 写到底，写到要调布局与流水线时才发现旋钮不在抽象层里，前面的代码要推倒。判断的价值在于把这次返工提前到动笔之前。
 
-三个误解是这张表最容易被误读的地方。第一个是“Triton 抽象掉了硬件，所以慢”：抽象掉的是控制，不是速度——访存模式与融合这些决定速度的大头，Triton 不但没丢，还由编译器接手管了起来；本周的 fused softmax 用 Triton 写，访存从 24 KB 降到 8 KB，省掉的 3 倍搬运是实打实的。第二个是“CUDA 总是更快”：瓶颈在访存时，Triton 与 CUDA 的访存账是一样的，快慢的差别在测量误差里；只有瓶颈下沉到 warp 与流水线时，CUDA 的细粒度控制才拉开差距。第三个是“选一边站队”：取舍是按 kernel 选的，不是按人选的——同一个项目里，逐元素与简单融合走 Triton、最后榨性能的那一两个 kernel 走 CUDA，是完全正常的分工。
+本章攒出来的检查清单：
 
-从本周起建一张总清单，先记两条——“mask 写对了吗（尾巴处理）”与“BLOCK 是不是 2 的幂（tl.arange 要求）”。两条各有本周的教训撑着：mask 那条的教训是 n = 10000、BLOCK = 1024 时 9 号程序的 240 个凑数 lane——load 与 store 两边必须共用同一个 mask，只挡一边就会 corrupt 尾巴；BLOCK 那条的教训是 `tl.arange` 的长度必须是 2 的幂，BLOCK 取 1000 会在编译时报错，而 n_cols = 513 时 BLOCK 跳到 1024 的代价也来自同一条规则。清单从这两条起步，第 3 周讲 fused attention 时会加上 online 更新的检查项，第 4–5 周读 FA2/FA3 时再继续加——清单的价值在于它是本周的错攒出来的，不是抄来的。
+- mask 在 load 与 store 两边都写，且用同一个条件；
+- BLOCK 是 2 的幂，且不超过 2²⁰；
+- 读进来要参与计算的 masked lane 必须给 `other`（softmax 用 −inf）；
+- 计时写明是均值还是中位数，热身与重复的次数口径一起写；
+- fp32 的 `tl.dot` 写明 `input_precision` 是 TF32 还是 ieee；
+- BLOCK 与 num_warps 配对，算出每线程扛几个元素。
 
-选错方向也有代价，值得在动手前算进去。简单的融合想法用 CUDA 起手：访存账和 Triton 写出来是一样的，24 KB 对 8 KB 不会因为换了语言就变，多的只是手写线程、shared memory 与同步的那几天。反过来，需要 warp 级控制的 kernel 用 Triton 写到底：写到一半才发现要调的布局与流水线在抽象层里摸不到，前面的工作要推倒重写。判断题的意义就在这里——选对方向省的不是几行代码，是重写的那几天。
+往后几章的判断会继续加码。第 21 章的 online softmax 仍是 block 语言——rescale 是 block 级的更新规则，Triton 够用；第 22 章 int8 的 `tl.dot` 与 autotune 走同一条路；第 23 章读 FlashAttention 2/3 与 CUTLASS 时，话题下沉到 warp 分工与流水线排布，天平往 CUDA 移；第 24 章把 kernel 接回引擎，量的是端到端的变化。判断表每章加一行，不是给语言排座次，是给下一个 kernel 选起手的地方：能用 block 说清的先在 Triton 里写完，说不清的再从 CUDA 起手。
 
-这张表在第 3–5 周还会继续长。第 3 周的 fused attention：online softmax 的 rescale 是 block 级的更新规则，优化仍能说成“哪个 block 读哪块”，还在 Triton 够用的那一边；第 5 周读 FA2/FA3 时，话题会下沉到 warp 分工与流水线排布，判断的天平就往 CUDA 那边移。每过一周，往表里加一行、往清单里加一项——表越长，判断越准。
+**延伸**：[Triton 官方教程](https://triton-lang.org/main/getting-started/tutorials/index.html)（vector add、fused softmax、matrix multiplication 三篇对应 20.1–20.3）、[Triton 语言文档](https://triton-lang.org/main/python-api/triton.language.html)（`program_id`、`arange`、`load`、`dot` 的参数与限制）、[Triton Puzzles](https://github.com/gpu-mode/Triton-Puzzles)（解释器里的访存可视化，编号以仓库为准）、[Triton: An Intermediate Language and Compiler for Tiled Neural Network Computations](https://dl.acm.org/doi/10.1145/3315508.3329973)（Tillet、Kung、Cox，MAPL 2019：tile 级编程模型的设计动机）、[Datawhale《大模型算法与系统教程》](https://github.com/datawhalechina/llm-algo-leetcode)（第三部分 Triton Kernels，20 个可运行 Notebook，编号以仓库为准）。
 
-**产出**：一页取舍笔记 + 更新后的检查清单。
 ## 第 21 章 · Fused Attention 深讲：先推导，再写 kernel
 
 > 硬件：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证；第 1–2 节的推导与计算无卡可做。
