@@ -6,11 +6,13 @@
 #
 # Usage:
 #   bash site-build.sh        # build into site/
-#   bash site-build.sh serve  # build staging tree, then serve on localhost:8000
+#   bash site-build.sh serve  # build staging tree, then serve on localhost:8010
 #
 # Needs the dependencies from requirements.txt:
-#   python3 -m venv .venv-mkdocs
-#   .venv-mkdocs/bin/pip install -r requirements.txt
+#   uv venv .venv-mkdocs
+#   uv pip install --python .venv-mkdocs/bin/python -r requirements.txt
+# (or, if python3 -m venv works on your system:
+#   python3 -m venv .venv-mkdocs && .venv-mkdocs/bin/pip install -r requirements.txt)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -27,7 +29,7 @@ cp -r docs assets tracker site-src/
 
 if [[ "${1:-build}" == "serve" ]]; then
   # Note: edits to README.md / docs/ need a re-run of this script to reach site-src/.
-  exec "$MKDOCS" serve -f mkdocs.yml
+  exec "$MKDOCS" serve -f mkdocs.yml -a "${MKDOCS_ADDR:-127.0.0.1:8010}"
 fi
 
 rm -rf site
