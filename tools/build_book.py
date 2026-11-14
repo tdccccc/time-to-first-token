@@ -141,6 +141,7 @@ CHAPTER_FIGURES = {
     1: ("roofline.svg", "Roofline 示意图：横轴为算术强度，纵轴为可达性能；斜线是带宽上限，横线是算力上限，交点是脊点；decode 点在斜线一侧，prefill 点越过脊点", "先看斜线、横线与交点（本算例的脊点是 156 FLOP/字节），再找 decode 与 prefill 示例点。结论：decode 在带宽斜线一侧，增加算力不改第一瓶颈；prefill 越过脊点后更受算力限制。"),
     2: ("timeline.svg", "一次流式请求的时间线：请求到达、排队、prefill、TTFT、逐 token decode 与 ITL", "先看 TTFT 在哪里结束，再看其后的 token 间隔如何组成 ITL。结论：排队和 prefill 都计入 TTFT，不能和 decode 的 step time 混成一个数。"),
     3: ("profiler-trace.svg", "CPU 与 GPU 双泳道 trace 示意：CPU 侧依次是 Python 调度、连续 kernel 启动与 synchronize，GPU 侧是若干短 kernel、一段空白、一个长 kernel 与更多短 kernel；空白与 CPU 的同步等待对齐", "先对齐 CPU 与 GPU 两条泳道，看 GPU 空白下方 CPU 在做什么；再区分发射跟不上、同步等待与拷贝。结论：GPU 时间线上的空白不是没有成本，它和 kernel 一样要归因。"),
+    7: ("model-ledgers.svg", "五个模型的总参数与每 8K 请求全局 KV 对照：两列均为对数轴，同一行是一个模型；左列总参数，右列每 8K 请求的全局 KV，固定状态另计", "先看左右两列的对数轴，同一行对应同一个模型；再比较两列的位置，参数规模与 KV 账并不同向。结论：总参数管容量与放置，KV 结构管长上下文，两张账要分别算。"),
     6: ("kernel-anatomy.svg", "kernel 时间账：计算、显存搬运、启动与同步三项取最大，并指向不同优化动作", "先看三项时间哪一项最大，再看底部对应的动作。结论：判断瓶颈在计算、带宽还是启动，优化清单才选得对。"),
     8: ("kv-pages.svg", "PagedAttention 的块表映射：左侧逻辑块 L0–L5，经中间块表映射到右侧非连续物理页", "先看左侧逻辑块和中间块表，再沿映射看右侧物理页；相邻逻辑块可以落在不相邻的物理页。结论：按需分页把浪费压到最后一个未满 block，代价是 attention 按块表 gather。"),
     10: ("batching.svg", "静态批处理与连续批处理的时间线对比：请求结束后的空槽与新请求换入", "先对齐两条时间轴看空白与换入点：静态批处理等最慢请求，连续批处理在请求结束时释放槽位。结论：它提高 GPU 占用率，不改变单请求计算速度。"),
@@ -225,6 +226,7 @@ CHAPTER_FIGURE_PLACEMENT = {
     1: (3, 6),    # 1.3 after the ridge-point cross-over is solved
     2: (None, 1), # chapter opens with the metric question; figure before the table
     3: (2, 1),    # 3.2 CPU/GPU trace lanes
+    7: (5, 1),    # 7.5 five-model ledger comparison
     6: (1, 1),    # 6.1 three bottleneck buckets
     8: (1, 1),    # 8.1 PagedAttention block mapping
     10: (4, 1),   # 10.4 continuous batching
@@ -893,8 +895,12 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
         text = re.sub(r"第\s*(\d+)\s*节", lambda m: f"{chapter.num}.{m.group(1)}", text)
     # Module labels become parts.
     text = text.replace("M0–M4", "第一部分到第五部分")
-    text = text.replace("M0", "第一部分").replace("M1", "第二部分")
-    text = text.replace("M2", "第三部分").replace("M3", "第四部分").replace("M4", "第五部分")
+    text = re.sub(
+        r"(?<![A-Za-z0-9])M([0-4])(?![A-Za-z0-9])",
+        lambda m: {"0": "第一部分", "1": "第二部分", "2": "第三部分",
+                   "3": "第四部分", "4": "第五部分"}[m.group(1)],
+        text,
+    )
     text = text.replace("模块地图", "全书结构")
     if module == "m4":
         text = text.replace("这个模块", "这个项目").replace("逐周教程", "正文教程")
