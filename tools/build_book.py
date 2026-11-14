@@ -134,7 +134,7 @@ CHAPTER_SUMMARIES = {
     28: "算子覆盖分析要拿 profiler 的真实清单逐条对照，不靠猜。",
     29: "移植 kernel 先找语义等价的最小闭环，再处理内存层级与同步差异。",
     30: "精度回归与性能对比要同评测集、同负载、同版本；差异要归因到算子。",
-    31: "毕业设计的重点是同一套条件、可追溯的数据和明确的证据等级：把同一模型在两套硬件上的差异做两遍并写清楚。",
+    31: "综合项目的重点是同一套条件、可追溯的数据和明确的证据等级：把同一模型在两套硬件上的差异做两遍并写清楚。",
 }
 
 CHAPTER_FIGURES = {
@@ -970,6 +970,12 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
     text = text.replace("第三部分 的", "第三部分的").replace("第四部分 的", "第四部分的")
     text = text.replace("第五部分 的", "第五部分的")
     text = text.replace("每节，每章", "每章").replace("每节，", "每节")
+    # Remove spaces introduced when module references become part/chapter references.
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*[一二三四五]部分)", r"\1", text)
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*[一二三四五](?:、第?\s*[一二三四五])*部分)", r"\1", text)
+    text = re.sub(r"(第\s*[一二三四五]部分)\s+(?=[\u4e00-\u9fff、，。；：）])", r"\1", text)
+    text = re.sub(r"(第\s*\d+\s*章)\s+(?=[\u4e00-\u9fff、，。；：）])", r"\1", text)
+    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*\d+\s*章)", r"\1", text)
     text = clean_ws(text)
     return restore(text, store)
 
@@ -1534,7 +1540,7 @@ def override_chapter_17(text: str) -> str:
 
 **节奏。** 把阅读放进固定日程，而不是等“有空”。固定的时段不必很长，但要在日历上占位、可重复；到了时间就做漏斗、读一篇、写记录。忙的时候读队列里最短的一篇，不要跳过；跳过一次，下一次启动的成本会更高。
 
-## 17.4 第一次习惯性阅读：读一篇论文
+## 17.4 第一次完整练习：读一篇论文
 
 **目标**：按“只读摘要、方法图和实验，不读全文”的方法读完一篇论文，并留下一段读后记录。你要能说出：先看什么、后看什么、什么可以跳过、读完留下什么。
 

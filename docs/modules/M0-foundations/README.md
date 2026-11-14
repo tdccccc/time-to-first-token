@@ -53,7 +53,7 @@ Roofline 模型就是把这类判断变成算术。它用两个量描述一个 k
 
 这组数还说明：把算力翻倍，0.045 ms 变成 0.022 ms，总时间仍由 7 ms 的搬运决定。算力不是没用，而是当前瓶颈不在它那里。
 
-### 走查：batch 与 prefill 把点推到哪里
+### 用 batch 与 prefill 看 Roofline 上的位置变化
 
 **增大 batch。** batch=8 时，一次 decode 步骤仍只读一遍 14 GB 权重，但计算量变成 8 × 14 = 112 GFLOP：
 

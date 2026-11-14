@@ -14,6 +14,10 @@
   --notes-width: 17rem;
 }
 
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #fcfcfd;
+}
+
 /* A three-column book: navigation | content | notes.
    The nav stays at chapter level: hide the integrated page subsection TOC
    and Material's separate page TOC sidebar. */
