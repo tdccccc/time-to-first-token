@@ -397,7 +397,7 @@ DeepSeek V4.1 Flash 把省 KV 的思路再推一步：不只压缩，还让多�
 
 表 2-D 是 V4.1 的 CED 对 prefill 账的改写，8K 输入，单位 TFLOPs：参考全层前向合计 282.386，CED 加末尾窗口重放是 143.947，省了 138.439，约一半，比值约 1.96。省的量几乎全在解码器一侧：20 层编码器从 142.139 降到 141.727，只省 0.412，约 0.29%；解码器共享全局 KV 与索引键投影是 0.044；20 层解码器的查询与前馈等计算从 140.202 降到 2.175，省了 138.027，相当于把这一项压到原来的 1/64.46；末尾 token 的词表头是 0.001，可以忽略。原因在 7.4 的末尾窗口重放：编码器处理全部输入，解码器只重放末尾窗口内的位置，长提示里解码器的大量位置被跳过了。第 14、15 章讲 PD 解耦与 Mooncake 时，配比按“prefill 重、decode 轻”算；CED 把 prefill 内部的解码器计算压掉 64 倍之后，prefill 侧的算力需求、P 节点与 D 节点的配比、KV 传输的量都要重算，旧配比不能直接沿用。
 
-表 2-E 是 1M 外推对照，1M 指 1,048,575 个历史位置加当前查询，上下文交互与状态分 8K 与 1M 两档：
+表 2-E 是 1M 外推对照，1M 指 1,048,575 个历史位置加当前查询，上下文交互与状态分 8K 与 1M 两档。状态列按本节的外推口径统计，含各层局部窗口、索引与固定状态，与 7.4 的“全局历史”表不是同一分母，不能按 890 B/token 反推。
 
 | 模型 | 8K 状态（GiB） | 1M 状态（GiB） | 8K 交互（GFLOPs） | 1M 交互（GFLOPs） |
 |---|---|---|---|---|
@@ -2557,7 +2557,7 @@ EAGLE-3 的 6.5 倍不是“一轮接受 6.5 个 token”：它是高接受率�
 
 如果你在隐私浏览里打开页面，或在沙箱 frame 里打开，local storage 可能被禁用。页面会检测并提示你，打勾在当次访问里仍然能用。
 
-**2. GitHub issue。** Fork 本仓库，新建一个 issue，把 `progress.md` 里的检查清单复制进去，在里面打勾。GitHub 把任务列表的状态存在它自己的服务器上，和你的账号绑定，所以在任何你登录的设备上都有效，还能留下一份你何时完成每一周的、带日期的评论记录。如果你想让进度比浏览器配置活得久，这是最好的选择。
+**2. GitHub issue。** Fork 本仓库，新建一个 issue，把 `progress.md` 里的检查清单复制进去，在里面打勾。GitHub 把任务列表的状态存在它自己的服务器上，和你的账号绑定，所以在任何你登录的设备上都有效，还能留下一份你何时完成每一章的、带日期的评论记录。如果你想让进度比浏览器配置活得久，这是最好的选择。
 
 **3. 直接改 progress.md。** Fork 本仓库，在你自己的副本里勾选清单。你的提交记录就是进度记录。
 
@@ -2571,7 +2571,7 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 
 ## 发表 benchmark 之前
 
-这些是公开的推理 benchmark 最容易被拆台的地方。第 5 周先读，第 10 周再用。
+这些是公开的推理 benchmark 最容易被拆台的地方。读第 5 章前先看一遍，写第 17 章的报告前再用一遍。
 
 - [ ] 扫描请求速率。只测一个并发级别是轶事，不是 benchmark。
 - [ ] 报告精确的输入和输出 token 长度。KV 缓存大小、进而吞吐，完全取决于它们。
@@ -2588,11 +2588,11 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 
 | 如果 | 那么 |
 |---|---|
-| **第 5 周。** 还没到目标并发，TTFT 就飙升、`num_requests_waiting` 爬升。 | 服务器在抢占。先停下来调 `--max-num-seqs`、`--gpu-memory-utilization` 和分块 prefill。在抢占点上测出来的数据不能发表。 |
-| **第 6 周。** INT4 换来的吞吐，让质量代理指标掉了超过 1–2%。 | 保留 FP16 或 FP8 作默认。把 INT4 当作缓解显存压力的杠杆，不当作默认的吞吐手段。 |
-| **第 7 周。** 在你真实的请求速率下，投机解码反而变慢了。 | 预期之内。收益出现在低查询率下，GPU 被计算打满时就消失了。把交叉点发表出来，它比加速比更有用。 |
-| **第 8 周。** Kubernetes 开始整节整节地吃掉你搭集群的时间。 | 用托管集群，或者退回单节点 Docker 加 KEDA 那篇阅读。自动扩缩容的信号比自己搭的集群重要。 |
-| **第 8 周（续）。** 解耦后 TTFT 反而变差。 | 先算传输账：KV 传输时间超过了 prefill 排队省下的时间，解耦在你的 prompt 长度和带宽下不划算。先缩短传输路径（同机、更高速的互联）或退回同机部署，再谈扩池子。 |
+| **第 5 章。** 还没到目标并发，TTFT 就飙升、`num_requests_waiting` 爬升。 | 服务器在抢占。先停下来调 `--max-num-seqs`、`--gpu-memory-utilization` 和分块 prefill。在抢占点上测出来的数据不能发表。 |
+| **第 12 章。** INT4 换来的吞吐，让质量代理指标掉了超过 1–2%。 | 保留 FP16 或 FP8 作默认。把 INT4 当作缓解显存压力的杠杆，不当作默认的吞吐手段。 |
+| **第 13 章。** 在你真实的请求速率下，投机解码反而变慢了。 | 预期之内。收益出现在低查询率下，GPU 被计算打满时就消失了。把交叉点发表出来，它比加速比更有用。 |
+| **第 14 章。** Kubernetes 开始整节整节地吃掉你搭集群的时间。 | 用托管集群，或者退回单节点 Docker 加 KEDA 那篇阅读。自动扩缩容的信号比自己搭的集群重要。 |
+| **第 15 章。** 解耦后 TTFT 反而变差。 | 先算传输账：KV 传输时间超过了 prefill 排队省下的时间，解耦在你的 prompt 长度和带宽下不划算。先缩短传输路径（同机、更高速的互联）或退回同机部署，再谈扩池子。 |
 
 ---
 
@@ -2604,15 +2604,15 @@ Local storage 对单个读者能达到同样的效果，而且什么都不需要
 
 | 论文 | 会议 | 主题 | 本书总结 |
 |---|---|---|---|
-| [PagedAttention / vLLM](https://arxiv.org/abs/2309.06180) | SOSP 2023 | KV 缓存分页 | 第 2 周 |
-| [Orca](https://www.usenix.org/conference/osdi22/presentation/yu) | OSDI 2022 | 连续批处理 | 第 4 周 |
-| [SGLang](https://arxiv.org/abs/2312.07104) | NeurIPS 2024 | RadixAttention、前缀复用 | 第 4 周 |
-| [SARATHI](https://arxiv.org/abs/2308.16369) / [Sarathi-Serve](https://arxiv.org/abs/2403.02310) | OSDI 2024 | 分块 prefill | 第 4 周 |
-| [DistServe](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin) | OSDI 2024 | prefill/decode 解耦 | 第 8 周 |
-| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU | 第 8 周（续） |
-| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 | 第 8 周（续） |
-| [StreamingLLM](https://arxiv.org/abs/2309.17453) | ICLR 2024 | 注意力汇、长上下文 | 第 7 周 |
-| [EAGLE](https://arxiv.org/abs/2401.15077) | arXiv | 投机采样 | 第 7 周 |
+| [PagedAttention / vLLM](https://arxiv.org/abs/2309.06180) | SOSP 2023 | KV 缓存分页 | 第 8 章 |
+| [Orca](https://www.usenix.org/conference/osdi22/presentation/yu) | OSDI 2022 | 连续批处理 | 第 10 章 |
+| [SGLang](https://arxiv.org/abs/2312.07104) | NeurIPS 2024 | RadixAttention、前缀复用 | 第 10 章 |
+| [SARATHI](https://arxiv.org/abs/2308.16369) / [Sarathi-Serve](https://arxiv.org/abs/2403.02310) | OSDI 2024 | 分块 prefill | 第 10 章 |
+| [DistServe](https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin) | OSDI 2024 | prefill/decode 解耦 | 第 14 章 |
+| [Splitwise](https://arxiv.org/abs/2311.18677) | ISCA 2024 | 按阶段拆分到不同 GPU | 第 15 章 |
+| [Mooncake](https://arxiv.org/abs/2407.00079) | FAST 2025 | 以 KV 缓存为中心的服务 | 第 15 章 |
+| [StreamingLLM](https://arxiv.org/abs/2309.17453) | ICLR 2024 | 注意力汇、长上下文 | 第 13 章 |
+| [EAGLE](https://arxiv.org/abs/2401.15077) | arXiv | 投机采样 | 第 13 章 |
 
 GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention 系列，请用 [Lilian Weng 的综述](https://lilianweng.github.io/posts/2023-01-10-inference-optimization/)和 [NVIDIA 优化综述](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/)，它们直接引用了这些工作。搜精确标题，不要猜 arXiv 编号。
 
@@ -2640,13 +2640,13 @@ GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention
 
 ### 阅读习惯
 
-每周 30 分钟：扫 arXiv cs.DC 和系统会议的标题，只读一篇论文的摘要、方法图和实验，并在 [vLLM](https://blog.vllm.ai) 和 [LMSYS](https://lmsys.org/blog/) 博客以及 [Modal Almanac](https://modal.com/llm-almanac/summary) 上跟踪应用型写作。读系统论文，跳过模型发布的新闻稿。
+读论文按问题驱动，不按固定配额：先扫 arXiv cs.DC 和系统会议的标题，挑与当前服务直接相关的一篇，只读摘要、方法图和实验；再在 [vLLM](https://blog.vllm.ai) 和 [LMSYS](https://lmsys.org/blog/) 博客以及 [Modal Almanac](https://modal.com/llm-almanac/summary) 上跟踪应用型写作。读系统论文，跳过模型发布的新闻稿。
 
 ---
 
 ## 关于来源的说明
 
-这里的每个视频都有具名的讲者——来自大学、引擎团队或会议——并且配有覆盖同样内容的文字材料，所以你可以读而不是看。没有视频达到这个标准的地方，这一周就是纯文字，而不是硬凑。
+这里的每个视频都有具名的讲者——来自大学、引擎团队或会议——并且配有覆盖同样内容的文字材料，所以你可以读而不是看。没有视频达到这个标准的地方，这一章就是纯文字，而不是硬凑。
 
 还有几点要注意：
 
@@ -2662,7 +2662,7 @@ GPTQ、AWQ、SmoothQuant、LLM.int8()、Medusa、H2O、SnapKV 和 FlashAttention
 
 - 失效或搬家的链接
 - 取代了这里某项内容的新的一手资料
-- 达到标准的视频（具名讲者、可信机构、配有文字），给目前标记为纯文字的周
+- 达到标准的视频（具名讲者、可信机构、配有文字），给目前标记为纯文字的章节
 - 如果你走完了路线图，你自己的 benchmark 写作
 
 开 issue 或 PR。

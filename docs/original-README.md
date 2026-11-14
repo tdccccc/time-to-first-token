@@ -1,5 +1,8 @@
 ![Learn LLM Inference Serving by Shipping One Service](../assets/banner.png)
 
+> **存档说明**：这是改写前的英文原稿，保留作对照，不是现行读法。文中的“10 周、每天 30 分钟、50 次课”是旧结构；现行版本已改为 5 部分 31 章，按章阅读，不再使用这套学习计划。技术内容以中文正文为准。
+
+
 # Learn LLM Inference Serving by Shipping One Service
 
 A 10-week, 30-minutes-a-day roadmap for engineers who want to actually run LLM inference in production, not just read about it.
