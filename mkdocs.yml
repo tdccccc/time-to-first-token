@@ -1,0 +1,41 @@
+# 学习计划的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
+# Markdown 仍是唯一事实来源：改内容请改 md，推送后 Actions 自动重新生成上线。
+# 本地预览：~/workspace/.venv-mkdocs/bin/mkdocs serve
+site_name: 边做边学 LLM 推理服务
+site_url: https://tdccccc.github.io/time-to-first-token/
+repo_url: https://github.com/tdccccc/time-to-first-token
+repo_name: tdccccc/time-to-first-token
+# MkDocs 不允许 docs_dir 就是仓库根目录，所以先由 site-build.sh 把
+# Markdown（README.md、progress.md、docs/、assets/、tracker/）原样复制到
+# site-src/ 再构建；布局和仓库一致，内部链接不需要改。
+docs_dir: site-src
+site_dir: site
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - M1 · 框架路线图: README.md
+  - 模块地图: docs/MODULES.md
+  - M0 · 基础与度量: docs/modules/M0-foundations/README.md
+  - M2 · 算子优化: docs/modules/M2-operators/README.md
+  - M3 · 国产芯片适配: docs/modules/M3-domestic-chips/README.md
+  - 附录:
+      - 进度跟踪清单: progress.md
+      - M0 · 基线报告模板: docs/modules/M0-foundations/baseline-report-template.md
+      - M3 · 跨芯片对比报告模板: docs/modules/M3-domestic-chips/cross-chip-report-template.md
+      - 上游英文原文: docs/original-README.md
+  - 进度打卡页: tracker/index.html
