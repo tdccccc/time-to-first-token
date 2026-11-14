@@ -220,6 +220,23 @@ TERM_GLOSSARY = [
     {"id": "rag", "aliases": ("RAG",), "en": "Retrieval-Augmented Generation", "zh": "检索增强生成", "desc": "先从外部知识库检索相关文档，再把结果交给模型生成"},
 ]
 
+CHAPTER_FIGURE_PLACEMENT = {
+    1: (3, 1),    # 1.3 prefill/decode points on the Roofline
+    2: (None, 1), # chapter opens with the metric question; figure before the table
+    6: (1, 1),    # 6.1 three bottleneck buckets
+    8: (1, 1),    # 8.1 PagedAttention block mapping
+    10: (4, 1),   # 10.4 continuous batching
+    11: (4, 1),   # 11.4 throughput knee
+    12: (1, 1),   # 12.1 weight volume by precision
+    13: (2, 1),   # 13.2 proposer/scorer/verifier pipeline
+    14: (1, 1),   # 14.1 prefill/decode separation
+    15: (2, 1),   # 15.2 Mooncake request path
+    19: (2, 1),   # 19.2 measurement bench and optimization ladder
+    22: (3, 1),   # 22.3 fused dequant+matmul
+    25: (2, 1),   # 25.2 software stack layers
+    27: (3, 1),   # 27.3 plugin position in the stack
+}
+
 M1_WEEK_TO_CH = {
     "1": 6, "1续": 7, "2": 8, "3": 9, "4": 10, "5": 11, "6": 12,
     "7": 13, "8": 14, "8续": 15, "9": 16, "10": 17, "11": 18,
@@ -383,34 +400,68 @@ OUTPUT_LABEL_RE = re.compile(r"^\*\*(?:本章产出|产出|产出物)([。：:]?
 BUFFER_LABEL_RE = re.compile(r"^\*\*缓冲\*\*.*$")
 
 
-def chapter_brief(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Pull the chapter-level goal out of the intro into a card."""
-    items: list[tuple[str, str]] = []
+def chapter_goal(lines: list[str]) -> tuple[list[str], list[str]]:
+    """Extract the chapter-level goal as plain prose."""
+    goals: list[str] = []
     kept: list[str] = []
     for line in lines:
         match = BRIEF_RE.match(line)
         if match:
             if match.group(1) == "本章目标":
-                items.append((match.group(1), match.group(2).strip()))
+                goals.append(match.group(2).strip())
             continue
         kept.append(line)
-    if not items:
-        return [], lines
-    out = ['<div class="chapter-brief">']
-    for label, body in items:
-        kind = "goal" if label == "本章目标" else "output"
-        out += [
-            f'<div class="chapter-brief__item chapter-brief__item--{kind}">',
-            f'<span class="chapter-brief__label">{label}</span>',
-            '<div class="chapter-brief__body" markdown>',
-            "",
-            body,
-            "",
-            "</div>",
-            "</div>",
-        ]
-    out += ["</div>"]
-    return out, kept
+    return goals, kept
+
+
+def insert_figure_after_paragraphs(
+    lines: list[str], figure: list[str], after_paragraphs: int = 1
+) -> list[str]:
+    """Insert a figure after the Nth prose block in a section."""
+    if not figure or after_paragraphs <= 0:
+        return lines
+    out: list[str] = []
+    prose_seen = 0
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip():
+            out.append(lines[i])
+            i += 1
+            continue
+        first = lines[i]
+        stripped = first.lstrip()
+
+        # Keep fenced blocks together and do not count them as prose.
+        if stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+            out.append(lines[i])
+            i += 1
+            while i < len(lines) and not lines[i].lstrip().startswith(fence):
+                out.append(lines[i])
+                i += 1
+            if i < len(lines):
+                out.append(lines[i])
+                i += 1
+            continue
+
+        block: list[str] = []
+        while i < len(lines) and lines[i].strip():
+            block.append(lines[i])
+            i += 1
+
+        is_prose = not (
+            stripped.startswith(("#", "|", "<", ">", "---"))
+            or re.match(r"^(?:[-*+]\s|\d+\.\s)", stripped)
+            or KEYLINE_RE.match(first)
+        )
+        out.extend(block)
+        if is_prose:
+            prose_seen += 1
+            if prose_seen == after_paragraphs:
+                out += ["", *figure, ""]
+    if prose_seen < after_paragraphs:
+        out += ["", *figure, ""]
+    return out
 
 
 def chapter_figure(chapter: Chapter) -> list[str]:
@@ -532,7 +583,7 @@ def glossary_annotation(term: str, entry: dict[str, str]) -> str:
         inside = f"{en}：{desc}"
     else:
         inside = f"{en}，{zh}：{desc}"
-    return f"{term}（{inside}）"
+    return f'{term}<span class="term-def">（{inside}）</span>'
 
 
 class TermAnnotator:
@@ -680,6 +731,11 @@ def format_blocks(lines: list[str], references: list[str] | None = None) -> list
 
         if line.startswith("```"):
             blank()
+            raw_info = line.strip()[3:].strip()
+            lang = raw_info.split()[0] if raw_info else ""
+            lang = re.sub(r"[^A-Za-z0-9_+-]", "", lang)
+            data_attr = f' data-lang="{html.escape(lang, quote=True)}"' if lang else ""
+            out += [f'<div class="code-block"{data_attr} markdown>', ""]
             if line.strip() == "```":
                 out.append("```text")
             else:
@@ -691,6 +747,7 @@ def format_blocks(lines: list[str], references: list[str] | None = None) -> list
             if i < len(lines):
                 out.append(lines[i])
                 i += 1
+            out += ["", "</div>"]
             blank()
             continue
 
@@ -704,8 +761,16 @@ def format_blocks(lines: list[str], references: list[str] | None = None) -> list
 
         match = KEYLINE_RE.match(line)
         if match:
-            blank()
             kind = KEYLINE_KIND.get(match.group(1), "note")
+            if kind == "goal":
+                rest = line[match.end():].lstrip("。：: ")
+                if rest:
+                    blank()
+                    out.extend(split_long_paragraph(rest))
+                    blank()
+                i += 1
+                continue
+            blank()
             out += [f'<div class="keyline keyline--{kind}" markdown>', "", line, "", "</div>"]
             blank()
             i += 1
@@ -1120,29 +1185,26 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
         "m4": "docs/modules/M4-capstone",
     }[module]
     summary = CHAPTER_SUMMARIES.get(chapter.num, "")
-    count_label = f"{len(section_titles)} 节" if section_titles else "专题"
     out: list[str] = [
-        '<div class="chapter-cover" markdown>',
-        "",
-        f'<div class="chapter-kicker">{PART_CN[chapter.part]} · {PART_TITLES[chapter.part]}</div>',
-        "",
         f'# 第 {chapter.num} 章 {chapter.title} {{ .chapter-title }}',
         "",
-        f'<p class="chapter-summary">{html.escape(summary)}</p>' if summary else "",
-        f'<div class="chapter-meta"><span>{count_label}</span>' + ('<span>选读</span>' if chapter.optional else '') + '</div>',
-        "",
-        "</div>",
-        "",
     ]
+    if summary:
+        out += [f'<p class="chapter-summary">{html.escape(summary)}</p>', ""]
     intro_lines = transform_lines(intro, module, chapter) if intro else []
-    brief, intro_lines = chapter_brief(intro_lines)
-    if brief:
-        out += brief
-        out.append("")
+    goals, intro_lines = chapter_goal(intro_lines)
+    if goals:
+        goal_text = "；".join(html.escape(goal) for goal in goals)
+        out += [
+            f'<p class="chapter-goal"><strong>本章目标</strong>：{goal_text}</p>',
+            "",
+        ]
     figure_lines = chapter_figure(chapter)
-    if figure_lines:
-        out += figure_lines
-        out.append("")
+    placement = CHAPTER_FIGURE_PLACEMENT.get(chapter.num, (None, 1) if not sections else (1, 1))
+    target_section, figure_after = placement
+    if figure_lines and target_section is None:
+        intro_lines = insert_figure_after_paragraphs(intro_lines, figure_lines, figure_after)
+        figure_lines = []
     references: list[str] = []
     if intro_lines:
         out += format_blocks(intro_lines, references)
@@ -1156,7 +1218,13 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
             title = section_titles[sec - 1]
             out.append(f"## {chapter.num}.{sec} {title}")
             out.append("")
-            out += format_blocks(transform_lines(chunk[1:], module, chapter), references)
+            section_lines = transform_lines(chunk[1:], module, chapter)
+            if figure_lines and target_section == sec:
+                section_lines = insert_figure_after_paragraphs(
+                    section_lines, figure_lines, figure_after
+                )
+                figure_lines = []
+            out += format_blocks(section_lines, references)
             out.append("")
         else:
             level = subhead_level(h, module)
@@ -1165,6 +1233,8 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
             out.append("")
             out += format_blocks(transform_lines(chunk[1:], module, chapter), references)
             out.append("")
+    if figure_lines:
+        out += ["", *figure_lines, ""]
     out = TermAnnotator().annotate_lines(out)
     unique_refs: list[str] = []
     seen_refs: set[str] = set()
