@@ -631,7 +631,7 @@ running 与 waiting 要分开量，因为它们指向不同瓶颈。waiting 在�
 
 延迟直方图量的是单个请求的耗时分布。vLLM 在 `/metrics` 上暴露一串带 `vllm:` 前缀的直方图，最常用的四个是 `vllm:time_to_first_token_seconds`（TTFT）、`vllm:inter_token_latency_seconds`（ITL，相邻两次流式输出之间的间隔）、`vllm:request_time_per_output_token_seconds`（TPOT，每个完成请求记一个样本）与 `vllm:e2e_request_latency_seconds`（端到端延迟）。这些名字按 vLLM 当前版本文档核对过；换版本后，先 `curl /metrics` 确认它们还在。
 
-每个直方图在 Prometheus 里展开成 `_bucket`、`_sum`、`_count` 三组序列。`_count` 是样本总数，`_sum` 是全部样本之和，平均数是 `_sum` 除以 `_count`：某段时间 `_sum` 是 32 秒、`_count` 是 100，平均延迟就是 32 ÷ 100 = 0.32 秒。分位数从 `_bucket` 里读：桶按延迟区间划分，样本落在哪个区间就计入哪个桶，`le` 是桶的上界（less or equal），p95 落在累计样本数第一次超过 95% 的那个桶里。分位数的误差由那个桶的宽度决定：桶越细，读数越准；p95 落在 0.5 秒到 1 秒的桶里，就只能报到“在这个区间里”，没法更细。vLLM 的桶边界在启动时定死；`request_latency` 这一族（端到端、排队、prefill、decode 等）的默认最小边界是 0.3 秒，要看 300 毫秒以下的 SLO，得用 `--custom-histogram-buckets` 换边界，代价是每个边界都多一条时间序列。
+每个直方图在 Prometheus 里展开成 `_bucket`、`_sum`、`_count` 三组序列。`_count` 是样本总数，`_sum` 是全部样本之和，平均数是 `_sum` 除以 `_count`：某段时间 `_sum` 是 32 秒、`_count` 是 100，平均延迟就是 32 ÷ 100 = 0.32 秒。分位数从 `_bucket` 里读：桶按延迟区间划分，样本落在哪个区间就计入哪个桶，`le` 是桶的上界（less or equal），p95 落在累计样本数第一次超过 95% 的那个桶里。分位数的误差由那个桶的宽度决定：桶越细，读数越准；p95 落在 0.5 秒到 1 秒的桶里，就只能报到“在这个区间里”，没法更细。vLLM 的桶边界随版本固定；看板上的 p95 落在哪个桶，就只能报那个区间。桶边界以当前版本的文档或源码为准；分位数报得比桶边界更细，就是把插值当成了测量。
 
 四个延迟指标之间有一条分解链。TTFT 从前端收到请求算起（`arrival_time` 从 tokenization 开始计时）到第一个 token 生成，包含前端输入处理、排队与 prefill 三段，外加前端到引擎的传递开销。vLLM 把后两段单独记成直方图：`vllm:request_queue_time_seconds` 从请求到达引擎核心（QUEUED 事件）到第一次被调度（SCHEDULED），`vllm:request_prefill_time_seconds` 从 SCHEDULED 到第一个 token（NEW_TOKENS）。排队 0.5 秒、prefill 0.3 秒，这两段加起来 0.8 秒，是 TTFT 里能被这两个直方图解释的部分；输入处理与传递开销不在其中。
 
