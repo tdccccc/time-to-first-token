@@ -11,7 +11,6 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <rect x="50" y="150" width="110" height="70" rx="8" fill="#fff" stroke="#dbe3ef"/>
 <text x="105" y="180" class="small" text-anchor="middle">router</text><text x="105" y="200" class="small" text-anchor="middle">请求入口</text>
 <line x1="162" y1="170" x2="235" y2="125" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
-<line x1="162" y1="200" x2="555" y2="270" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
 <rect x="240" y="80" width="270" height="100" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
 <text x="375" y="110" class="label" text-anchor="middle">prefill 池</text>
 <text x="375" y="135" class="small" text-anchor="middle">算力密集，适合大 batch 的 prefill</text>

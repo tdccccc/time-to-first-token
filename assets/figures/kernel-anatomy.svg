@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="kernel 时间账与三种瓶颈的判断流程">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:22px;font-weight:700;fill:#1f2937}.sub{font-size:14px;fill:#6b7280}
+.label{font-size:16px;font-weight:700;fill:#1f2937}.small{font-size:12px;fill:#4b5563}
+.formula{font-size:13px;fill:#374151}.hint{font-size:12px;fill:#6b7280}
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+</defs>
+<rect width="900" height="430" fill="#fbfcfe"/>
+<text x="40" y="42" class="title">一个 kernel 慢：先看它在等什么</text>
+<text x="40" y="65" class="sub">把计算、显存搬运、启动同步分别估出来；最大的一项决定优化方向。</text>
+
+<g>
+<rect x="40" y="90" width="250" height="164" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
+<text x="60" y="119" class="label">计算时间</text>
+<text x="60" y="143" class="formula">FLOPs ÷ 峰值算力</text>
+<text x="60" y="169" class="small">典型：大矩阵乘、长 prompt</text>
+<text x="60" y="189" class="small">判断：算术强度 &gt; 脊点</text>
+<text x="60" y="217" class="hint">动作：更好 tiling、低精度、少算</text>
+</g>
+
+<g>
+<rect x="325" y="90" width="250" height="164" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
+<text x="345" y="119" class="label">显存搬运</text>
+<text x="345" y="143" class="formula">字节数 ÷ 有效带宽</text>
+<text x="345" y="169" class="small">典型：decode 读权重、逐元素链</text>
+<text x="345" y="189" class="small">判断：算术强度 &lt; 脊点</text>
+<text x="345" y="217" class="hint">动作：量化、融合、复用、少读写</text>
+</g>
+
+<g>
+<rect x="610" y="90" width="250" height="164" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+<text x="630" y="119" class="label">启动与同步</text>
+<text x="630" y="143" class="formula">launch + sync + 调度</text>
+<text x="630" y="169" class="small">典型：小 kernel、采样、逐元素</text>
+<text x="630" y="189" class="small">判断：输入放大后时间基本不变</text>
+<text x="630" y="217" class="hint">动作：融合、CUDA Graph、合并启动</text>
+</g>
+
+<rect x="40" y="278" width="820" height="52" rx="9" fill="#f8fafc" stroke="#cbd5e1"/>
+<text x="60" y="299" class="label">总时间 ≈ max（计算时间，搬运时间，启动与同步）</text>
+<text x="60" y="318" class="small">这是近似：重叠执行会让实测略低，但省不掉最大那一项本身。</text>
+
+<line x1="450" y1="336" x2="450" y2="354" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="260" y="360" width="380" height="38" rx="8" fill="#e0e7ff" stroke="#c7d2fe"/>
+<text x="450" y="384" class="small" text-anchor="middle" style="font-weight:600;fill:#1f2937">先记录最大项，再用 ncu / 压测验证；不要只凭总时间猜</text>
+<text x="40" y="419" class="hint">示意：小 kernel 的启动开销可能比计算和搬运都大；大 decode 通常由带宽决定。</text>
+</svg>
