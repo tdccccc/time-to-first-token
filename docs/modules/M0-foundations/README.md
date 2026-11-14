@@ -187,25 +187,113 @@ Token 间延迟（ITL，inter-token latency，也叫 TPOT，time per output toke
 **延伸**：PyTorch 官方 Profiler 文档、[GPU MODE 讲座](https://github.com/gpu-mode/lectures)中 profiling 相关章节。
 ## 第 4 章 · 写压测脚本：`bench_openai.py`
 
-**目标**：有一套自己的、可复现的压测工具，后续所有模块都用它，数字之间才能比较。
+**本章目标。** 读懂并跑通 bench_openai.py 这个只用 Python 标准库的压测脚本，它面向提供 /v1/chat/completions 的 OpenAI 兼容服务，固定输入、输出上限与并发条件；说清首 token 延迟、token 间延迟与吞吐每个数是怎么算出来的。
 
-**怎么做**（60 分钟，无 GPU 可做，纯 Python）：
+压测工具的价值不在它测得多快，在它每次测的条件都一样。手动发请求，换个时间、换个 prompt、换个输出长度，数字就全变了，上一轮的数和这一轮比不了。`bench_openai.py`（[源码](scripts/bench_openai.py)）把会变的条件钉死：固定 prompt、固定 `--max-tokens`、固定并发档位与每档请求数，用同一套计时和统计口径输出结果。脚本只用 Python 标准库，不需要 GPU——GPU 在服务端，客户端只负责发请求、读流、记时间。
 
-这节只干一件事，就是把第 2 节那张表里的量变成一个每次运行都给出同样答案的程序。先读 [scripts/bench_openai.py](scripts/bench_openai.py)，它是本模块的产物，只用 Python 标准库，不需要 GPU 也可以跑通逻辑。脚本量的是四个量：TTFT、总延迟、ITL 和 token 数。为什么要写成脚本，而不是每次手动发请求看一眼？手动发请求看到的数没法复现：换个时间、换个 prompt、换个输出长度，数字全变了，上一周的数和这一周的数比不了。脚本的作用，是把所有会变的条件钉死，只让被测对象变。钉死的东西后面会逐项讲，先把这句话立住：压测工具的价值不在它测得多快，在它每次测的条件都一样。脚本只用 Python 标准库，不需要 GPU 也可以跑通逻辑——GPU 在服务端，脚本这边只有计时与解析。
+### 为什么必须是流式
 
-脚本打的是 OpenAI 兼容接口的 `/v1/chat/completions`，而且是流式。为什么必须是流式？TTFT 只能从流里读出来：第一个 chunk 到达的时刻就是首个 token 产生的时刻。非流式请求要等整个回答生成完才返回，只给一个总延迟，TTFT 藏在里面出不来。流式返回是一行行以 data: 开头的 SSE（Server-Sent Events，服务器推送事件）chunk，最后一行是 [DONE]，表示流结束。脚本逐行读这些 chunk，记下第一个 chunk 到达的时间、最后一个 chunk 到达的时间，三个时间量就从这一行行 chunk 里长出来了。反过来，选接口就是选尺子：M1 第 5 周换引擎、第 6 周换量化、第 7 周换解码方法，量的都是同一个接口后面的变化，接口换了，数字之间就没法比较了。
+脚本打的是 OpenAI 兼容接口的 `/v1/chat/completions`，请求体里 `stream` 设为 `true`。首 token 延迟（TTFT，Time to First Token）只能从流里读出来：非流式请求要等整个回答生成完才返回，客户端只拿到一个总延迟，第一个 token 什么时候出来藏在里面。流式返回把生成过程一段段推回来，客户端从第一个 chunk 到达起就能计时；这个时刻就是脚本记的 TTFT。
 
-三个时间量先分清，再算。TTFT 是从发请求到收到第一个 chunk 的时间；总延迟是从发请求到收到最后一个 chunk 的时间；ITL 是相邻两个 token 之间的平均时间，算式是（总延迟 − TTFT）÷（token 数 − 1）。分母为什么是 token 数减 1，不是 token 数？token 之间有几段间隔，数一数就知道了：5 个 token 之间是 4 段间隔，128 个 token 之间是 127 段间隔。拿一组数走一遍：总延迟 12.8 秒，TTFT 0.8 秒，128 个 token，ITL = (12.8 − 0.8) ÷ 127 = 12 ÷ 127 ≈ 0.0945 秒。验算一下：127 × 0.0945 ≈ 12.0015，基本就是 12 秒，账是平的。TTFT 与 ITL 为什么要分开报？第 2 节已经讲过，这里的算式让理由更具体：TTFT 里装的是 prefill 的时间，ITL 里装的是 decode 的节奏，一个管"等多久才看到东西"，一个管"输出流不流畅"。压成一个"延迟"，等于把 prefill 与 decode 的结论混在一起，第 1 节 Roofline 里 prefill 与 decode 分属两个区间的结论也就没法验证了。分开报不是格式要求，是第 1 节的物理结论在测量上的对应物。
+流式响应体是 SSE（Server-Sent Events，服务器推送事件）：一行行 `data: {...}`，最后一行 `data: [DONE]`。脚本逐行读，遇到第一个非 `[DONE]` 的 JSON 记 TTFT，读到 `[DONE]` 或连接结束记总延迟。
 
-token 数是 ITL 的分母，也是吞吐的分子，数错了，两个数全错。脚本数 token 的办法分两档，一档是读数，一档是估算。读数优先：优先读流式最后一个 chunk 的 `usage.completion_tokens`，vLLM 支持 `stream_options.include_usage`，开了这个选项，服务器会在最后一个 chunk 里把用量带回来，这是服务器自己数的，最准。服务器不支持时退一步估算：按字符数估算，并在结果里标明是估计值。估算的办法是字符数除以 4——英文平均约 4 个字符一个 token，这是个经验换算，不是测量。估算值要标明，是因为它是有偏的：中文字符占比高时，一个字符往往就是一个 token 甚至更多，字符数除以 4 会把 token 数低估，ITL 与吞吐跟着被带偏。标明估计值，就是告诉读数的人，这两个数的底气比 TTFT 弱一档。反过来，TTFT 不依赖 token 数，估算再偏也碰不到它：TTFT 只看第一个 chunk 到达的时刻，分母里没有 token 数。读一份压测结果的时候，先看 token 数是实测还是估计，再决定 ITL 与吞吐能信几分，这个顺序就是这一节的读数方法。
+chunk 是传输单位，不是 token 单位：一个 chunk 可能带 0 个、1 个或多个 token。脚本把第一个流式 chunk 当作 TTFT 的终点，这个口径要固定；跨服务端比较时，各家的切 chunk 粒度不同，TTFT 的口径也会跟着变，比较前先确认两边都按第一个 chunk 计时。要更严格，可以改成“第一个 `delta.content` 非空的 chunk”；两种口径都能用，但同一份报告里不能混用。
 
-固定长度是脚本的另一条主线。脚本固定 prompt 与 `--max-tokens`，按 `--concurrency` 列表逐级扫并发，每级固定 `--requests` 个请求，输出 JSON 与 Markdown 表格。固定 prompt 与输出长度，理由在第 2 节的固定长度原则里：KV 缓存的大小完全由输入输出长度决定，长度一变，吞吐跟着变，数字就没法比较。逐级扫并发，理由是只测一个并发点看不出拐点：并发 1 的数再干净，也回答不了"系统能顶到几并发"，拐点要扫出来，不是猜出来。每级固定 `--requests` 个请求，理由是样本量相同，分布才可比：每级 20 个请求，p50 是第 10 个与第 11 个顺序值的中间，p95 的秩是 (20 − 1) × 0.95 = 18.05，基本由最慢的一两个请求决定。p95 的底气薄到这个程度，读 p95 的时候就要知道，它反映的是尾巴，不是整体。输出分两种，JSON 存每个请求的原始记录与每一级的汇总，留着以后复算；Markdown 表格打印到终端，给人一眼读：并发、成功、TTFT p50/p95、ITL p50、吞吐。表格的每一列都要会读：并发是本级压了多少路；成功是成功数比请求数，失败的请求不进统计，成功数掉了先查服务，而不是先读数；TTFT p50 与 p95 是首 token 延迟的分布，一半请求与 95% 的请求分别比它快；ITL p50 是 decode 节奏的中位数；吞吐是总 token 数除以整级的耗时，是系统级的产出，不是单请求 token 数除以单请求时间——这个区别要分清，ITL 是请求级的，吞吐是系统级的，两个数一个管流畅，一个管产出。
+选接口就是选尺子：第 10 章换引擎、第 12 章换量化、第 13 章换解码方法，量的都是同一个 `/v1/chat/completions` 后面的变化。接口与请求字段固定，数字之间才有可比性。
 
-**验证脚本本身**（无 GPU 可做）：用一个本地 mock SSE 服务跑通一次——2026-11-12 已对本地 mock SSE 服务器跑通过：mock 服务每 10ms 吐一个 chunk，脚本测出的 ITL 应为约 0.011s，TTFT 接近 0，并发 4 时的吞吐应约为并发 1 的数倍（mock 服务无真实瓶颈，仅验证测量逻辑）。这三个数每一个都能算出为什么。ITL 约 0.011 秒，是 10ms 的 chunk 间隔加上约 1ms 的开销：理想情况下 ITL 就是 0.010 秒，实测 0.011 秒，多出来的 1ms 是解析 chunk、记时间、拼文本的开销。拿默认输出 128 个 token 走一遍：总延迟减 TTFT 是 127 × 0.011 ≈ 1.397 秒，理想值是 127 × 0.010 = 1.27 秒，两者差 0.127 秒，摊到 127 段间隔上，每段正好约 1ms，账是平的。TTFT 接近 0，是因为 mock 没有真实的 prefill 计算：首 chunk 在请求到达后立即发出，TTFT 里只剩网络与解析的开销，是毫秒级；相对 1.397 秒的总延迟，TTFT 若为 0.002 秒，占比只有约 0.14%。"接近 0"是相对总延迟而言的，不是真的等于 0。并发 4 的吞吐约为并发 1 的 4 倍，也是算出来的：mock 里没有真实瓶颈，4 路并行互不干扰，wall 时间除以 4，总 token 数不变，吞吐就乘以 4。按默认 128 个 token、每级 20 个请求推算，每请求约 1.397 秒，并发 1 时 20 个请求串行，wall 时间约 27.94 秒，总 token 数 2560，吞吐约 91.6 tok/s；并发 4 时 5 批跑完，wall 时间约 6.99 秒，吞吐约 366.5 tok/s，比值正好是 4.00。实测比值偏离 4，先查 mock 本身有没有串行化，而不是庆祝。
+### 三个时间量怎么算
 
-mock 验证能证明什么、不能证明什么，要分得清清楚楚。能证明的是尺子本身：计时逻辑、流式解析、并发脚手架、JSON 与表格输出全通了，脚本没有把时间记错、没有把 chunk 解析错。不能证明的是真实服务的任何性能数字：真实服务里有 prefill 计算、KV 缓存、显存带宽、调度排队，mock 里全都没有。打个比方，mock 验证像拿标准砝码校秤：砝码验的是秤准不准，秤准了不代表货物有多重。一个常见的误解：mock 上吞吐高，等于服务快——不是，mock 上跑出来的数只说明尺子没坏，服务的快慢要到第 5 节的真服务上量。尺子与被测对象是两回事，mock 验的是前者。
+脚本在发请求前记下 `start = time.perf_counter()`；第一个 chunk 到达时记 `ttft = now - start`；最后一个 chunk 到达时记 `total = now - start`。三个时间量由此得到：
 
-**产出**：在你自己的机器上跑通 `python3 scripts/bench_openai.py --help`，并理解输出表格里每一列的含义。
+- TTFT：从发请求到收到第一个 chunk 的时间。
+- 总延迟：从发请求到收到最后一个 chunk 的时间。
+- ITL（Inter-Token Latency，token 间延迟）：相邻两个输出 token 之间的平均时间。
+
+ITL 的算式是 `(total - TTFT) / max(tokens - 1, 1)`。分母是 token 数减一：128 个 token 之间有 127 段间隔。脚本用 `max(tokens - 1, 1)` 防止只输出 1 个 token 时除零；只有 1 个 token 时没有间隔，这个 ITL 实际是首 token 到流结束的那段时间，读到时要知道它是边界情况。
+
+设总延迟 12.8 s，TTFT 0.8 s，128 个 token：ITL = (12.8 − 0.8) ÷ 127 = 12 ÷ 127 ≈ 0.0945 s。验算：127 × 0.0945 ≈ 12.0015 s，与 12.0 s 一致。
+
+TTFT 里包含排队、prefill、网络与客户端解析；ITL 里包含 decode 的每一步以及每个 chunk 的网络与解析。两个都是客户端观测值，不是 GPU 时间；要把 GPU 内部的时间拆开，得用第 3 章的 profiler，排队与网络的部分要靠服务端指标或对照实验。第 1 章 Roofline 说 prefill 与 decode 落在不同区间，TTFT 与 ITL 分开报，才给这个结论提供可验证的读数。
+
+脚本算的是平均 ITL，不是每一步的分布；单步抖动被平均掉了。要看抖动，得另外记录每个 chunk 的到达时间，这一版没有做。
+
+### token 数与固定长度
+
+token 数是 ITL 的分母，也是吞吐的分子，数错了两个数都错。脚本的取法分两档：
+
+1. 优先读 `usage.completion_tokens`。请求里带 `stream_options: {"include_usage": true}`，vLLM 等支持这个字段的服务会在最后一个 chunk 里返回 usage；这是服务端自己数的 token 数。
+2. 服务端不支持时，按字符数估算：`max(1, len(text) // 4)`，`text` 是所有 `delta.content` 拼起来的文本。`// 4` 是英文经验值，平均约 4 个字符一个 token；中文一个字符往往就是一个 token 甚至更多，字符数除以 4 会低估 token 数。分母被低估，ITL 会偏大；分子被低估，吞吐会偏小。
+
+脚本固定带上 `stream_options`；如果服务端不认这个字段并直接报错，这一级会整级失败——脚本不会自动去掉它再重试，遇到时要么换支持的服务端，要么改脚本去掉该字段，token 数就退化为估算。
+
+估算值在 JSON 里用 `tokens_estimated` 标记：本级只要有一个请求是估算的，整级就标 `true`。TTFT 不受影响，它的算式里没有 token 数。读结果时先看这个标记，再决定 ITL 与吞吐能信几分。
+
+参数与默认值：
+
+| 参数 | 默认值 | 作用 |
+|---|---|---|
+| `--base-url` | 必填 | 服务地址；脚本拼上 `/v1/chat/completions` |
+| `--model` | 必填 | 服务端的模型名 |
+| `--max-tokens` | 128 | 输出 token 上限 |
+| `--concurrency` | 1 8 32 | 逐级扫描的并发档位 |
+| `--requests` | 20 | 每档的请求数 |
+| `--timeout` | 300 | 单请求的 socket 超时，单位秒 |
+| `--output` | bench-results.json | 结果 JSON 的路径 |
+
+固定长度是脚本的另一条主线。prompt 是脚本里的常量 `Explain why the sky is blue in one short paragraph.`；`--max-tokens` 默认 128。固定 prompt 就是固定 prefill 的输入长度；`--max-tokens` 固定的是输出上限，不是每个请求的实际输出：模型遇到 EOS（end of sequence，序列结束标记）会提前停，实际 token 数以服务端返回的 `completion_tokens` 为准，脚本用它算 ITL 与吞吐。长度决定 KV 缓存大小与 decode 步数，长度一变，延迟与吞吐跟着变，两次结果就没法比。这是第 2 章固定长度原则在脚本里的落地。
+
+温度设为 0，减少采样随机性；温度 0 不等于逐位可复现，生成长度仍可能因 EOS 的位置而变。要严格固定实际长度，得选一个能稳定跑满 `--max-tokens` 的 prompt，或者在脚本里补上每请求长度的记录——当前汇总不保存这个数。
+
+脚本按 `--concurrency` 列表逐级扫：每级提交 `--requests` 个请求，用 `ThreadPoolExecutor(max_workers=concurrency)` 限制同时在途的请求数；所有请求结束后，用整级墙钟时间（wall time，从提交第一个请求到最后一个请求完成的真实时间）算吞吐：`吞吐 = 本级成功请求的 completion_tokens 之和 / wall_s`。并发是客户端同时在途的请求数，不是服务端同时执行的请求数，服务端调度、排队与 KV 限制都会让两者不同；第 5 章会专门看这个差别。
+
+输出分两种。JSON 记录顶层条件（`base_url`、`model`、`max_tokens`、`prompt`）与每一级的汇总：`concurrency`、`ok`、`requests`、`wall_s`、`ttft_s` 的 `mean/p50/p95/p99`、`itl_s` 的 `mean/p50/p95`、`throughput_tok_per_s`、`tokens_estimated`。它不保存每个请求的原始记录；单请求的 `total_s` 也没有进入汇总，只在 `stream_request` 内部参与 ITL 计算。Markdown 表格打印五列：并发、成功、TTFT p50 / p95、ITL p50、吞吐。失败的请求不进延迟与 token 统计，但它们占用的时间仍计入 wall，所以吞吐会被拉低；全失败时该级显示失败原因。
+
+百分位用线性插值，与第 2 章、第 5 章同一口径：先把本级的值排序，算 `rank = (n − 1) × p / 100`，再在相邻两个值之间插值。20 个请求时，p95 的秩是 19 × 0.95 = 18.05，落在下标 18 与 19 之间，取 `0.95 × x[18] + 0.05 × x[19]`；p99 的秩是 19 × 0.99 = 18.81，取 `0.19 × x[18] + 0.81 × x[19]`。样本只有 20 个，p95 基本由最慢的一两个请求决定，p99 基本就是最慢的那一个。表格只印 TTFT 的 p50/p95 与 ITL 的 p50；JSON 里 TTFT 有 p99，ITL 只有 p50/p95，没有 p99。
+
+### mock 验证能证明什么
+
+验证脚本不需要 GPU：起一个本地 mock SSE 服务，让它按固定节奏吐 chunk，看脚本量出来的时间是否与设定一致。仓库里没有现成的 mock 脚本；把下面这段代码复制出来存成 `mock_sse.py` 运行，它监听 8400 端口：
+
+```python
+import json, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for i in range(128):
+            if i: time.sleep(0.010)
+            self.wfile.write(b"data: " + json.dumps({"choices": [{"delta": {"content": "x"}}]}).encode() + b"\n\n")
+            self.wfile.flush()
+        self.wfile.write(b'data: {"choices": [], "usage": {"completion_tokens": 128}}\n\n')
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+ThreadingHTTPServer(("127.0.0.1", 8400), H).serve_forever()
+```
+
+它每 10 ms 发一个内容 chunk，共 128 个；最后补一个 `usage.completion_tokens = 128` 的 chunk 和 `[DONE]`。在 `docs/modules/M0-foundations/` 目录下另开一个终端跑：
+
+```bash
+python3 scripts/bench_openai.py --base-url http://127.0.0.1:8400 \
+    --model mock --max-tokens 128 --concurrency 1 4 --requests 20 \
+    --output mock-results.json
+```
+
+预期量级：TTFT 是毫秒级，mock 没有 prefill，首 chunk 在请求到达后立即返回；ITL p50 约为 0.010 s 加上解析与线程调度的开销，通常在 10 ms 出头；总延迟减 TTFT 约为 127 × 0.010 ≈ 1.27 s；吞吐随并发近似线性增长，因为 mock 没有真实瓶颈，每个连接各自 sleep、互不排队。这些是预期量级，不是实测成绩；本机跑出来的数有几毫秒偏差属正常。
+
+数字偏离预期时先查三处：mock 是否真的按 10 ms 间隔发（`time.sleep` 的精度与线程调度会让间隔略长）；mock 是否被串行化（换成单线程 `HTTPServer` 会把并发请求排成队，吞吐就不随并发线性涨）；usage chunk 是否带上。没有 usage chunk，脚本会按字符数估算：128 个单字符 chunk 只估成 32 个 token，分母从 127 变成 31，算出来的 ITL 约是真实值的 4 倍。这不是脚本的 bug，是估算口径的边界；mock 验证时把 usage 带上，才能单独验证时间逻辑。
+
+mock 能证明的是尺子本身：计时逻辑、流式解析、并发脚手架、JSON 与表格输出全通了。不能证明任何真实服务的性能：mock 里没有 prefill 计算、没有 KV 缓存、没有显存带宽、没有调度排队，它的延迟只反映 sleep 与 HTTP 开销。mock 上跑出来的数只验证尺子，不证明任何真实服务性能；真实服务的基线要到第 5 章量。
+
+跑一次 `--help` 与一次 mock 扫描，能解释表里每一列是怎么来的，验证就完成了。后面换引擎、换量化、换解码方法时，被测对象变，脚本与固定条件不变，两次结果之差才能归因到被测对象上。
+
+**延伸**：[vLLM 的 OpenAI 兼容服务器文档](https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/)（`stream`、`stream_options` 等请求字段）、[WHATWG 的 Server-Sent Events 规范](https://html.spec.whatwg.org/multipage/server-sent-events.html)（`data:` 行与事件流解析）。
 
 ## 第 5 章 · 跑出第一份基线
 
