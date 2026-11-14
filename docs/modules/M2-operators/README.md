@@ -547,273 +547,437 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride,
 **产出**：一页取舍笔记 + 更新后的检查清单。
 ## 第 21 章 · Fused Attention 深讲：先推导，再写 kernel
 
-> 硬件：本周需要 GPU 跑性能对比；无卡可用 LeetGPU 的免费 GPU 评测先做正确性验证；第 1–2 节的推导与计算无卡可做。
->
-> 本周的顺序是反过来的：先推导，再写 kernel——第 3 节的每一行代码都能在第 1 节的公式里找到对应。
+一个 1024 token 的序列，attention 的分数矩阵是 1024×1024。把它算出来、写回显存、再读回来做 softmax，S 和 P 两个中间矩阵各占 2 MiB，一写一读就是 8 MiB 的搬运；而 Q、K、V、O 四个张量加起来只有 512 KiB。A100 的 HBM 带宽是 2 TB/s，8 MiB 对应 4.46 µs，512 KiB 只对应 0.26 µs——朴素实现的瓶颈不在乘加，在中间矩阵的往返。FlashAttention 的做法是让 S 和 P 永远不落 HBM：Q、K、V 分块读进 SRAM（静态随机存取存储器：GPU 每个 SM 上的一块高速存储，CUDA 里以 shared memory 的形式使用），softmax 与加权求和在片上完成，只把最终输出写回。这要求先回答两个问题：softmax 的整行最大值与分母，分块之后怎么精确算出来；每 SM 只有 164 KB 的 SRAM，块最大能开到多少。这两个问题答完，kernel 才有得写；写完还要用正确性、计时与 Roofline 三项验收。
+
+**本章目标。** 手推 online softmax 的更新式并说明它与整行 softmax 精确相等；按 A100 的 164 KB shared memory 算出 block 上限与寄存器压力；写出单 head、单序列的 Triton fused attention（causal 可选），并用 SDPA 对照、`do_bench` 计时和 Roofline 定位验收。
 
 ### 第 1 节 · Online softmax 的数学推导
 
-**目标**：手推 online softmax 的 rescale 公式，并证明分块算出的 attention 与标准 attention 完全相等（不是近似）。
+标准 softmax 作用在一行长为 N 的分数向量 `x` 上：
 
-**怎么做**（60 分钟，无 GPU 可做）：
+```text
+m = max_j x_j
+p_i = exp(x_i − m)
+l = Σ_j p_j
+softmax(x)_i = p_i / l
+```
 
-先把困难说清楚。标准 softmax 是一行向量 `x`，`softmax(x)_i = exp(x_i − m) / Σ_j exp(x_j − m)`，其中 `m = max(x)`。减最大值是为了数值稳定：FP32 下 x 超过 89 左右，exp(x) 就溢出成 inf，整个结果全毁；减了 max 之后 exp 的输入全 ≤ 0，结果全 ≤ 1，溢出不可能发生。
+减最大值是数值稳定措施，不是数学上的需要。FP32 能表示的最大值约 3.4×10³⁸，`exp` 的输入超过 `ln(3.4×10³⁸) ≈ 88.72` 就溢出成 inf；减去 m 之后所有输入 ≤ 0，输出落在 (0, 1]，溢出不会发生。softmax 对整体平移不变，减 m 不改变结果。
 
-困难在于，`m` 和分母的求和都是整行级别的量：算任何一个 `exp(x_i − m)` 之前，你得先知道整行的最大值；算分母之前，你得先把整行加完。分块之后，处理第一块的时候第二块还没读进来，`m` 和分母都还不知道——softmax 看起来是没法分块的。
+问题在于 m 和 l 都是整行级别的量。分块之后，处理第一块时后面的块还没读进来，m 和分母都未知；如果等整行读完再算，S 和 P 就必须先写回显存，融合省下的搬运又还回去了。online softmax（即在线 softmax：分块计算 softmax 时维护运行最大值与归一化因子，使分块结果与整行计算精确相等）就是为这个局面准备的：维护运行量，每来一块更新一次。
 
-解法是维护两个运行量（running statistics），每来一块更新一次。设已处理部分的运行最大值是 `m`、运行和是 `l = Σ exp(x_j − m)`。新来一块，算出块内最大值 `m_b` 与块内和 `l_b = Σ exp(x_j − m_b)`，更新规则是：
+设已处理部分的运行最大值是 m，运行和是 `l = Σ exp(x_j − m)`。新来一块，块内最大值 `m_b`、块内和 `l_b = Σ exp(x_j − m_b)`。取
 
 ```text
 m' = max(m, m_b)
+```
+
+把旧状态换到新基准 m' 下。对已处理的每一项：
+
+```text
+exp(x_j − m) = exp(x_j − m') · exp(m' − m)
+```
+
+两边对已处理的 j 求和：
+
+```text
+Σ exp(x_j − m) = exp(m' − m) · Σ exp(x_j − m')
+```
+
+所以旧状态在新基准下的和是 `l · exp(m − m')`。新块自己的和是 `l_b · exp(m_b − m')`。两部分相加：
+
+```text
 l' = l · exp(m − m') + l_b · exp(m_b − m')
 ```
 
-为什么这样更新是对的？旧的 `l` 是在旧的 `m` 下算的，新基准是 `m'`，旧的每一项都要乘 `exp(m − m')` 换算到新基准下；新块的 `l_b` 是在 `m_b` 下算的，同样乘 `exp(m_b − m')` 换算。`m` 只会长大不会缩小，`exp(m − m')` 永远 ≤ 1，所以旧状态只会被缩小，不会爆炸。换句话说，rescale 不是近似修正，是精确的换算——换基准不改变比值。
+这就是 rescale 公式。它不是对旧结果的近似修正，而是把同一个和从基准 m 换到基准 m'；换基准只改变每一项乘的公共因子，不改变各项之间的比例。
 
-拿一组数走一遍。一行 `x = [1, 2, 3, 4]`，分两块 `[1, 2]` 和 `[3, 4]`。标准做法：`m = 4`，`exp(x − 4) = [e⁻³, e⁻², e⁻¹, 1] ≈ [0.0498, 0.1353, 0.3679, 1]`，求和 `l ≈ 1.5530`，softmax ≈ `[0.0321, 0.0871, 0.2369, 0.6439]`。
-
-分块做法：第一块 `[1, 2]`，块内最大值 `m₁ = 2`，`l₁ = e⁻¹ + e⁰ ≈ 0.3679 + 1 = 1.3679`。第二块 `[3, 4]`，块内最大值 `m_b = 4`，`l_b = e⁻¹ + e⁰ ≈ 1.3679`。更新：`m' = max(2, 4) = 4`，`l' = 1.3679 × e^(2−4) + 1.3679 × e^(4−4) = 1.3679 × 0.1353 + 1.3679 ≈ 0.1851 + 1.3679 = 1.5530`——和标准做法的求和完全一致。`exp(x − 4) / 1.5530` 就是上面那组 softmax。分块没有改变任何一个数，只是换了个顺序算。
-
-把同样的思想搬到 attention 上。设已处理部分的未归一化累加器是 `Õ = Σ_j exp(S_j − m) · V_j`（`S` 是 QK^T 的一行），新来一块 K、V：
+attention 的输出多一个 V 的加权：
 
 ```text
-α = exp(m_old − m_new)              # 旧状态的 rescale 系数
-P_block = exp(S_block − m_new)      # 块内概率（未归一化）
-l_new = l_old · α + rowsum(P_block)
-Õ_new = Õ_old · α + P_block · V_block
+Õ = Σ_j exp(S_j − m) · V_j
 ```
 
-最后 `O = Õ / l_new`。注意 `α` 同时乘在 `l` 和 `Õ` 上：旧的求和与旧的累加器是在同一个旧基准下算的，换基准时两个要一起换，只换一个就错了。
+同样的换算给出：
 
-同样拿数走一遍。设 `S = [1, 2, 3, 4]`，`V = [10, 20, 30, 40]`（d=1，好手算）。标准做法：softmax(S) ≈ `[0.0321, 0.0871, 0.2369, 0.6439]`，`O = 0.0321×10 + 0.0871×20 + 0.2369×30 + 0.6439×40 ≈ 0.321 + 1.743 + 7.107 + 25.756 = 34.926`。
+```text
+Õ' = Õ · exp(m − m') + Õ_b · exp(m_b − m')
+```
 
-分块做法：第一块 `[1, 2]`，`m₁ = 2`，`l₁ ≈ 1.3679`，`Õ₁ = e⁻¹×10 + e⁰×20 ≈ 3.679 + 20 = 23.679`。第二块 `[3, 4]`，`m_b = 4`，`α = e^(2−4) ≈ 0.1353`，`l' = 1.3679 × 0.1353 + 1.3679 ≈ 1.5530`，`Õ' = 23.679 × 0.1353 + (e⁻¹×30 + e⁰×40) ≈ 3.205 + (11.037 + 40) = 54.242`。最后 `O = 54.242 / 1.5530 ≈ 34.926`——和标准做法一致。两组数都对上，分块的正确性就不是信念，是算出来的。
+其中 `Õ_b = Σ_{j∈块} exp(S_j − m_b) · V_j`。最后 `O = Õ / l`。l 和 Õ 必须乘同一个 `α = exp(m − m')`：它们是在同一个基准下算出来的，只换一个就等于把分子分母的比例改了。
 
-证明写成归纳法。每一步的 invariant 是：`Õ = Σ_{已处理 j} exp(S_j − m_current) · V_j`，`l = Σ exp(S_j − m_current)`。第一块来之前 `m = -inf`、`l = 0`、`Õ = 0`，invariant 空成立；每来一块，更新规则恰好保持 invariant（上面那组数就是一次归纳步）；所有块处理完，`Õ` 和 `l` 就是整行的量，除一下得到标准 attention。归纳法走完，“分块不改变结果”就不是口号，是定理。
+精确性可以直接验证。取 `x = [1, 2, 3, 4]`，分两块 `[1, 2]` 和 `[3, 4]`。整行算：m = 4，`exp(x − 4) = [0.049787, 0.135335, 0.367879, 1]`，`l = 1.553002`，softmax = `[0.032059, 0.087144, 0.236883, 0.643914]`。分块算：第一块 m₁ = 2，`l₁ = e⁻¹ + e⁰ = 1.367879`；第二块 m_b = 4，`l_b = 1.367879`；`α = exp(2 − 4) = 0.135335`；`l' = 1.367879 × 0.135335 + 1.367879 × 1 = 0.185122 + 1.367879 = 1.553002`。与整行结果在 FP32 舍入范围内相同。
 
-结论：FlashAttention 是精确算法。分块 + online softmax 改变的只是计算顺序与中间结果的存放位置（S、P 不再写回 HBM），最终输出与标准 attention 在数学上相等，差别只有浮点舍入。这一点后面第 5 周读 FA2/FA3 时还会用到：它们改的都是并行与流水线，不是数学。
+attention 的例子：`S = [1, 2, 3, 4]`，`V = [10, 20, 30, 40]`，d = 1。整行算 `O = 0.032059×10 + 0.087144×20 + 0.236883×30 + 0.643914×40 = 34.926527`。分块算：第一块 `Õ₁ = e⁻¹×10 + e⁰×20 = 23.678794`；第二块 `Õ_b = e⁻¹×30 + e⁰×40 = 51.036383`；`Õ' = 23.678794 × 0.135335 + 51.036383 = 3.204576 + 51.036383 = 54.240960`；`O = 54.240960 / 1.553002 = 34.926527`。同样的结果。
 
-一个常见的误解：“分块是近似”——不对。近似的意思是结果变了，分块的结果没变，变的是中间结果存在哪、按什么顺序算。把“分块”等同于“近似”的人，通常是把 rescale 当成了修正项；rescale 是精确换算，不是修正。
+写成归纳法。每一步的不变式是：
 
-对照第 2 周的 fused softmax：那一节的 `row - tl.max(row)` 就是单块版的 online softmax——整行一次性读进来时，`m` 一步到位；分块时 `m` 是逐步长大的，`α` 就是为“长大”付的代价。单块和分块是同一个公式的两种情况，不是两种算法。
+```text
+Õ = Σ_{j∈已处理} exp(S_j − m) · V_j
+l = Σ_{j∈已处理} exp(S_j − m)
+```
 
-**产出**：一份推导笔记，写出 rescale 公式与 invariant，并用一句话回答“为什么分块不改变结果”。
+处理第一块之前，已处理集合为空，和为 0；m = −inf 只是哨兵。第一块到来时 m' = m_b，`α = exp(−inf − m_b) = 0`，旧状态被清零，新状态正好是第一块的量。之后每一步按上面的代数保持不变式。所有块处理完，m 是整行最大值，l 和 Õ 是整行的量，`Õ / l` 就是标准 attention。分块与整行计算在数学上相等，差别只在浮点舍入和中间结果的存放位置。
 
-> **论文选读（不读也能学完本周）**：FlashAttention 原论文（Dao 等，[arXiv:2205.14135](https://arxiv.org/abs/2205.14135)，2022 年 5 月；链接保留，原文是可选的更深阅读，本周正文已包含它的核心内容）。
->
-> - **核心思想**：attention 慢、吃显存，根源在访存。标准 attention 把 N×N 的 S、P 矩阵写回 HBM 再读回，HBM 与片上 SRAM 之间的搬运才是瓶颈。论文提出的原则叫 **IO-aware**：算法设计要把“各级 GPU 显存之间的读写次数”算进去，而不是只算 FLOPs。
-> - **核心逻辑链条**：① 用 tiling 把 Q、K、V 分块，一次只把一块读进 SRAM，在 SRAM 里算完再写回；② 用 online softmax 让 softmax 也能分块（就是本节推导的 rescale）；③ 由此 S、P 两个 N×N 中间矩阵**永远不落 HBM**，HBM 访问量从 O(N²) 降到 O(N)；④ 论文给出 IO 复杂度分析，证明在一定 SRAM 容量范围内这个做法是最优的。
-> - **关键结论与数字**（论文摘要给出）：BERT-large 训练端到端提速 15%（序列长度 512，对比 MLPerf 1.1 训练速度纪录）；GPT-2 训练提速 3 倍（序列长度 1K）；Long-Range Arena 提速 2.4 倍（序列长度 1K–4K）。更长上下文还带来质量提升：GPT-2 困惑度好 0.7，长文档分类提升 6.4 个点；首次让 Transformer 在 Path-X（序列长度 16K，61.4% 准确率）与 Path-256（序列长度 64K，63.1% 准确率）上超过随机水平。
-> - **为什么重要**：它把“算得快”的优化对象从 FLOPs 转向了访存，并且证明了精确 attention 也可以分块算——这正是 M2 整体的底层逻辑：先定位瓶颈（第 1 周的 ncu + Roofline），再按瓶颈改算法，而不是盲目堆算力。
-> - **与本节的关系**：本节的推导就是论文第 2–3 节的核心机制；第 5 周会接着讲 FA2/FA3 在这条链上又改了什么（并行、流水线、FP8）。
+有一个边界会直接影响代码：如果某一行的所有位置都被 mask 掉，`m_b = −inf`，`m' = max(m, m_b) = −inf`，`α = exp(−inf − (−inf)) = exp(NaN) = NaN`。这不是精度问题，是定义域问题。kernel 必须保证每一行至少有一个合法位置参与第一次更新；21.3 节会说明标准循环为什么天然满足这一点，以及加了块跳过之后为什么不再满足。
 
-**延伸**：[Triton 官方教程](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)的 fused attention（`06-fused-attention`）。
+20.3 节的 fused softmax 是这里的单块特例：整行一次读进来，m 一次算到位，α 永远不被用到。分块版把同一套公式用在多块上，公式没有变。
 
 ### 第 2 节 · SRAM 容量约束如何决定 block 大小
 
-**目标**：给定你的 GPU，能自己算出 BLOCK_M / BLOCK_N 的上限，而不是抄教程的默认值。
+fused attention（融合注意力：把 QK^T、softmax 与 PV 融进一个 kernel，N×N 中间矩阵不写回显存）的整个卖点是 S 和 P 不落 HBM；代价是 Q、K、V、P 四块 tile 要在同一个 SM 的 SRAM 里同时存在。A100 每个 SM 有 164 KB shared memory（从 192 KB 的 L1/shared 统一容量中最多划出 164 KB），H100 是 228 KB；单个 block 能申请的上限比这少 1 KB（A100 163 KB，H100 227 KB），差的 1 KB 留给驱动。这个数是每 SM 的，不是整张卡的：A100 有 108 个 SM，每个 SM 各管各的 164 KB，block 之间不共享。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+一个 block 在 SRAM 里要放的东西：
 
-先看两个数：`Br=128, Bc=64` 时一个 block 占 48KB，`Br=128, Bc=128` 时占 80KB。只把 `Bc` 翻了一倍，SRAM 占用就从 48KB 涨到 80KB，涨了三分之二。这一节就是要把这笔账算明白：多出来的 32KB 花在哪了，下一次调参数时该往哪个方向花。
+- Q tile：`Br × d` 个 FP16，`2·d·Br` 字节。它在整个 K/V 循环里只读一次，之后一直复用。
+- K tile：`Bc × d` 个 FP16，`2·d·Bc` 字节。每次内层迭代读一块。
+- V tile：`Bc × d` 个 FP16，`2·d·Bc` 字节。K 算完分数之后才用它做加权求和。
+- P tile：`Br × Bc` 个 FP16，`2·Br·Bc` 字节。它是第二次 `tl.dot` 的左操作数。
 
-为什么 SRAM 决定 block 大小？第 1 周讲过存储分层：HBM 大但慢，SRAM 快但小。fused attention 的整个卖点是 S、P 不落 HBM——代价是 Q、K、V、S 四块东西要同时塞进 SRAM。塞不下，kernel 就跑不起来。所以 block 大小的上限由 SRAM 容量算出来，公式和表都在上面。换个说法：融合省掉的 HBM 搬运，是用 SRAM 容量换来的，SRAM 就是这笔交易的预算。
+K 和 V 各占一份，是因为一次迭代里两件事都要做：先拿 K 算分数，再拿 V 做加权和；流水线还会在当前块计算时预取下一块 K/V。只开一个缓冲时，K/V 各一份；`num_stages=2` 时各多一份，额外 `4·d·Bc` 字节。
 
-列出一个 block 在 SRAM 里要放的东西（FP16，每元素 2 字节，head 维 `d`，Q 块 `Br×d`，K/V 块 `Bc×d`，S 块 `Br×Bc`）：
+`qk`（也就是 S）是 `Br × Bc` 的 FP32，在 Triton 的 lowering 里是寄存器里的张量，不占 shared；如果某个后端把它落到 shared，预算要再加 `4·Br·Bc`。输出累加器 `acc` 是 `Br × d` 的 FP32，`q` 是 `Br × d` 的 FP16，`m_i`/`l_i` 各是长度为 Br 的 FP32 向量，它们都在寄存器里。
+
+按活 tile 算，单缓冲的 shared 预算是：
 
 ```text
-SRAM ≈ Q + K + V + S
-     = 2·d·Br + 2·d·Bc + 2·d·Bc + 2·Br·Bc
-     = 2d(Br + 2Bc) + 2·Br·Bc   ≤ 每 block 可用的 shared memory
+shared ≈ 2·d·(Br + 2·Bc) + 2·Br·Bc
 ```
 
-四项各有来头。Q 块是当前程序负责的那 `Br` 行 query，整个内层循环只读一次，在 SRAM 里一直留着等复用；K 块和 V 块是当前扫到的那 `Bc` 列 key 和 value，每扫一块新来一对；S 块是 `Br×Bc` 的 QK^T 分片——第 1 节的 `P_block` 就是从它算出来的。为什么 K 和 V 要各占一份？因为一次内层迭代里两件事都要做：先拿 K 算分数，再拿 V 做加权求和，分数算完之前 V 还没用上，V 读进来之后 K 的分数还在用，两块东西在时间上是交叠的，预算就得按同时在场算。公式里 `Bc` 出现两次，`2·d·Bc + 2·d·Bc`，就是这个意思。
+第一项是 Q、K、V，第二项是 P。`Bc` 在括号里出现两次，因为 K 和 V 各有一份。开双缓冲再加 `4·d·Bc`。
 
-公式里最值得盯着看的是最后一项 `2·Br·Bc`。Q、K、V 三项都只跟 `Br` 或 `Bc` 的一次方成正比，S 这一项是 `Br` 和 `Bc` 的乘积。`Br` 和 `Bc` 各翻一倍，Q、K、V 只翻一倍，S 翻两倍。拿数验证：`Br=64, Bc=64` 时 S 占 8KB，`Br=128, Bc=128` 时 S 占 32KB，整整 4 倍，而 Q 只从 8KB 涨到 16KB。block 开大之后，预算的大头会越来越向 S 倾斜。问一句：瓶颈到底在哪？多数时候答案是 S 这一项先顶到天花板。
+`d = 64` 时逐项算出来：
 
-手算一张表（`d=64`，A100 每 SM shared memory 164KB，H100 228KB；每 block 的可用上限用 `cudaDeviceGetAttribute(cudaDevAttrMaxSharedMemoryPerBlockOptin)` 查，以你所用 CUDA 版本的设备属性为准）。表里每一行的四项加起来就是总数，你可以顺着公式自己验算：
+| Br | Bc | Q | K | V | P | 单缓冲合计 | 双缓冲合计 |
+|----|----|---|---|---|---|------------|------------|
+| 64 | 64 | 8 KB | 8 KB | 8 KB | 8 KB | 32 KB | 48 KB |
+| 128 | 32 | 16 KB | 4 KB | 4 KB | 8 KB | 32 KB | 40 KB |
+| 64 | 128 | 8 KB | 16 KB | 16 KB | 16 KB | 56 KB | 88 KB |
+| 128 | 64 | 16 KB | 8 KB | 8 KB | 16 KB | 48 KB | 64 KB |
+| 128 | 128 | 16 KB | 16 KB | 16 KB | 32 KB | 80 KB | 112 KB |
+| 256 | 64 | 32 KB | 8 KB | 8 KB | 32 KB | 80 KB | 96 KB |
+| 256 | 128 | 32 KB | 16 KB | 16 KB | 64 KB | 128 KB | 160 KB |
+| 128 | 256 | 16 KB | 32 KB | 32 KB | 64 KB | 144 KB | 208 KB |
 
-| Br | Bc | Q | K | V | S | 合计 |
-|----|----|---|---|---|---|------|
-| 64 | 64 | 8KB | 8KB | 8KB | 8KB | 32KB |
-| 128 | 32 | 16KB | 4KB | 4KB | 8KB | 32KB |
-| 64 | 128 | 8KB | 16KB | 16KB | 16KB | 56KB |
-| 128 | 64 | 16KB | 8KB | 8KB | 16KB | 48KB |
-| 128 | 128 | 16KB | 16KB | 16KB | 32KB | 80KB |
-| 256 | 64 | 32KB | 8KB | 8KB | 32KB | 80KB |
-| 256 | 128 | 32KB | 16KB | 16KB | 64KB | 128KB |
-| 128 | 256 | 16KB | 32KB | 32KB | 64KB | 144KB |
+表中每一格都是 `2·d·Br`、`2·d·Bc` 或 `2·Br·Bc` 算出来的，例如 `Br=128, Bc=64`：Q = 2×64×128 = 16 KB，K = V = 2×64×64 = 8 KB，P = 2×128×64 = 16 KB，合计 48 KB；双缓冲多一对 K/V，16 KB，得 64 KB。`128×128` 的 P 是 2×128×128 = 32 KB，合计 80 KB，双缓冲 112 KB；开到 3 级流水线再加 32 KB，144 KB，已经接近 A100 的 164 KB。`128×256` 单缓冲 144 KB，双缓冲 208 KB，超过 A100 单 block 的 163 KB 上限，这个组合在 A100 上开不了双缓冲。
 
-先看两组花同样钱的搭配。`Br=64, Bc=64` 和 `Br=128, Bc=32` 都是 32KB，一组是方块，一组是瘦高条；`Br=128, Bc=128` 和 `Br=256, Bc=64` 都是 80KB，一组把钱花在更宽的 K/V 扫描上，一组花在更多的 Q 行上。同样 80KB 预算，第二组把钱花在更宽的 K/V 扫描上，第三组花在更多的 Q 行上；哪个更好取决于 N 和卡，得实测，下一节各跑一遍。预算相同不代表性能相同：`Bc` 更宽意味着内层循环步数更少，每步的 rescale 和求和次数也更少；`Br` 更大意味着一个程序算更多行，程序总数减半——N=1024 时，`BLOCK_M=64` 对应 16 个程序，`BLOCK_M=128` 对应 8 个，`BLOCK_M=256` 对应 4 个。程序总数直接由 `N / BLOCK_M` 决定，`BLOCK_M` 翻倍，程序数减半，并行度的结构跟着变。
+P 是预算里唯一按 `Br × Bc` 增长的部分。`Br` 和 `Bc` 各翻一倍，Q/K/V 只翻一倍，P 翻四倍：`64×64` 的 P 是 8 KB，`128×128` 是 32 KB，正好四倍；同一组变化里 Q 从 8 KB 到 16 KB，只翻一倍。块开大之后，预算的大头会越来越向 P 倾斜。
 
-再看 `d` 的影响。公式里 `d` 只乘在 Q、K、V 三项上，S 这一项没有 `d`。`d=128, Br=128, Bc=64` 时，Q 32KB、K 16KB、V 16KB、S 16KB，合计 80KB——和 `d=64` 时 `Br=128, Bc=128` 的 80KB 撞了个正着。同一个 80KB 可以是“`d` 翻倍”，也可以是“`Bc` 翻倍”，账面上一样，瓶颈可不一样：前者是每个元素的 head 维变宽了，后者是每步扫的列变多了。`d=128, Br=64, Bc=64` 又是另一组数：Q 16KB、K 16KB、V 16KB、S 8KB，合计 56KB。所以换了模型、换了 `d`，上一张表的结论要重算，抄一组参数过去是抄不来的。
+换 `d` 也会改账。`d = 128, Br = 128, Bc = 64`：Q = 2×128×128 = 32 KB，K = V = 2×128×64 = 16 KB，P = 2×128×64 = 16 KB，合计 80 KB。这和 `d = 64, Br = 128, Bc = 128` 的 80 KB 数值相同，但来源不同：前者是 head 维变宽，后者是每步扫的列变多。`d = 128, Br = 64, Bc = 64` 是 Q 16 KB、K 16 KB、V 16 KB、P 8 KB，合计 56 KB。换模型、换 head 维，上一张表的结论要重算。
 
-理解取舍：block 越大，Q/K/V 的重复读越少（K、V 被更多 Q 行复用），但 SRAM 占用越大、一个 SM 上能同时驻留的 block 越少。只按 shared memory 算一个上限：A100 每 SM 164KB，32KB 的 block 最多驻留 5 个（164 ÷ 32 ≈ 5.1，取整 5），48KB 的最多 3 个，80KB 的最多 2 个，128KB 的只剩 1 个；H100 每 SM 228KB，32KB 的 block 最多 7 个，48KB 的最多 4 个，80KB 的最多 2 个，128KB 的只剩 1 个。80KB 的 block 在两张卡上都只能驻留 2 个——从 48KB 涨到 80KB，SRAM 占用涨了三分之二，并行驻留数却从 3 个掉到 2 个。这个上限只是 shared memory 一项算出来的，寄存器、warp 数这些别的限制只会让它更小，不会更大。这就是第 1 周 occupancy 那一节在 attention 上的回响——第 1 周调的是寄存器和 block 大小，这里调的是 SRAM 和 block 大小，限制因子换了，思路没变：先找出哪项资源先顶到天花板，再决定参数往哪边让。
+shared 只是一半。另一半是寄存器。`qk`、`acc`、`q`、`m_i`/`l_i` 都在寄存器里，按 32 位寄存器数：
 
-有两个常见误解。一个是把 164KB 当成整张卡的 SRAM：164KB 是每 SM（流多处理器）的 shared memory 上限，一张卡有几十上百个 SM，每个 SM 各有各的 164KB，block 之间不共享。算预算的时候，分母永远是“每 SM 每 block”的数。另一个是以为 block 越大越好：上面的表已经说明，block 开大之后 S 那一项按乘积膨胀，驻留数跟着往下掉，省下来的重复读未必抵得过并行度的损失。到底哪边赢，没有公式能直接告诉你，公式只负责告诉你哪些组合在预算内，预算内的组合得实测分高下。
+```text
+regs/thread ≈ (Br·Bc + 1.5·Br·d + 2·Br) / (32·num_warps)
+```
 
-Triton 里的对应关系：你不直接管 SRAM，`BLOCK_M` / `BLOCK_N` 就是旋钮；配额超了编译或运行时会直接报错（shared memory 不足），这是最直接的反馈。顺带一提，`BLOCK_M`、`BLOCK_N` 取 2 的幂、16 的倍数，和第 2 周 `tl.dot` 对形状的要求是同一回事：`tl.arange` 要求长度是 2 的幂，`tl.dot` 要求参与矩阵乘的维度至少 16，尺寸取成 64、128 这样的数，两边都对得上。把你算出的两组参数记下来，下一节各跑一遍。
+`qk` 是 `Br·Bc` 个 FP32；`acc` 是 `Br·d` 个 FP32；`q` 是 `Br·d` 个 FP16，折合 `Br·d/2` 个 32 位寄存器；`m_i` 和 `l_i` 各 `Br` 个 FP32，合计 `2·Br`。除以线程数 `32·num_warps`。这个数只算四个大头，P 的 FP32 临时量、mask、地址与编译器临时量另算，实际用量更高。
 
-**产出**：一张“block 大小 vs SRAM 占用”计算表（至少三组参数，含你 GPU 的上限），并标出你下一节要先试哪一组。
+| Br | Bc | num_warps | qk | acc | q | regs/thread（下限） |
+|----|----|-----------|----|-----|---|---------------------|
+| 64 | 64 | 4 | 4,096 | 4,096 | 2,048 | 81 |
+| 128 | 64 | 8 | 8,192 | 8,192 | 4,096 | 81 |
+| 64 | 128 | 4 | 8,192 | 4,096 | 2,048 | 113 |
+| 128 | 128 | 8 | 16,384 | 8,192 | 4,096 | 113 |
+| 256 | 64 | 8 | 16,384 | 16,384 | 8,192 | 162 |
+| 256 | 128 | 8 | 32,768 | 16,384 | 8,192 | 226 |
+
+取 `d = 64` 算两行：`64×64`、4 个 warp（128 线程）时 `(4096 + 1.5×4096 + 128) / 128 = 81`；`128×128`、8 个 warp（256 线程）时 `(16384 + 1.5×8192 + 256) / 256 = 113`。`256×64` 到 162，`256×128` 到 226；每个线程最多 255 个寄存器，后两组加上编译器的临时量很容易溢出，溢出会把值放到 local memory，延迟和带宽都变差。
+
+寄存器总量也要算。每个 SM 有 64K 个 32 位寄存器；一个 block 的寄存器用量是 `线程数 × regs/thread`。`64×64`、4 warp、81 regs/thread 时是 128×81 = 10,368 个，64K ÷ 10,368 ≈ 6.3，最多 6 个 block；但 shared 那一侧只允许 5 个（164 ÷ 32），所以 shared 先顶到天花板。双缓冲 48 KB 时 shared 只允许 3 个。`128×64`、8 warp、81 regs/thread 时是 256×81 = 20,736 个，64K ÷ 20,736 ≈ 3.2，最多 3 个；双缓冲 64 KB 时 shared 只允许 2 个。`128×128`、8 warp、113 regs/thread 时是 28,928 个，最多 2 个；双缓冲 112 KB 时 shared 只允许 1 个。`256×64` 是 256×162 = 41,472 个，寄存器只允许 1 个，shared 单缓冲却允许 2 个，实际按 1 个算。
+
+把这些数并排看：
+
+| 配置 | 单缓冲 shared | 双缓冲 shared | A100 驻留（单/双） |
+|------|--------------|--------------|---------------------|
+| 64×64 | 32 KB | 48 KB | 5 / 3 |
+| 128×64 | 48 KB | 64 KB | 3 / 2 |
+| 64×128 | 56 KB | 88 KB | 2 / 1 |
+| 128×128 | 80 KB | 112 KB | 2 / 1 |
+| 256×64 | 80 KB | 96 KB | 1 / 1 |
+| 256×128 | 128 KB | 160 KB | 1 / 1 |
+
+H100 的 228 KB 宽一些：`64×64` 单/双是 7/4，`128×64` 是 4/3，`128×128` 是 2/2，`256×128` 还是 1/1。驻留数不是越高越好：每个 block 都要搬自己的 K/V，驻留多意味着更多 block 争同一份 L2 与带宽；但驻留太少，延迟藏不住。这个取舍要用实测定。
+
+块大小还决定程序总数。单 head、单序列时，`grid = ceil(N / Br)`：N = 1024 时，Br = 64 只有 16 个程序（CTA，Cooperative Thread Array，线程块），Br = 128 是 8 个，Br = 256 是 4 个。A100 有 108 个 SM，16 个程序最多占 16 个 SM，连六分之一都不到。每个 SM 能驻留 3–5 个 block 这件事，在只有 16 个 block 时没有意义——总共就 16 个。工业实现靠 batch × head 维度把程序数拉上去，长序列还会把 K 维切开（split-K）；本章的 kernel 两件事都不做，所以它的实测时间不能用 0.86 µs 去要求。21.4 节会给出完整对比。
+
+两个容易算错的地方。第一，把 164 KB 当成整张卡的 SRAM：它是每 SM 的 shared memory 上限，一张卡几十上百个 SM 各有各的一份，block 之间不共享。第二，以为 block 越大越好：P 按乘积膨胀，驻留数和程序数一起下降，省下来的 K/V 重复读未必抵得过并行度的损失。公式只负责告诉你哪些组合在预算内，预算内哪个快，要测。
+
+Triton 里不直接管 SRAM，旋钮是 `BLOCK_M`、`BLOCK_N`、`num_warps`、`num_stages`。`BLOCK_M`/`BLOCK_N` 取 2 的幂、16 的倍数：`tl.arange` 要求长度是 2 的幂，`tl.dot` 要求矩阵维度至少 16。超了 shared 配额，编译或运行时会直接报错。手算的预算是估算，真实占用以编译产物里的 shared 用量为准（字段名随 Triton 版本变），两者差得多时，先看是不是流水线多开了缓冲。
+
+这一版从 `64×64` 起步：单缓冲 32 KB、双缓冲 48 KB，4 个 warp，约 81 regs/thread，A100 上双缓冲还能驻留 3 个 block。下一组试 `128×64`：双缓冲 64 KB，8 个 warp，驻留 2 个。`128×128` 是这一版的上限：双缓冲 112 KB，驻留 1 个，113 regs/thread。`256×64` 的 162 regs/thread 已经接近上限，驻留只有 1 个 block，不作为首选。
 
 ### 第 3 节 · 动手写 fused attention（单 head、单序列版）
 
-**目标**：写出一个能跑的 fused attention，与 PyTorch 参考数值对齐。
-
-**怎么做**（60 分钟，需 GPU）：
-
-读 Triton 官方教程 `06-fused-attention` 的结构：外层循环按 `BLOCK_M` 分 Q 行，内层循环按 `BLOCK_N` 扫 K/V，每步做一次 online softmax 更新。下面是单 head、单序列、无 causal mask 的版本（多 head、变长、causal 是它的扩展，第 5 节留作练习）：
+这一版只处理单 head、单序列、最后一维连续的 `[N, D]` FP16 输入，D 取 64 或 128，causal mask（因果掩码：第 m 行 query 只能看到前 m 个 key，生成时看不到未来 token）由 `IS_CAUSAL` 开关。它是示意代码，按 Triton 3.x 的 API 写；`tl.dot`、`tl.trans`、`tl.math` 的参数在不同版本间有差异，跑之前按本地版本核对。下面的代码没有在 GPU 上跑过，也不附带实测数字；21.4 节给出验收方法，数字要自己测。
 
 ```python
 import torch
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _attn_fwd(Q, K, V, Out,
               stride_qm, stride_kn, stride_vn, stride_om,
               N, sm_scale,
               D: tl.constexpr,
-              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+              BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+              IS_CAUSAL: tl.constexpr):
     pid_m = tl.program_id(0)
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_d = tl.arange(0, D)
     mask_m = offs_m < N
+
     q = tl.load(Q + offs_m[:, None] * stride_qm + offs_d[None, :],
                 mask=mask_m[:, None], other=0.0)
-    m_i = tl.full([BLOCK_M], -float('inf'), tl.float32)
+
+    m_i = tl.full([BLOCK_M], -float("inf"), tl.float32)
     l_i = tl.zeros([BLOCK_M], tl.float32)
     acc = tl.zeros([BLOCK_M, D], tl.float32)
+
     for start_n in range(0, N, BLOCK_N):
         offs_n = start_n + tl.arange(0, BLOCK_N)
         mask_n = offs_n < N
+
         k = tl.load(K + offs_n[:, None] * stride_kn + offs_d[None, :],
                     mask=mask_n[:, None], other=0.0)
-        qk = tl.dot(q, tl.trans(k))
-        qk = qk * sm_scale
-        qk = tl.where(mask_n[None, :], qk, -float('inf'))
+        qk = tl.dot(q, tl.trans(k)) * sm_scale
+
+        keep = mask_n[None, :]
+        if IS_CAUSAL:
+            keep = keep & (offs_m[:, None] >= offs_n[None, :])
+        qk = tl.where(keep, qk, -float("inf"))
+
         m_block = tl.max(qk, axis=1)
         m_new = tl.maximum(m_i, m_block)
         alpha = tl.exp(m_i - m_new)
         p = tl.exp(qk - m_new[:, None])
+
         l_i = l_i * alpha + tl.sum(p, axis=1)
+
         v = tl.load(V + offs_n[:, None] * stride_vn + offs_d[None, :],
                     mask=mask_n[:, None], other=0.0)
         acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
         m_i = m_new
+
+    l_i = tl.maximum(l_i, 1.0)
     acc = acc / l_i[:, None]
     tl.store(Out + offs_m[:, None] * stride_om + offs_d[None, :],
              acc, mask=mask_m[:, None])
 
-def fused_attention(q, k, v):
-    # q, k, v: [N, D]，fp16，D=64；单 head、单序列、无 causal mask 版
-    N, D = q.shape
+
+def fused_attention(q, k, v, causal=False):
+    # q, k, v: [N, D] fp16, CUDA；单 head、单序列
+    n, d = q.shape
     out = torch.empty_like(q)
-    BLOCK_M, BLOCK_N = 64, 64
-    grid = (triton.cdiv(N, BLOCK_M),)
-    _attn_fwd[grid](q, k, v, out,
-                    q.stride(0), k.stride(0), v.stride(0), out.stride(0),
-                    N, 1.0 / (D ** 0.5),
-                    D=D, BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N)
+    if n == 0:
+        return out
+    block_m, block_n = 64, 64
+    grid = (triton.cdiv(n, block_m),)
+    _attn_fwd[grid](
+        q, k, v, out,
+        q.stride(0), k.stride(0), v.stride(0), out.stride(0),
+        n, 1.0 / (d ** 0.5),
+        D=d, BLOCK_M=block_m, BLOCK_N=block_n,
+        IS_CAUSAL=causal,
+        num_warps=4, num_stages=2,
+    )
     return out
 ```
 
-先把整体结构对上第 1 节的推导。`m_i` / `l_i` / `acc` 就是运行量（running statistics）：`m_i` 是已处理部分的运行最大值，`l_i` 是运行和，`acc` 是未归一化的累加器 `Õ`。`alpha` 就是 rescale 系数 `α = exp(m_old − m_new)`。循环每走一步，三个运行量按第 1 节的更新规则一起往前推一步；循环结束，`acc / l_i` 就是标准 attention 的输出。代码和公式之间没有多余的东西：公式里有的，代码里都有；代码里有的，公式里都能找到对应。
+`pid_m` 是程序编号，`offs_m` 是这个程序负责的 Q 行号，`offs_d` 是 0 到 D−1 的 head 维下标。`mask_m` 处理 N 不能被 BLOCK_M 整除的尾巴：`q` 的 load 用 `other=0.0` 把越界行填 0，`tl.store` 再用同一个 mask 拦住它们。越界的行照样参与计算，只是写不出去；浪费的是最后不到一块的行，换来的是程序不越界读内存。
 
-拿一组具体尺寸把执行过程走一遍。`N=128, D=64, BLOCK_M=64, BLOCK_N=64` 时，`grid = (triton.cdiv(128, 64),)` 等于 2 个程序，每个程序负责 64 行 query，内层循环走 2 步（128 ÷ 64）。Q 块是 64×64 的 fp16，一共 8KB，只在循环外读一次；每步读进来的 K 块和 V 块各是 64×64 的 fp16，各 8KB；S 块 `qk` 是 64×64 的 fp32，全程只活在片上，从不写回 HBM。这就是分块的 payoff：Q 读一次、反复用，K、V 每块读一次，S、P 全程不落 HBM。
+`m_i`、`l_i`、`acc` 是 21.1 节的三个运行量，初值 −inf、0、0 对应归纳法的空集。第一轮 `m_new = m_block`，`alpha = exp(−inf − m_new) = 0`，旧状态被清零。如果把 `m_i` 初值写成 0，第一轮的 `alpha = exp(0 − m_new)` 不是 0；虽然它乘的是全零状态，结果碰巧不变，但归纳法的不变式已经不成立，后面一旦改了初值或加了块跳过就会出错。
 
-再算一笔 FLOPs 的账，验证代码算的量和理论算的量对得上。一次 `tl.dot` 是 64×64 乘 64×64 的矩阵乘，乘加次数是 64×64×64 = 262,144，折合 FLOPs（一次乘加算 2 次浮点运算）是 524,288。内层每步有两次 `tl.dot`（一次算 `qk`，一次算 `P·V`），每步 1,048,576 FLOPs；每个程序走 2 步，一共 2,097,152 FLOPs；2 个程序加起来是 4,194,304 FLOPs。理论公式是 `4·N²·d`，N=128、d=64 时正好是 4×16,384×64 = 4,194,304。两边对上了，代码没有多算也没有少算。
+内层循环里，`offs_n` 是当前 K/V 块的列号，`mask_n` 是尾巴 mask。K 的 load 用 `other=0.0`，越界列读成零向量，`qk` 在那些列上算出来是 0；随后 `tl.where` 把它们置成 −inf，`exp(−inf) = 0`，对 l 和 acc 没有贡献。K 不能 load 成 −inf：`tl.dot` 里 q 的元素乘上 −inf 会得到 NaN，NaN 会污染整个 qk。先 load 0、dot 完再 mask，是这里必须的顺序。
 
-逐行看。`pid_m = tl.program_id(0)` 拿程序编号，`offs_m` 是这个程序负责的 64 行行号，`offs_d` 是 0 到 63 的 head 维下标。`mask_m = offs_m < N` 是尾巴处理：N 不是 BLOCK_M 的整数倍时，多出来的行号要拦住。`q` 的那次 `tl.load` 里，`mask=mask_m[:, None]` 把越界的行挡在外面，`other=0.0` 给它们填 0。注意一个细节：被 mask 掉的 Q 行在循环里照样会算，只是最后 `tl.store` 时也被 `mask_m` 拦住，算出来的东西永远写不出去。算了白算，但保证了程序不越界读内存——正确性优先，浪费的那几行是小头。
+`tl.dot(q, tl.trans(k))` 的形状是 `[BLOCK_M, D] × [D, BLOCK_N] = [BLOCK_M, BLOCK_N]`。`tl.trans` 是一次布局变换，编译器可能借 shared memory 做转置；它换来的是 K 的 load 仍然按行连续，合并访问。直接按 `[D, BLOCK_N]` 读 K 会把每行的步长变成 `stride_kn`，访存不连续，通常更慢。
 
-`m_i = tl.full([BLOCK_M], -float('inf'), tl.float32)`、`l_i = tl.zeros`、`acc = tl.zeros` 是第 1 节归纳法的起点：第一块来之前 `m = -inf`、`l = 0`、`Õ = 0`，invariant 空成立。为什么 `m_i` 的初始值必须是 `-inf`？看第一轮循环就明白了：`m_block` 是第一块的块内最大值，`m_new = tl.maximum(m_i, m_block)` 一定等于 `m_block`，`alpha = tl.exp(m_i - m_new)` 等于 `exp(-inf)`，也就是 0。旧状态是全零，乘 0 还是全零，旧状态被正确清掉。如果 `m_i` 初始值错写成 0，第一轮的 `alpha` 就成了 `exp(0 − m_block)`，一个不等于 0 的数，零状态被莫名其妙地缩放了一轮——虽然初值是零，缩放后还是零，结果碰巧不错，但逻辑已经错了，第二轮的 invariant 就无从谈起。
+`qk = qk * sm_scale` 里的 `sm_scale = 1/sqrt(D)`。q、k 的元素是标准正态分布时，QK^T 的每一项是 D 个独立乘积之和，方差为 D，标准差为 sqrt(D)；D = 64 时是 8。除以 8 之后分数的标准差回到 1。不除的话，两个分数的差很容易到 16，权重比 `e^16 ≈ 8.9×10^6`，softmax 被最大项压成近似 one-hot，数值上不健康。缩放放在 dot 之后、mask 之前，顺序不影响结果。
 
-内层循环里，`offs_n` 是当前 K/V 块的列号，`mask_n` 同样是尾巴处理。`k` 读进来之后，`qk = tl.dot(q, tl.trans(k))` 算出 64×64 的分数矩阵。`tl.trans(k)` 的原因是 `tl.dot` 要的是矩阵乘：`q` 是 `[BLOCK_M, D]`，`k` 是 `[BLOCK_N, D]`，转置之后才是 `[D, BLOCK_N]`，乘出来正好是 `[BLOCK_M, BLOCK_N]` 的 QK^T。
+mask 的条件合成一个：`keep = mask_n[None, :]`，causal 打开时再与 `offs_m[:, None] >= offs_n[None, :]` 相与。`>=` 保留了对角线：第 m 行能看到第 m 个 key 本身，`n = m` 是合法位置；写成 `>` 会把对角线扔掉，整行少一个位置，分母和输出都错。两个条件合成一个 `tl.where`，比写两次少遍历一遍 qk。
 
-`qk = qk * sm_scale` 里的 `sm_scale = 1/sqrt(D)` 不是随便选的。Q、K 的元素是标准正态分布（`torch.randn` 采出来的，方差为 1），QK^T 的每一项是 D 个独立乘积的和，每个乘积的方差是 1，和的方差就是 D，标准差是 `sqrt(D)`。D=64 时标准差是 8，`qk` 里 typical 的数值量级就是 8 左右。除以 `sqrt(D)` 之后标准差回到 1，softmax 的输入拉回 O(1) 的量级。`sm_scale` 的数值是 1/8 = 0.125，`fused_attention` 里传的就是 `1.0 / (D ** 0.5)`。不除会怎么样？分数的量级是 8，两个分数差 16 再常见不过，权重之比就是 `e^16 ≈ 8.9×10^6`——softmax 还没开始算，最大的一项已经把其他项压得看不见了，attention 退化成只看一个位置的硬选择。缩放的作用就是不让分数在进 softmax 之前就分出胜负。
+`m_block = tl.max(qk, axis=1)` 是块内每行的最大值；`m_new = tl.maximum(m_i, m_block)` 是更新后的运行最大值；`alpha = tl.exp(m_i − m_new)` 是 rescale 系数，指数输入 ≤ 0，所以 `0 < alpha ≤ 1`。`p = tl.exp(qk − m_new[:, None])` 是未归一化的块内概率，`m_new[:, None]` 把 `[BLOCK_M]` 广播成 `[BLOCK_M, 1]`。`l_i = l_i * alpha + tl.sum(p, axis=1)` 对应 21.1 节的 `l' = l·α + rowsum(P_block)`。
 
-`qk = tl.where(mask_n[None, :], qk, -float('inf'))` 是尾巴处理：超出 N 的 K 位置被置成 -inf，exp 之后是 0，对求和与累加都没有贡献——和第 2 周的 `other=-inf` 是同一个手法。为什么非 -inf 不可？0 的 exp 是 1，会实实在在地加进分母。拿第 1 节的数算一下就知道代价有多大：`S = [1, 2, 3, 4]` 时 `l = 1.5530`，多一个没 mask 干净的位置贡献 `exp(0) = 1`，`l` 变成 2.5530，凭空涨了 64%，输出全错。-inf 的 exp 是 0，加了等于没加，这才是“不存在的位置”该有的样子。
+`acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)` 是最容易写错的一行。`alpha` 必须同时乘在 `l_i` 和 `acc` 上：两者共享同一个基准，只换一个就把分子分母的比例改了。用 21.1 节的数：第一块 `Õ₁ = 23.678794`，第二块 `α = 0.135335`，`Õ_b = 51.036383`；正确更新是 `23.678794×0.135335 + 51.036383 = 54.240960`，`O = 54.240960/1.553002 = 34.926527`。如果 `acc` 漏乘 `alpha`，`Õ' = 23.678794 + 51.036383 = 74.715177`，`O = 48.110168`，与正确值差 13.18。这个差距远大于 FP16 舍入，验收时一眼就能看出来。
 
-`m_block = tl.max(qk, axis=1)` 是当前块每行的块内最大值，`m_new = tl.maximum(m_i, m_block)` 是更新后的运行最大值，`alpha = tl.exp(m_i - m_new)` 是 rescale 系数。`alpha` 永远小于等于 1，因为 `m_i` 不可能比 `m_new` 大，指数的输入永远小于等于 0。`p = tl.exp(qk - m_new[:, None])` 是块内概率（未归一化），`m_new[:, None]` 把 `[BLOCK_M]` 的向量拉成 `[BLOCK_M, 1]`，沿着列的方向广播。`l_i = l_i * alpha + tl.sum(p, axis=1)` 就是第 1 节的 `l_new = l_old · α + rowsum(P_block)`，一行代码对一行公式。
+`p.to(v.dtype)` 把 FP32 的 p 转成 FP16，因为 `tl.dot` 要求两个操作数同类型，FP16 输入才能走 tensor core。转换本身有舍入：FP16 的机器精度是 `2^-10 ≈ 9.77×10^-4`，单次舍入的相对误差约 `2^-11 ≈ 4.88×10^-4`。这是输出误差的主要来源之一。输出是 V 的加权平均，V 的元素量级为 O(1)，绝对误差在 10^-3 量级；再叠加参考实现与 kernel 的累加顺序差异，1e-2 的验收容限是合理的。把 p 留在 FP32 再 dot 并不划算：要么走 TF32（TensorFloat-32，19 位格式：8 位指数、10 位尾数；算力减半），要么走 IEEE FP32（慢一个数量级），两条路都比 FP16 的 P 差。
 
-`v` 读进来之后，`acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)` 是最容易写错的一行，两个细节都在这里。第一个细节是 `alpha` 必须同时乘在 `l_i` 和 `acc` 上：旧的求和与旧的累加器是在同一个旧基准下算的，换基准时两个要一起换，只换一个就错了。拿第 1 节的数验证：第一块算完 `Õ₁ = 23.679`，第二块的 `α = 0.1353`，正确的更新是 `23.679 × 0.1353 ≈ 3.205` 再加上第二块的贡献 `51.037`，得到 `Õ' ≈ 54.242`，最后 `O = 54.242 / 1.5530 ≈ 34.926`。如果 `acc` 忘了乘 `alpha`，`Õ'` 就成了 `23.679 + 51.037 = 74.716`，`O ≈ 48.11`，和 34.926 差了 13.18——误差大到一眼就能看出来，这正是验收时先查 rescale 的原因。
+`tl.dot` 的累加精度：FP16 输入默认以 FP32 累加，`out_dtype` 默认是 `tl.float32`；如果显式写 `out_dtype=tl.float16`，累加也降到 FP16，1024 项的累加误差会明显变大。输入是 FP32 时，A100 上的 `tl.dot` 默认走 TF32（10 位尾数），要全精度得传 `input_precision="ieee"`，吞吐会降。这个 kernel 的输入是 FP16，走的是 FP16×FP16→FP32 的路径。
 
-第二个细节是 `p.to(v.dtype)` 里的 `.to`。`p` 是 `exp` 的结果，fp32；`v` 是 fp16，`tl.dot` 要求两边同类型才进 tensor core，所以 `p` 要先 cast 回 fp16。这个 cast 是 fp16 舍入的来源之一，也是下面容限取 1e-2 的原因之一。fp16 的机器精度（machine epsilon）是 `2^-10 ≈ 9.8×10^-4`，单次舍入的量级大约是这个数的一半，`2^-11 ≈ 4.9×10^-4`。输出是 V 的加权平均，V 的元素量级是 O(1)，单次舍入带来的绝对误差就在 `10^-3` 量级附近。再加上参考实现在 fp32 里算完再 cast 回 fp16、两个 kernel 的累加顺序不一样，偏差攒到 `10^-2` 量级是预期内的。1e-2 这个容限不是随意定的：它比单次舍入的量级高一个数量级，给累加顺序和 cast 留了余地，又比“算错了”的误差小得多——上面那个漏乘 `alpha` 的例子误差是 13.18，尾巴没 mask 干净的例子能让分母涨 64%，真算错了，1e-2 的容限拦不住你，也不会放过你。
+`tl.exp` 在 Triton 里通常落到 libdevice 的 exp，精度高但比 `exp2` 慢。FA2 一类实现把 `sm_scale` 乘上 `log2(e) = 1.442695`，用 `tl.math.exp2` 做指数，把一次 exp 换成一次乘法和一次 exp2；NVIDIA GPU 上 exp2 有硬件近似指令，通常更快。换之前先用同一组输入比较最大误差；本章保留 `tl.exp`，因为读起来和公式一一对应。
 
-循环结束，`acc = acc / l_i[:, None]` 是最后的归一化：`Õ` 除以 `l`，得到标准 attention 的输出。`tl.store` 把结果写回，`mask=mask_m[:, None]` 再次拦住越界的行。整个 kernel 里，Q 只在循环外读一次：一个程序负责的 `BLOCK_M` 行 query 在整个内层循环里复用，K、V 每块读一次，S、P 全程不落 HBM——这就是分块的 payoff。反过来，如果把 `q` 的 `tl.load` 写进循环里，N=1024、`BLOCK_N=64` 时每个程序要走 16 步，8KB 的 Q 块会被重复读 16 次，每个程序多读 128KB。代码的位置决定了访存量，循环外读一次和循环内读 16 次，算出来的数完全一样，搬运量差了一个数量级。
+循环结束，`l_i = tl.maximum(l_i, 1.0)` 处理整行没有合法 key 的情况。只要一行至少有一个合法 key，`p` 里最大的一项就是 `exp(0) = 1`，所以 `l_i ≥ 1`；把下界钳到 1 不会改变任何合法行的结果，只把空行的 0 变成 1，避免除零。它修不了 `m_new = −inf` 带来的 NaN：如果整行都被 mask，`alpha = exp(−inf − (−inf))` 在更新 l 之前就已经是 NaN。标准循环从 `start_n = 0` 开始，第一块一定含第 0 列，而 causal 条件下列 0 对任何行都合法，所以每一行的 `m_i` 在第一轮就会变成有限值；只有当你跳过整块、或者 N = 0 时，才需要额外保证每行至少处理一个合法块。
 
-`fused_attention` 这个包装函数里，`BLOCK_M, BLOCK_N = 64, 64` 是第 2 节算出来的那组参数里最小的一档：64×64 的 block 占 32KB，A100 上按 shared memory 算最多能驻留 5 个，留给并行度的余地最大，先拿它跑通正确性，再去试更大的。`grid = (triton.cdiv(N, BLOCK_M),)` 是程序总数，N=128 时是 2。`stride_qm` 这些参数是张量的步长（stride）：`q` 是 `[N, D]` 的连续 fp16 张量，`q.stride(0)` 等于 64，也就是一行 64 个元素、128 字节，`tl.load` 里的 `offs_m[:, None] * stride_qm` 就是靠这个步长找到每一行的起始地址。
+`tl.store` 用 `mask_m` 拦住越界的 Q 行。整个 kernel 里 Q 只在循环外读一次，K/V 每块读一次，qk 和 p 只活在片上——这就是 21.1 节换来的搬运账。
 
-正确性检查：与 PyTorch 参考对比（fp16 精度，最大绝对误差应在 1e-2 量级；大了先查 mask 与 rescale，不要先调容限）：
+边界清单：
+
+- N 不能被 BLOCK_N 整除：K/V load 用 `other=0.0`，qk 在 dot 之后用 `mask_n` 置 −inf；顺序反了会出 NaN。
+- N 不能被 BLOCK_M 整除：Q 的 load 和 store 共用 `mask_m`；tail 行计算但不写出。
+- 整行被 mask：`m_new = −inf` 会让 `alpha` 变成 NaN；标准循环的首块含列 0，天然避免；加块跳过时要重新保证。
+- N = 0：`grid = 0`，kernel 不启动；wrapper 直接返回空张量。
+- D 不是 2 的幂：`tl.arange(0, D)` 要求 2 的幂；把 D 补到下一个 2 的幂，load 时 mask 掉多余通道，dot 的贡献为 0。D 至少 16，否则 `tl.dot` 不接受。
+
+用 N = 128、D = 64、BLOCK_M = BLOCK_N = 64 验算 FLOPs：grid = ceil(128/64) = 2 个程序；每个程序走 128/64 = 2 步；每步两次 `tl.dot`，每次 `64×64×64 = 262,144` 次乘加，折合 524,288 FLOPs；每个程序 2×2×524,288 = 2,097,152；两个程序 4,194,304，正好等于 `4N²d = 4×128²×64`。causal 版这一版仍然算满整个方阵，FLOPs 不变；21.5 节讲怎么跳过整块。
+
+参考实现与最小验收：
 
 ```python
-def ref_attention(q, k, v):
-    scale = 1.0 / (q.shape[-1] ** 0.5)
-    p = torch.softmax(q.float() @ k.float().T * scale, dim=-1)
+import math
+import torch
+import torch.nn.functional as F
+
+
+def ref_attention(q, k, v, causal=False):
+    n, d = q.shape
+    s = (q.float() @ k.float().T) * (1.0 / math.sqrt(d))
+    if causal:
+        mask = torch.triu(torch.ones(n, n, dtype=torch.bool, device=q.device), diagonal=1)
+        s = s.masked_fill(mask, float("-inf"))
+    p = torch.softmax(s, dim=-1)
     return (p @ v.float()).to(q.dtype)
 
+
 torch.manual_seed(0)
-q = torch.randn(128, 64, dtype=torch.float16, device='cuda')
-k = torch.randn(128, 64, dtype=torch.float16, device='cuda')
-v = torch.randn(128, 64, dtype=torch.float16, device='cuda')
+n, d = 1024, 64
+q = torch.randn(n, d, dtype=torch.float16, device="cuda")
+k = torch.randn(n, d, dtype=torch.float16, device="cuda")
+v = torch.randn(n, d, dtype=torch.float16, device="cuda")
+
 out = fused_attention(q, k, v)
 ref = ref_attention(q, k, v)
-print('max abs err:', (out.float() - ref.float()).abs().max().item())
+print("max abs err vs FP32 reference:", (out.float() - ref.float()).abs().max().item())
+
+out_sdpa = F.scaled_dot_product_attention(
+    q[None, None], k[None, None], v[None, None]
+)[0, 0]
+print("max abs err vs SDPA:", (out.float() - out_sdpa.float()).abs().max().item())
 ```
 
-如果误差大了，先查 mask 与 rescale——最常见的两个错是尾巴没 mask 干净（多出来的位置进了求和）和 alpha 乘错了地方（旧状态没 rescale）；容限是最后才动的东西。上面两个错各给了你一个数：尾巴漏一个位置，分母能涨 64%；`acc` 漏乘一次 `alpha`，输出能偏 13.18。1e-2 的容限筛得出这种错，也筛得出“只是舍入”的情况。调容限之前先问一句：误差是 `10^-2` 量级还是 `10^0` 量级？前者是精度，后者是逻辑。
+`ref_attention` 用 FP32 算 S、softmax 和 PV，再转回 FP16，是不依赖 kernel 的数值基准；SDPA（Scaled Dot-Product Attention，缩放点积注意力：PyTorch 的 `scaled_dot_product_attention` 接口）是第二个对照，也是 21.4 节的计时基线。N = 1024 时 S 是 1024×1024 的 FP32，占 4 MB，单卡放得下；N 再大就用 SDPA 做基准，别在 PyTorch 里物化更大的方阵。预期的最大绝对误差在 1e-2 量级；如果看到 1e-1 以上或 NaN，先查 mask 和 rescale，不要先调容限。
 
-**产出**：一个能跑的 fused attention（数值对齐）+ 一份“代码行 vs 推导公式”的对照笔记。
+这一版刻意没做的事：没有 causal 整块跳过，没有 split-K，没有 persistent scheduling，没有 autotune，没有把 K 预转置成 `[D, N]`，也没有 `exp2`。这些是第 23 章读 FA2/FA3 的内容。先把正确性和 SRAM 账做对，再谈这些优化。
 
 ### 第 4 节 · 验收：正确性 + 计时 + Roofline 定位
 
-**目标**：给 fused attention 一个完整的验收：对不对、快不快、卡在哪。
+验收的顺序是正确性、计时、Roofline。先对一个没验证过的 kernel 计时，测出来的数字没有意义；先标 Roofline 点再看实现，容易把并行度不足误判成实现质量。
 
-**怎么做**（60 分钟，需 GPU）：
+正确性用 21.3 节的 `ref_attention` 做 FP32 基准，再用 SDPA 交叉对照。至少覆盖四组：N = 1024（主测试点）、N = 1000（不能被 64 整除，同时触发 BLOCK_M 与 BLOCK_N 的尾巴）、N = 256（短序列）、causal 开与关。D = 64。判据是最大绝对误差 ≤ 1e-2（预期值，不是实测）；超过 1e-1 或出现 NaN，按逻辑错误处理。几个典型症状：`acc` 漏乘 `alpha` 时，21.1 节的四元素例子会偏 13.18；尾巴没 mask 干净时，多出来的位置给 l 加 1，`l` 从 1.553002 涨到 2.553002，涨 64.4%；causal 写成 `>` 时，对角线被扔掉，第 0 行整行没有合法位置，直接 NaN，其他行的误差也会明显变大；K load 成 −inf 时直接 NaN。
 
-验收有三个问题：对不对、快不快、卡在哪。顺序不能乱：先对、再快——拿一个没验证过的 kernel 计时，测出来的数字没有任何意义。第 3 节的正确性检查就是第一关，这一节的后两关才轮到计时和定位。
+| 检查 | 形状 | 判据 | 实测 |
+|------|------|------|------|
+| 对照 FP32 参考，非 causal | N=1024, 1000, 256 | 最大绝对误差 ≤ 1e-2 | 待补测 |
+| 对照 SDPA，非 causal | N=1024, 1000, 256 | 最大绝对误差 ≤ 1e-2 | 待补测 |
+| 对照 FP32 参考，causal | N=1024, 1000, 256 | 最大绝对误差 ≤ 1e-2 | 待补测 |
+| 对角线检查，causal | N=128 | 第 0 行输出等于 `v[0]`（误差 ≤ 1e-2） | 待补测 |
 
-计时：用 `triton.testing.do_bench` 测 fused attention 与 PyTorch 参考（`torch.nn.functional.scaled_dot_product_attention`，SDPA）在 N=1024、d=64 下的耗时。SDPA 是对的对照：它本身就是融合实现（底层走 flash-attention 后端），比它慢是正常的——先记下差距，下一节再分析。第一版写出来就比 SDPA 快是不现实的，目标是先对、再快。还有一点容易忽略：SDPA 和你的 kernel 比的是实现质量：两个都是 fused attention，算法账是一样的，差出来的时间全在实现上（`tl.dot` 的利用率、softmax 部分的开销、循环的组织方式）。所以差距本身就是信息：它告诉你工业级实现和你这版之间隔了多少。
+计时用 `triton.testing.do_bench`：
 
-先算 Roofline，再看实测。标准 attention 计算量 = 4·N²·d：QK^T 占 2N²d（N×N 个输出，每个 d 次乘加），PV 占 2N²d。N=1024、d=64 时，计算量是 4×1,048,576×64 = 268,435,456 FLOPs，大约 0.268 GFLOP。Fused 版搬运量 = Q、K、V、O 各 N·d 个 fp16 元素 = 8·N·d 字节，N=1024 时是 8×1024×64 = 524,288 字节，正好 512 KiB。算术强度 = 4N²d / 8Nd = N/2，N=1024 时 AI=512。注意这个 N/2 的形式：算术强度只跟 N 有关，跟 `d` 无关。`d` 翻倍，计算量和搬运量一起翻倍，比值不动。
+```python
+from triton.testing import do_bench
 
-朴素版（物化 N×N 的 S 与 P）要多搬约 8N² 字节，N=1024 时是 8×1,048,576 = 8,388,608 字节，正好 8 MiB，是 fused 版搬运量的 16 倍。加上 fused 版自己的 512 KiB，朴素版总共要搬 8,912,896 字节，约 8.5 MiB，算术强度掉到 268,435,456 ÷ 8,912,896 ≈ 30.1 FLOP/字节。以 A100 为例（FP16 tensor core 约 312 TFLOPS，HBM 约 2 TB/s，数字以厂商公开规格为准），机器平衡点约 156 FLOP/字节——AI=512 远高于它，理论上是计算受限；朴素版的 AI≈30 远低于它，理论上是访存受限。同一个 attention，融合前后在 Roofline 图上的位置横跨了平衡点：融合做的事，就是把一个访存受限的问题变成了一个计算受限的问题。这个 16 倍就是融合省掉的东西，先算出来，再看实测。
+t_kernel = do_bench(lambda: fused_attention(q, k, v),
+                    warmup=25, rep=100, return_mode="median")
+t_sdpa = do_bench(
+    lambda: F.scaled_dot_product_attention(q[None, None], k[None, None], v[None, None]),
+    warmup=25, rep=100, return_mode="median",
+)
+print(t_kernel, t_sdpa)
+```
 
-再把这个对比换成时间下界，更直观。Fused 版如果跑满 312 TFLOPS 的算力，0.268 GFLOP 的计算量最少需要 0.86 微秒；如果只跑满 2 TB/s 的 HBM 带宽，512 KiB 的搬运量最少需要 0.26 微秒。计算的下界比搬运的下界大，瓶颈在计算这边，和 AI=512 高于平衡点 156 的判断一致。朴素版的下界在搬运这边：8.5 MiB 除以 2 TB/s 是 4.46 微秒。两个下界一比，约 5.2 倍——哪怕朴素版的实现完美无缺，它也快不过 4.46 微秒，而 fused 版的天花板在 0.86 微秒。融合省掉的 16 倍搬运，折成时间下界是 5 倍多的差距。实测时间一定比下界长，长出来的部分就是实现上的开销，下一段就是去认这部分开销。
+`do_bench` 的默认返回是均值（`return_mode="mean"`），不是中位数；上面的代码显式传了 `"median"`。均值和中位数都可以用，但两组对比必须用同一种，否则差距里混进了统计口径。以你装的版本的函数签名为准；Triton 3.6.x 的默认是 `mean`，文档字符串里的 median 与实现对不上。
 
-算术强度随 N 变化，这一点决定了验收结论不能只看 N=1024 一个点。AI = N/2，N=256 时 AI=128，低于平衡点 156，同一个 kernel 在短序列下是访存受限的；N=512 时 AI=256，刚过平衡点；N=2048 时 AI=1024，N=4096 时 AI=2048。平衡点对应的序列长度是 N=312（N/2 = 156）。所以“fused attention 是计算受限的”这句话要加定语：在 N=1024 的测试点上是。在 N=256 的短序列上，结论反过来。测完 N=1024 之后，有时间可以顺手测一个 N=256 的点，看 Roofline 上的位置是不是按 N/2 的规律移动——如果两个点都落在你算的 AI 上，说明你对这个 kernel 的理解是对的。
+`do_bench` 在每次计时前会用一个大缓冲区把 L2 清掉，所以它测到的是冷 L2 的数；如果你自己写循环且不清缓存，Q/K/V 可能留在 L2 里，数字会偏小。记录时写清口径。另一个细节：清缓存用写操作实现时，缓冲区留下的脏行可能在下一个 kernel 的计时窗口里写回；这个开销随 Triton 版本变化，微秒级 kernel 尤其要留意。
 
-把本周 kernel 的点标到 M0 的 Roofline 图上：横轴是你算的 AI，纵轴是实测算力。实测算力 = 计算量 ÷ 实测耗时，N=1024 时就是 268,435,456 FLOPs 除以 `do_bench` 测出来的时间。举个算术例子（非实测数字，只演示怎么换算）：如果测得耗时 10 微秒，实测算力就是 268,435,456 ÷ 10 微秒 ≈ 26.8 TFLOPS，大约是 312 TFLOPS 峰值的 8.6%。点离 Roofline 有多远，一眼就能看出来。如果点远在 Roofline 下方，说明瓶颈不在访存——理论上计算受限的 kernel 没跑出算力，差在实现上（`tl.dot` 的利用率、softmax 部分的非 matmul 开销）。`tl.dot` 之外的部分值得注意：`exp`、`max`、求和这些操作不走 tensor core，是纯粹的向量与归约开销，`tl.dot` 利用率再高也盖不住它们。第 5 周读 FA2/FA3 会告诉你工业级实现是怎么把它顶上去的。
+计时对比要同进程、同形状、同 dtype。SDPA 背后可能选 flash、mem-efficient 或 math 后端，记录 `torch.__version__`、CUDA、Triton 版本和 GPU 型号；跨版本比较没有意义。N = 1024 时理论下界是 0.86 µs，比一次 kernel 启动和计时噪声还小；单 head 又只有 16 个 CTA（见 21.2 节），实测时间会明显高于下界。这不是实现失败的证据，先把这两笔账算进去再解读数字。
 
-计时的方法本身也有讲究。第 2 周讲过 `do_bench` 取中位数（median）的道理：计时抖动来自系统噪声，单次测量不可信，中位数扛得住偶尔冒出来的离群值。测 SDPA 和测你的 kernel 要用同一套方法、同一组形状、在同一个进程里跑，否则差距里混进了方法差，分不清是实现差还是测量差。另外，重复跑同一组张量时，512 KiB 的 Q、K、V、O 在两次测量之间很可能还留在片上缓存里，实测的 HBM 搬运量会比 512 KiB 的冷启动账更小——写实测记录时注明是热缓存还是冷启动，比只写一个数字有用。
+| 实现 | N | d | causal | 中位耗时 | 实测算力 | 占 312 TFLOPS | 备注 |
+|------|---|---|--------|----------|----------|----------------|------|
+| Triton 64×64 | 1024 | 64 | 否 | 待补测 | 待补测 | 待补测 | num_warps=4, num_stages=2 |
+| Triton 128×64 | 1024 | 64 | 否 | 待补测 | 待补测 | 待补测 | num_warps=8, num_stages=2 |
+| SDPA | 1024 | 64 | 否 | 待补测 | 待补测 | 待补测 | 记录 PyTorch 版本 |
+| 朴素 FP16（物化 S/P） | 1024 | 64 | 否 | 待补测 | 待补测 | 待补测 | 同一 dtype，口径一致 |
 
-LeetGPU 验收：上 [LeetGPU](https://leetgpu.com)（50+ 题，浏览器里跑，CUDA 12.8；题库见 [leetgpu-challenges](https://github.com/AlphaGPU/leetgpu-challenges)），做至少 3 道 attention / matmul 相关题。LeetGPU 的评测会给你正确性与耗时排名——把它当成“别人写的同一道题”的对照，排名告诉你离别人的实现还有多远。排名的用法是横向对照：同一道题上，别人的实现快你多少倍、用的什么思路，比名次本身更值得看。做完把三道题的通过情况和排名记进实测记录，和 SDPA 的对比放在一起：一个是对照工业界的融合实现，一个是对照其他学习者的手写实现，两边夹着，你这版的位置就清楚了。
+实测算力 = 268,435,456 FLOPs ÷ 耗时；耗时用秒。比如 10 µs 对应 26.8 TFLOPS，是 312 TFLOPS 的 8.6%。这是算术示例，不是实测。
 
-有两个常见误解。一个是“算术强度高就一定快”：Roofline 画的是上界，算力能不能跑出来还要看实现。AI=512 只说明访存不是瓶颈，点落在 Roofline 下方很远，就是实现在拖后腿，理论账本身没错。另一个是“比 SDPA 慢就是写错了”：SDPA 背后是调优过的工业实现，第一版比它慢是正常的，慢多少才是信息。先记下差距，下一节再分析——差距本身就是下一节的输入。
+Roofline 逐项算：
 
-**产出**：一份实测记录（fused vs SDPA 耗时、Roofline 点、LeetGPU 3 道题通过）。
+| 量 | 算式 | 结果 |
+|----|------|------|
+| 计算量 | 4·N²·d = 4×1024²×64 | 268,435,456 FLOPs |
+| fused 搬运 | 8·N·d = 8×1024×64 | 524,288 B = 512 KiB |
+| fused 算术强度 | 268,435,456 ÷ 524,288 | 512 FLOP/字节 |
+| 朴素额外搬运 | 8·N² = 8×1024² | 8,388,608 B = 8 MiB |
+| 朴素总搬运 | 512 KiB + 8 MiB | 8,912,896 B ≈ 8.5 MiB |
+| 朴素算术强度 | 268,435,456 ÷ 8,912,896 | 30.1 FLOP/字节 |
+| A100 脊点 | 312 TFLOPS ÷ 2 TB/s | 156 FLOP/字节 |
+| fused 计算下界 | 268,435,456 ÷ 312×10¹² | 0.86 µs |
+| fused 搬运下界 | 524,288 ÷ 2×10¹² | 0.26 µs |
+| 朴素搬运下界 | 8,912,896 ÷ 2×10¹² | 4.46 µs |
+| 下界之比 | 4.46 ÷ 0.86 | 5.2 |
+
+每一行的来历：
+
+- 计算量：QK^T 产生 N×N 个分数，每个 d 次乘加，乘加算 2 FLOPs，所以 2N²d；PV 同样是 N×N 个输出、每个 d 次乘加，2N²d；合计 4N²d。
+- fused 搬运：Q、K、V、O 各 N×d 个 FP16，每个 2 字节，四个张量合计 8Nd。
+- 朴素额外搬运：S 和 P 各 N×N 个 FP16；每个写一次、读一次，2 个矩阵 × 2 字节 × 2 次访问 × N² = 8N²。
+- 脊点：312 TFLOPS ÷ 2 TB/s = 156 FLOP/字节。
+- 时间下界：字节数 ÷ 2 TB/s，或 FLOPs ÷ 312 TFLOPS。fused 的计算下界 0.86 µs > 搬运下界 0.26 µs，是计算受限；朴素版的搬运下界 4.46 µs > 计算下界 0.86 µs，是带宽受限。
+
+两个比值要分开说。搬运量：朴素版总共 8,912,896 B，是 fused 版 524,288 B 的 17 倍；其中 S、P 的额外 8 MiB 正好是 fused 基础搬运量的 16 倍。时间下界：4.46 µs ÷ 0.86 µs = 5.2 倍，不是 17 倍。原因是两侧的瓶颈不同：朴素版的时间由 8.5 MiB 的搬运决定，fused 版由 0.268 GFLOP 的计算决定；搬运量涨了 17 倍，时间只涨 5.2 倍。
+
+算术强度随 N 变：AI = N/2。N = 256 时 128，低于脊点 156，同一 kernel 在短序列上转成带宽受限；N = 512 时 256，超过脊点；N = 2048 时 1024；N = 4096 时 2048。脊点对应的序列长度是 N = 312。「fused attention 是计算受限」这句话只在 N 大于 312 时成立，N = 1024 的测试点只是其中一个点。
+
+512 KiB 是 HBM 口径，前提是 K/V 在 L2 里被后续 Q block 复用。单 head、N = 1024、Br = 64 时，每个 Q block 都要扫一遍全部 K/V，16 个 block 合计发出约 16×256 KiB = 4 MiB 的 K/V load 请求；K+V 本身只有 256 KiB，A100 的 40 MB L2 放得下，所以 HBM 流量可以接近 512 KiB。如果 L2 放不下、或者被别的数据挤掉，HBM 流量会接近 4.25 MiB（4 MiB K/V + 256 KiB Q/O），AI 掉到约 60，落到脊点以下。这个边界决定了 512 KiB 的账在什么条件下成立。
+
+把点标到 Roofline 图上：横轴 AI = 512，纵轴实测算力。点落在脊点右侧，理论上属于计算受限；如果离 312 TFLOPS 很远，差距来自三处：程序数只有 16 个（21.2 节），`tl.dot` 之外的 `exp`、`max`、求和走不了 tensor core，以及 `tl.dot` 本身的利用率。三处各占多少，要看 profiler，不能凭 Roofline 一张图断定。没有实测时，表里的数字写「待补测」，不要填估算值冒充实测。
+
+如果测的是 causal 版且做了整块跳过，FLOPs 不再是 4N²d，Roofline 的横轴要按实际有用的 FLOPs 重算；否则点会落在错误的位置。21.5 节给出 causal 的块级账。
 
 ### 第 5 节 · 小结：在 Roofline 图上标点 + causal mask 练习
 
-**目标**：收拢本周的结论，并把 causal mask 留作练习。
+Roofline 图上的点是一次验收的收尾：横轴是 21.4 节算出的 AI = 512，纵轴是 `do_bench` 测出的实测算力。点贴着 312 TFLOPS 的水平线，说明实现兑现了理论潜力；点远在下方，说明计算下界和实现之间还有距离。距离的归因要谨慎：单 head 只有 16 个 CTA 这一条，就足以让点远离水平线，不能全记在 `tl.dot` 头上。写结论时把「算出来的」和「测出来的」分开，测不出来的部分写「待补测」。
 
-**怎么做**（60 分钟，推导与总结无卡可做）：
+本章的链条是四步。21.1 节证明分块与整行 softmax 精确相等，给融合开了绿灯；21.2 节算出 SRAM、寄存器和程序数的约束，说明 block 参数不能抄；21.3 节把三条更新式逐行翻成 kernel，每一行都能在公式里找到对应；21.4 节用正确性、计时和 Roofline 验收，把理论账和实测账放在一起。四步里任何一步断了，后面的结论都站不住：rescale 推错，正确性没有根；SRAM 账没算，参数就是猜的；Roofline 没标点，「快不快」只剩感觉。
 
-更新 Roofline 图：把 fused attention 的点标上去，并写一句话——它离 Roofline 有多远、差在哪（大概率是 `tl.dot` 的利用率与 softmax 部分的非 matmul 开销，第 5 周会展开工业级实现用什么手段把它顶上去）。标图的动作本身就是验收的收尾：横轴是你第 4 节算的 AI=512，纵轴是实测算力，点的位置把“理论上计算受限”和“实测跑出多少算力”钉在同一张图上。点如果贴着 Roofline，说明实现已经把理论潜力兑现得差不多了；点如果远在下方，说明理论账和实现账之间还有距离，距离就是第 5 周要读的东西。写那一句话的时候要诚实：差在哪是猜测还是测出来的？第 4 节的分析能支撑到哪一步就写到哪一步，撑不到的地方写“待补测”，不要把猜测写成结论。
+causal mask 是这一版最直接的扩展。条件写成：
 
-回头看本周的链条，每一步都咬着上一步。第 1 节证明了分块不改变结果，数学上给融合开了绿灯；第 2 节算出 block 大小的 SRAM 上限，告诉你参数不能抄、得按自己的卡算；第 3 节把公式逐行翻成代码，每一行都能在推导里找到对应；第 4 节用 Roofline 和实测验收，理论账和实测账第一次碰头。链条里任何一环断了，后面的结论都站不住：rescale 没推对，代码的正确性就没根；SRAM 账没算过，block 参数就是抄来的；Roofline 没标点，“快不快”就只剩感觉。
+```python
+keep = mask_n[None, :]
+if IS_CAUSAL:
+    keep = keep & (offs_m[:, None] >= offs_n[None, :])
+qk = tl.where(keep, qk, -float("inf"))
+```
 
-练习：给 kernel 加 causal mask。causal 的意思是 query 第 m 行只能看到 key 的前 m 个位置——后面的位置权重必须是 0。做法是在算 `qk` 之后加一行：`qk = tl.where(offs_m[:, None] >= offs_n[None, :], qk, -float('inf'))`。条件 `offs_m >= offs_n` 恰好保留了 n ≤ m 的位置，其余位置被置成 -inf，exp 之后是 0，对求和与累加都没有贡献——和第 3 节的尾巴 mask 是同一个手法。为什么条件里用 `>=`？query 第 m 行能看到 key 的第 m 个位置本身——对角线上的位置是合法的，`n = m` 必须保留。写成 `>` 会把对角线也 mask 掉，整行 attention 少了一个位置，分母和输出全错一位。这是最容易错的一位，改完先数对角线。
+`offs_m >= offs_n` 保留 `n ≤ m` 的位置，正好是第 m 行 query 能看到的前 m+1 个 key。`>=` 不能写成 `>`：第 m 行能看到第 m 个 key 本身，对角线是合法的；写成 `>` 会把对角线 mask 掉，整行少一个位置，分母和输出都错一位。
 
-拿 N=128、BLOCK_M=BLOCK_N=64 的尺寸数一数 mask 掉了多少。N×N 的分数矩阵一共 16,384 个位置，causal 保留的是下三角加对角线，一共 N(N+1)/2 = 8,256 个位置，mask 掉 8,128 个，占 49.6%。将近一半的位置算完就被扔掉——这是 causal 版如实算出来的账。再按 block 看，四个 64×64 的 tile 各不相同：行 64–127、列 0–63 的那块，行号最小是 64、列号最大是 63，每一行都满足 `n < m`，整块保留；行 0–63、列 64–127 的那块，行号最大是 63、列号最小是 64，每一行都满足 `n > m`，整块 mask 掉；对角线上的两块（行 0–63 列 0–63、行 64–127 列 64–127）是块内三角，一半保留一半扔掉。整块 mask 掉的那一块，这一版还是老老实实算完再扔——第 5 周读 FA2 时会看到工业实现怎么跳过这种整块，为的是把那 49.6% 的浪费省下来。
+块级的账可以数出来。N = 128、BLOCK_M = BLOCK_N = 64 时，分数矩阵分成四个 64×64 的 tile：
 
-注意 mask 的形状是 `[BLOCK_M, BLOCK_N]`，与 `mask_n` 的那行 `tl.where` 可以合并成一个条件。两个条件都是“这个位置合不合法”：尾巴 mask 问的是 `offs_n < N`，causal mask 问的是 `offs_n <= offs_m`，合起来就是“列号既在序列内，又不超出行号”。两个 `tl.where` 写成一个，少一次对 `qk` 的整块遍历，意思也更清楚：合法位置的定义本来就是一句话，不必分两次说。改完之后，第 1 节的归纳法照样成立：被 mask 的位置贡献 `exp(-inf) = 0`，`l` 和 `Õ` 的求和里等于没有这一项，invariant 不变，结论不变。causal 没有改数学，只是把求和的范围从整行缩到了前 `m+1` 个位置。
+- 行 0–63、列 0–63：块内三角，一半保留一半 mask；
+- 行 0–63、列 64–127：行号最大 63、列号最小 64，全部 `n > m`，整块 mask；
+- 行 64–127、列 0–63：行号最小 64、列号最大 63，全部 `n < m`，整块保留；
+- 行 64–127、列 64–127：块内三角，一半保留一半 mask。
 
-改完用同样的参考实现验证（参考里用 `torch.tril` 造 mask 或直接调带 `is_causal=True` 的 SDPA）。验证要覆盖两种情况：对角线位置保留了没有，整块 mask 的区域有没有漏网。最简单的检查是拿 N=128 的随机输入跑一遍，最大绝对误差还在 1e-2 量级——如果误差突然变大，先查 `>=` 是不是写成了 `>`，再查合并后的条件是不是把尾巴 mask 挤掉了。causal 版多算的账也值得记一笔：这一版是先算满再 mask，FLOPs 还是 `4·N²·d`，N=128 时还是 4,194,304，但真正有用的只有下三角部分，2,113,536 FLOPs，约 50.4%。另一半算完就扔，是简单写法的代价；causal 本身并不要求算满再扔——区分这两点，第 5 周读 FA2 的跳块优化时才知道它在省什么。
+整块保留和整块 mask 各占四分之一，两个对角块各占四分之一。整个 N×N 矩阵保留 `N(N+1)/2 = 128×129/2 = 8,256` 个位置，mask 掉 16,384 − 8,256 = 8,128 个，占 49.6%。causal 版这一版仍然算满 4N²d = 4,194,304 FLOPs（N = 128），真正有用的只有 8,256/16,384 = 50.4%，即 2,113,536 FLOPs；另一半算完就扔。
 
-把本周的检查清单并进总清单，加两条：“rescale 的 invariant 写出来了吗”“分块参数是算出来的还是抄的”。这两条正好是本周的两根支柱：一条管数学对不对，一条管参数有没有根据。清单并进去之后，每次写新的 fused kernel 之前，先过一遍这两条：invariant 能不能一句话写出来，block 参数能不能拿出计算表。写不出来、拿不出来，就先回去补，别急着跑。
+整块 mask 的 tile 可以跳过。对第 `pid_m` 个 Q block，行号范围是 `[pid_m·BLOCK_M, (pid_m+1)·BLOCK_M − 1]`；当 `start_n > (pid_m+1)·BLOCK_M − 1` 时，这个 K block 的所有列都大于所有行号，整块 mask。把内层循环的上界从 N 改成 `min((pid_m+1)·BLOCK_M, N)`，就能省掉这些块。跳块之后要保证每行至少处理一个合法块：循环仍然从 `start_n = 0` 开始，第一块含第 0 列，而 causal 条件下列 0 对任何行都合法，所以 `m_i` 在第一轮就会变成有限值，`alpha` 不会遇到 `−inf − (−inf)`。把循环起点也往后挪会破坏这条保证，需要显式守卫。
 
-**产出**：更新后的 Roofline 图 + causal mask 版 kernel（数值对齐）。
+改完用同一套参考验证：`ref_attention(..., causal=True)` 和 `F.scaled_dot_product_attention(..., is_causal=True)`，最大绝对误差预期仍在 1e-2 量级。误差突然变大时，先查 `>=` 是不是写成了 `>`，再查合并后的 `keep` 有没有把尾巴 mask 挤掉。整块跳过只改变计算量，不改变数学：被跳过的块对 l 和 Õ 的贡献是 0，归纳法的不变式照样成立。
+
+本章的结论有两条：分块不改变结果，改变的是中间结果放在哪；block 大小由 SRAM、寄存器和程序数三者共同决定，不是抄来的默认值。把 causal mask 加上、把整块跳过加上，再往下读第 23 章的 FA2/FA3，看到的就是同一套数学在不同并行策略下的工程化。
+
+**延伸**：FlashAttention 原论文（Dao 等，[arXiv:2205.14135](https://arxiv.org/abs/2205.14135)，2022）：IO-aware 的分块 attention 与 IO 复杂度分析。
+
+**延伸**：[Triton 官方教程 `06-fused-attention`](https://github.com/triton-lang/triton/tree/release/3.6.x/python/tutorials)：与本版结构相同的参考实现，含 causal 与多头扩展。
+
+**延伸**：[Triton `tl.dot` 文档](https://triton-lang.org/main/python-api/generated/triton.language.dot.html)：输入精度、`out_dtype` 与 `input_precision` 的语义。
+
+**延伸**：[PyTorch SDPA 文档](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)：`is_causal` 与后端选择。
+
+**延伸**：[Triton `do_bench` 源码](https://github.com/triton-lang/triton/blob/release/3.6.x/python/triton/testing.py)：`return_mode` 的默认值与每次计时前的 L2 清缓存实现。
+
 ## 第 22 章 · 量化 Matmul 深讲：量化方案本身
 
 > 硬件：本周需要 GPU；无卡时先做第 1 节的手算与第 2–3 节的代码编写，实测标注“待补测”。
