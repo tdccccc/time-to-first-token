@@ -1137,166 +1137,219 @@ fused 点与 INT8 点在 M=32 时几乎重合（62.1 对 62.5），这个重合�
 **产出**：更新后的 Roofline 图 + 一张“相对误差 vs 提速比”对照表。相对误差一列来自第 2 节（手算约 1.47%，预期 1% 量级）；提速比一列来自第 4 节（待补测）。
 ## 第 23 章 · FlashAttention 2/3 与 CUTLASS：读工业级实现
 
-> 硬件：以读代码为主，无卡可做；第 4 节改配置实测需要 GPU（有 nvcc 的机器）。
->
-> 第 3 周你写了一个能跑的 attention，第 4 周你写了量化的 matmul。这一周不写新 kernel——读别人写的工业级实现，看它们把第 3 周的点离 Roofline 的差距是怎么补上的。
->
-> 本周主线：每一代工业实现都在回答同一个问题——利用率（实际算力占理论峰值的比例）为什么上不去，补上之后数字变成多少。
+第 21 章写出的 fused attention 在数学上是对的：Q 的一块常驻，K/V 分块流式读入，用 online softmax 维护运行最大值、归一化因子和输出累加器，不物化 S、P 两个 N×N 矩阵。同一套数学搬进工业实现，性能却可能差出一大截。FlashAttention-2 的论文给过一个直接读数：FlashAttention 1 在 A100 上只跑到理论峰值 FLOPs 的 25–40%，而调好的 GEMM 能到 80–90%。差的不是推导，是推导之外的决定：一个 block 算多少行、一个 warp 算哪一块、搬运和计算怎么重叠、针对哪一代 GPU 编哪条指令、哪些块可以整块跳过。
+
+这一章读三份工业实现，回答同一个问题：同样是分块 online softmax，工程上还要做哪些决定，才能把利用率从三分之一推到四分之三。读法不是逐行背代码，而是先分清论文改的是算法层、执行层还是硬件层，再在源码里找到对应的位置。
+
+**本章目标。** 能说清 FA1、FA2、FA3 各自把瓶颈归到哪里，flash-attn 前向主循环的骨架与特化分支各管什么，CUTLASS 的三级分工与 3.x 的 CuTe 术语，并能按“改一个 tile 参数 → 重编 → 验算 → 计时”的步骤设计一次自己的对照实验。
 
 ### 第 1 节 · FlashAttention 1→2→3 的工程演进
 
-**目标**：讲清三篇论文是一条链：每一代都先点名上一代的瓶颈，再改它。学完能说出每一代“改了什么、为什么改、改出多少”。
+FA1 解决的是访存。标准 attention 把 S = QK^T 和 P = softmax(S) 写回 HBM，再读出来乘 V，两个 N×N 矩阵的往返把时间压在显存带宽上。FA1 用 tiling 把 Q、K、V 切成能塞进 SRAM 的块，用 online softmax 在块之间传递运行统计量，S、P 只在片上出现，显存占用从 O(N²) 降到 O(N)。这是算法层的改动，dense attention 上数学精确，没有近似：不稀疏化，也不做低精度量化。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+FA1 论文的加速比要连着基线读：它宣称 GPT-2、序列长度 1K 上训练快 3 倍，Long Range Arena（1K–4K）上快 2.4 倍，基线是当时的常规 PyTorch 实现（版本与配置见论文）；FA2 论文回顾 FA1 时给的概括是“相对优化过的基线 2–4 倍”。3 倍、2.4 倍是端到端训练墙钟时间，2–4 倍是注意力算子层面的区间，两者口径不同。引用这些数字时，把对比对象、模型和序列长度一起写出来，否则数字没有意义。
 
-先把链条立起来（第 3 周已讲 FA1 的 IO-aware 与 tiling，这里只补它留下的尾巴）：FA1 只解决了访存，没解决算力利用率。利用率这个词值得先抠一下：它等于实测 FLOPs 除以理论峰值 FLOPs，是一个比值。FA2 的摘要直接点名：FA1 只达到理论峰值 FLOPs 的 25–40%，远低于优化过的 GEMM。25–40% 是什么概念？拿区间中点算一道题：（25 + 40）÷ 2 = 32.5%，也就是说 FA1 平均只用出了三分之一左右的算力，三分之二的 Tensor Core 时间在等数据、等同步、等别的 warp。数学对了，利用率还是低——瓶颈从算法挪到了并行结构上。
+FA1 把访存账算平了，算力利用率仍然低。FA2 的诊断是工作划分：同一个 head 的 attention 只交给一个 thread block（线程块，一组跑在同一个 SM 上的线程），长序列、小 batch 时 SM 大量闲着；block 内部 warp 之间又用 split-K 分工，K、V 切给不同 warp，每个 warp 算出一片部分和，再写 shared memory（同一 block 内线程共享的片上存储）做跨 warp 归约。归约要同步，同步让 Tensor Core 等。
 
-为什么数学对了还会低？第 3 周的 online softmax 推导证明的是正确性：分块算出的结果和标准 attention 相等。但正确性只保证结果对，不保证硬件忙。硬件忙不忙，取决于工作怎么分：一个 thread block（线程块，一组跑在同一个 SM 上的线程）算多少、一个 warp（32 个线程的执行单位）算多少、warp 之间要不要等对方把数据写进 shared memory（片上共享内存，同一 block 内线程共用的高速暂存）再读出来。分工不合理，Tensor Core 就算得断断续续，利用率自然上不去。FA1 的贡献在访存，FA2 的贡献就在分工。
+FA2 的三处改动都对着这个诊断：
 
-FA2 的三处改动（按摘要的原意），每一处都可以对着“利用率低”这个诊断去理解。
+- **减少非 matmul FLOPs。** 输出累加器不再每块除以归一化因子，而是保持未归一化，块间只乘 `exp(m_old − m_new)`，循环结束再统一除。softmax、rescale 这类逐元素操作只占 FLOPs 的一小部分，但论文指出非 matmul 吞吐最多只有 matmul 的 1/16，省下它们等于把 Tensor Core 的等待时间省下来。
+- **跨 thread block 并行。** 前向把 query 的行块分给不同 block，grid 变成 `(query 行块数, batch, heads)`；一个 head 也能占满多个 SM。长序列、小 batch 这个区间受益最大。
+- **warp 间改分工。** FA1 是 split-K：K/V 切给 warp，结果要经 shared memory 相加。FA2 改成 split-Q：Q 的行切给 warp，每个 warp 拿着自己那几行 Q 去乘完整的 K，再乘自己那片 V，输出行天然属于自己，warp 之间不需要归约，中间结果留在寄存器里。
 
-减少非 matmul 的 FLOPs：softmax、rescale 这些非矩阵乘的开销占比降下来，让 matmul 的比重上去。为什么这能提利用率？Tensor Core 只吃 matmul，softmax 和 rescale 跑在 CUDA core（通用计算单元）上。一个 attention 前向里，matmul 的 FLOPs 本来就占大头，但 softmax、rescale 这些逐元素操作如果反复做、每次都走一遍完整的读写，就会把流水线拖慢：Tensor Core 算完一块 QK^T，得等 CUDA core 把 softmax 算完才能继续。把非 matmul 的 FLOPs 压下去，等于把 Tensor Core 的等待时间压下去，同样的时间里 matmul 的占比上去了，利用率也就上去了。打个比方：一条流水线上真正赚钱的工位是 matmul，非 matmul 工位是绕不过去的质检，质检越快，赚钱工位的空闲就越少。
+causal mask 还有一个块级优化：完全落在对角线右上方的块，整块输出都是 0，可以直接跳过；对角线上的块才需要逐元素 mask。论文报告，长序列下跳过这些块带来约 1.7–1.8 倍于非 causal 版本的加速（论文宣称，序列长度与实现见原文）。
 
-跨 thread block 并行：哪怕是单个 head 的 attention，也拆到多个 thread block 上并行，提高 occupancy（占用率，SM 上同时驻留的 warp 占硬件上限的比例）。单个 head 的 attention 本来可以只交给一个 block 算，但一个 head 的计算量再大，一个 block 也只占一个 SM，别的 SM 全闲着。拆到多个 block 上，多个 SM 同时开工，总的并行度上去了。occupancy 高低直接决定延迟能不能被藏住：第 1 周讲过，一个 warp 等数据的时候，SM 要切到另一个 warp 去算，驻留的 warp 越多，能顶上去的就越多。跨 block 并行就是给 SM 多备几个能随时顶上去的 warp。
+FA2 的结果按口径分开记：摘要说相对 FA1 约 2 倍，A100 上达到理论峰值的 50–73%；端到端训练 GPT 风格模型时，单张 A100 达到 225 TFLOPs/s（72% 模型 FLOPs 利用率）。这是训练数字，不是推理数字。论文第 4 节的基准更细：跨序列长度相对 FA1 快 1.7–3.0 倍，相对 PyTorch 标准实现快 3–10 倍，相对 Triton 版 FA 快 1.3–2.5 倍。摘要取的是约 2 倍这个概括值，具体区间要看基准配置。
 
-warp 间分工：同一个 block 内把工作分给不同的 warp，减少 warp 之间经由 shared memory 的通信。原来一个 warp 算完要把中间结果写进 shared memory，另一个 warp 再读出来算下一步，一写一读之间还要同步。分工改了之后，每个 warp 手里的活更完整，中间结果尽量留在寄存器里，shared memory 的往返少了，同步的次数也少了。shared memory 的读写本身不慢，慢的是“写完要等别人读”这个同步点：同步点一多，所有 warp 都在等最慢的那个。
+FA3 的起点是硬件换代。FA2 的结构是为 Ampere 写的，搬到 H100 上只有 35% 利用率，而 H100 上调好的 GEMM 能到 80–90%。Hopper 多了两样 FA2 没用上的能力：TMA（Tensor Memory Accelerator，张量内存加速器：负责异步搬运的硬件单元）把 global memory 到 shared memory 的拷贝变成一条异步指令；Tensor Core 的 WGMMA 可以异步执行，计算不必等数据全部到位。FA3 的三项技术都是围绕这两点重排流水线：
 
-FA2 的结果（摘要数字）：相对 FA1 提速约 2 倍，A100 上达到理论峰值的 50–73%，接近 GEMM 的效率；端到端训练 GPT 风格模型时，单张 A100 达到 225 TFLOPs/s（72% 的模型 FLOPs 利用率）。这几个数可以互相验算。先看区间中点：（50 + 73）÷ 2 = 61.5%，FA1 的中点是 32.5%，61.5 ÷ 32.5 ≈ 1.89，约等于 2，和“相对 FA1 约 2 倍提速”对得上。再看端到端那个数：225 ÷ 0.72 ≈ 312.5 TFLOPs/s，这是摘要数字反推出的 A100 理论峰值——225 TFLOPs/s 是 72% 的利用率，峰值就是 225 除以 0.72。两个独立的数字（50–73% 的区间和 225 TFLOPs/s 配 72%）讲的是同一件事：FA2 把利用率从三分之一左右抬到了六成以上。还有一个细节值得留意：50–73% 是一个区间，不是单点，因为利用率随序列长度、head 维这些配置变化；读论文数字时，区间比单点诚实，单点往往是挑过的最好情况。
+- **warp specialization（线程束特化）。** 把 block 内的 warp 分成生产者和消费者：生产者只发 TMA 搬运，把 K/V 块填进多级 circular shared memory buffer；消费者只做计算，等 barrier 通知后取数。搬运和计算由不同的 warp 同时推进，不再由一个 warp 轮流做两件事。
+- **matmul 与 softmax 交错。** 一个 consumer warpgroup 内部，把上一块的 softmax 与下一块的 WGMMA 排进两级流水；两个 warpgroup 之间再用 ping-pong 调度，一个 warpgroup 做 softmax 时另一个做 GEMM。目的是让 Tensor Core 在 softmax 阶段也有活干。
+- **FP8 块量化与 incoherent processing（非相干处理）。** 每个 Q/K/V 块单独定 scale，避免一个全局 scale 被离群值拖垮；再把 Q、K 乘一个随机正交矩阵（实践中用随机对角矩阵与 Hadamard 矩阵的乘积），把离群值摊到多个分量上，量化误差更均匀。矩阵正交，乘积不改变 attention 的输出。
 
-> **论文选读（不读也能学完本周）**：FlashAttention-2（Dao，[arXiv:2307.08691](https://arxiv.org/abs/2307.08691)，2023 年 7 月；原文可选，正文已包含核心内容）。
->
-> - **核心思想**：FA1 的问题不在算法数学，在**并行结构**。同样的 tiling 与 online softmax，换一种工作分配就能多榨一倍性能。
-> - **核心逻辑链条**：诊断（25–40% 利用率 → 分工问题）→ 三处改动（减非 matmul FLOPs、跨 block 并行、warp 间分工）→ 验证（50–73% 利用率、端到端 225 TFLOPs/s）。
-> - **关键结论与数字**：相对 FA1 约 2 倍提速；A100 上 50–73% 理论峰值；GPT 风格模型端到端训练 225 TFLOPs/s（72% 利用率）。摘要同时确认了 FA1 的基线：相对优化过的基线 2–4 倍提速、显存从平方降到线性、无近似。
-> - **为什么重要**：它证明了“瓶颈诊断”本身的价值——第 1 周的 ncu 定位、第 3 周的 Roofline，都是在练同一种能力：先找到利用率低的原因，再决定改哪里。
+FA3 的结果同样按口径记：H100 SXM5 上，FP16 前向相对 FA2 快 1.5–2.0 倍、反向快 1.5–1.75 倍，最高 740 TFLOPs/s（75% 利用率）；FP8 接近 1.2 PFLOPs/s；FP8 的 RMSE 是 per-tensor 量化基线的 1/2.6。这里有两个容易读错的地方。第一，1.2 PFLOPs/s 是特定配置下的最高值，论文自己说明长序列下 FP16 可能反超 FP8，head 维度 128、256 且带 causal mask 时 FP8 并不总是更快，“FP8 一定更快”不成立。第二，2.6 倍低误差是相对“per-tensor 量化的 FP8 基线”，不是相对 FP16；FP16 下 FA2 与 FA3 的 RMSE 都是 1.9e-4，FP8 版是 9.1e-3，仍比 FP16 差一个量级以上。
 
-FA3 的转向：FA2 在 H100 上只有 35% 利用率——Hopper 有了新硬件能力（Tensor Core 异步、TMA），FA2 没用上。35% 这个起点要和 FA2 在 A100 上的 50–73% 对着看：同一套代码，换一块更强的卡，利用率反而掉了。这说明瓶颈跟着硬件走了：H100 的算力涨得比 FA2 的搬运与同步能力快，旧结构喂不饱新硬件。第 1 周“先看硬件再写 kernel”的道理，在这里是论文级别的演示：硬件升级不会自动带来提速，结构不跟着改，利用率反而会跌。
-
-FA3 的三项技术（摘要原意），每一项都是冲着 Hopper 的新能力去的。
-
-warp specialization（warp 特化，让不同的 warp 专门干不同的活）+ 异步：利用 Tensor Core 与 TMA（Tensor Memory Accelerator，张量内存加速器，Hopper 上专门负责搬运的硬件单元）的异步性，让计算与数据搬运重叠——一部分 warp 专做搬运（生产者），一部分专做计算（消费者），流水线不断。关键在“专做”：同一个 warp 不再又搬数据又算，搬运和计算各自有人管，TMA 异步搬运时 tensor core 不用等。为什么“专做”比“轮流做”好？一个 warp 又搬又算，搬的时候算的单元闲着，算的时候搬的通路闲着，两种闲置轮流发生；分开之后，搬运 warp 只管把下一块 tile 提前搬进 shared memory，计算 warp 只管在 Tensor Core 上算，两边同时进行，闲置就被重叠吃掉了。重叠能省多少，可以拿一组假设数字演示（假设数字，只为讲清机制，不代表实测）：一块 tile 的搬运要 6 个单位时间，计算要 10 个单位时间，串行是 6 + 10 = 16，重叠之后每块 tile 只要 max（6，10）= 10，16 ÷ 10 = 1.6 倍——这就是流水线重叠的算法，省掉的是“等”的时间。
-
-matmul 与 softmax 交错：把分块 matmul 与 softmax 操作交错排布，不让 Tensor Core 等 softmax。softmax 不是 matmul，跑在 CUDA core 上；流水线串行排布时，tensor core 在 softmax 阶段是闲着的，交错排布就是给它找活干。同样拿一组假设数字演示：每步 matmul 要 10 个单位时间，softmax 要 4 个单位时间，串行是 10 + 4 = 14；交错之后，上一块的 softmax 和下一块的 matmul 同时进行，理想情况下每步只要 10，14 ÷ 10 = 1.4 倍。两组假设数字都不代表 FA3 的实测提速，它们只说明一件事：FA3 的提速来自把“等”的时间从流水线里抠掉，单步本身并没有变快。FA2 减非 matmul FLOPs 是把 softmax 的活变少，FA3 的交错是把剩下的 softmax 藏到 matmul 的时间里——两代的思路是接力关系。
-
-FP8 的块量化与 incoherent processing（非相干处理，一种打散数据相关性以控制量化误差的手段）：用硬件的 FP8 支持做低精度计算，同时控制误差。FP8 的算力是 FP16 的约 2 倍，但量化误差更大，块量化和 incoherent processing 是把误差控制住的手段。块量化好理解：每块各自定 scale（缩放因子）来量化，一个全局 scale 不再管整张量，数值范围差异大的块不会被同一个 scale 拖垮；incoherent processing 的直觉是把数据的结构打散，让量化误差均匀摊开，不集中在少数几个数值上。低精度真正的风险不是“精度低了”，是误差集中爆发——控制手段的作用就是把误差摊薄。
-
-FA3 的结果（摘要数字）：H100 上相对 FA2 提速 1.5–2.0 倍；FP16 达到 740 TFLOPs/s（75% 利用率）；FP8 接近 1.2 PFLOPs/s；FP8 版的数值误差比基线 FP8 attention 低 2.6 倍。注意最后一项：FP8 不仅更快，误差反而更低——低精度不等于低质量，关键在误差控制的手段。这几个数也可以互相验算。740 ÷ 0.75 ≈ 986.7 TFLOPs/s，这是摘要数字反推出的 H100 FP16 理论峰值。再看起点：75% ÷ 35% ≈ 2.14，略高于 1.5–2.0 倍的提速区间——这并不矛盾，因为利用率是峰值占比，提速是实测耗时比，两者口径不同，不能直接划等号；读论文时把不同口径的数字直接相除，本身就是常见的误读。FP8 的账也值得算一笔：1.2 PFLOPs/s 就是 1200 TFLOPs/s，1200 ÷ 740 ≈ 1.62，即 FP8 版比 FP16 版快约 1.62 倍；而 FP8 的理论算力是 FP16 的约 2 倍，1200 ÷（740 × 2）≈ 0.81，说明 FP8 只兑现了理论翻倍的约 81%，剩下的 19% 被量化、搬运这些额外开销吃掉了——低精度翻倍的是峰值，不是实测。误差的账同样可以算：误差低 2.6 倍，就是新误差只有基线的 1 ÷ 2.6 ≈ 0.385，即约 38.5%，误差降了约 61.5%。“更快且误差更低”这句话，数字上就是 1.62 倍速度配 38.5% 的误差。
-
-> **论文选读（不读也能学完本周）**：FlashAttention-3（Shah 等，[arXiv:2407.08608](https://arxiv.org/abs/2407.08608)，2024 年 7 月；原文可选，正文已包含核心内容）。
->
-> - **核心思想**：新硬件要有新打法。Hopper 的异步能力（TMA、warp specialization）与 FP8 支持，是 FA1/FA2 的结构用不上的——FA3 围绕这两点重排了流水线。
-> - **核心逻辑链条**：诊断（FA2 在 H100 上仅 35% 利用率）→ 三项技术（warp specialization 重叠计算与搬运、matmul/softmax 交错、FP8 块量化）→ 验证（FP16 740 TFLOPs/s、FP8 近 1.2 PFLOPs/s、误差反而更低）。
-> - **关键结论与数字**：H100 上 1.5–2.0 倍于 FA2；FP16 740 TFLOPs/s（75% 利用率）；FP8 接近 1.2 PFLOPs/s；FP8 数值误差比基线低 2.6 倍。
-> - **为什么重要**：它把“硬件特性决定算法结构”这句话落到了实处——第 1 周学的“先看硬件再写 kernel”，在这里是论文级别的实践。M3 会回到这个主题：换一块芯片（Ascend），同样的重排要再做一遍。
-
-把三代画成一张演进表：每代一行，写“瓶颈诊断 → 改动 → 结果数字”。这是本周的核心产出，第 5 节会再用它。填好的样子：
-
-| 代 | 瓶颈诊断 | 改动 | 结果数字 |
+| 代 | 诊断的瓶颈 | 改动 | 论文宣称的结果（含口径） |
 |---|---|---|---|
-| FA1 | 访存：S、P 矩阵反复过 HBM | tiling + online softmax，IO-aware | 显存从平方降到线性；GPT-2 训练 3 倍 |
-| FA2 | 并行结构：利用率只有 25–40% | 减非 matmul FLOPs、跨 block 并行、warp 间分工 | 相对 FA1 约 2 倍；A100 上 50–73% 利用率 |
-| FA3 | 新硬件没用上：H100 上只有 35% | warp specialization、matmul/softmax 交错、FP8 | 相对 FA2 1.5–2.0 倍；FP16 740 TFLOPs/s（75%） |
+| FA1 | S、P 物化后反复过 HBM | tiling + online softmax，不物化 S/P | 显存 O(N²)→O(N)；GPT-2 序列 1K 训练 3×、LRA 1K–4K 2.4×，基线为当时的 PyTorch/HF 实现；FA2 概括为相对优化基线 2–4× |
+| FA2 | 工作划分：A100 上 25–40% 峰值 | 未归一化输出累加器、按 query 行切 block、split-Q 取代 split-K、跳过全遮 causal 块 | 相对 FA1 约 2×（摘要），基准区间 1.7–3.0×；A100 50–73% 峰值；GPT 风格训练 225 TFLOPs/s/A100（72% MFU） |
+| FA3 | Hopper 新能力没用上：H100 上 35%，GEMM 可到 80–90% | warp specialization + TMA、GEMM-softmax 交错（2/3 级流水）、FP8 块量化 + incoherent processing | 相对 FA2 前向 1.5–2.0×、反向 1.5–1.75×；FP16 740 TFLOPs/s（75%）；FP8 近 1.2 PFLOPs/s；FP8 RMSE 为 per-tensor 基线 1/2.6 |
 
-读这张表要看出的规律：每一代的“改动”都是上一代“瓶颈诊断”的直接回答，没有一代是在漫无目的地优化。先诊断、再改动、最后用数字验证——这就是第 1 周 ncu 定位、第 3 周 Roofline 的同一套方法，只是搬到了论文级别。还有一个容易忽略的规律：三代改的东西一层比一层靠近硬件。FA1 改的是访存模式（算法层），FA2 改的是并行分工（执行层），FA3 改的是流水线与硬件特性的用法（硬件层）。越往后，改动离数学越远，离硬件越近——这也是第 3 周你写的 Triton 版和第 5 周读的工业版之间的差距所在：Triton 帮你管了访存和分块，工业版还要亲手管 warp 分工和流水线重叠。
+表里的数字全部来自论文摘要、正文或结论，没有独立复现，行与行之间不能直接比：FA1 的 3× 是端到端训练对 PyTorch，FA2 的 2× 是注意力算子对 FA1，FA3 的 1.5–2.0× 是 H100 上对 FA2。同一代内部，摘要的概括值、正文的区间、端到端与算子级也各不相同。读论文数字先找三样东西：和谁比、在什么模型和序列长度上、量的是端到端还是单个算子。
 
-**产出**：一份“论文做法 vs 工程做法”对照笔记，核心是一张 FA1→FA2→FA3 演进表（每代的瓶颈、改动、数字）。
+三代改动一层比一层靠近硬件：FA1 改访存模式（算法层），FA2 改 block 与 warp 的工作划分（执行层），FA3 改流水线与指令的用法（硬件层）。不变的是三件事：不物化 S/P、分块 online softmax、结果精确。判断一篇新实现改的是哪一层，比背下它的加速比更有用。
 
 ### 第 2 节 · 读 flash-attn 源码：主循环长什么样
 
-**目标**：在真实实现里定位第 3 周学过的 online softmax 循环，画出前向 kernel 的结构图。
+源码读的是 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)。FA2 的 CUDA 实现在 `csrc/flash_attn/src/`：前向主 kernel 在 `flash_fwd_kernel.h`，按 head 维、数据类型和架构选实例的 dispatch 在 `flash_fwd_launch_template.h`，每个实例化是一个很小的 `.cu` 文件，例如 `flash_fwd_hdim64_fp16_sm80.cu`。FA3 的实现另放在 `hopper/` 目录，主循环文件是 `mainloop_fwd_sm90_tma_gmma_ws.hpp`，文件名里的 `tma_gmma_ws` 就是它的三项技术。文件名和目录结构随版本变，读之前以当前仓库为准。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+读的顺序与执行顺序相反：先看 dispatch，再看 kernel 本体。dispatch 决定“给定 head 维、精度、架构、causal，实际跑哪个变体”，不先看它，钻进任何一个 `.cu` 都不知道自己读的是哪种输入。`flash_fwd_launch_template.h` 里，`run_mha_fwd_hdim128` 按架构和 causal 选 tile：sm86/sm89 上非 causal 用 128×32、causal 用 64×64，其他架构用 128×64；dropout 打开又换一套。这些选择不是数学分支，是 tile 形状与 shared memory 预算的权衡。
 
-先说为什么读源码：第 3 周的 kernel 和 flash-attn 解的是同一道题，差别就是 FA2/FA3 的工程手段。读源码不是为了背实现，是为了看清“你的版本和工业版差在哪”——差的地方，就是第 1 节那张演进表里的改动落点。第 3 周你写的 Triton 版，编译器帮你处理了分块、流水线和内存层级；flash-attn 的 CUDA 版把这些全部摊开写在代码里。读它等于把编译器替你做的事重新看一遍，看完就知道第 1 节那张演进表里的每一行改动在代码里长什么样。
+dispatch 之后看 grid。`run_flash_fwd` 里 `dim3 grid(num_m_block, params.b, params.h)`，第一维是 query 行块数——单个 head 的 query 行被拆到多个 block，这就是 FA2 的跨 block 并行。再看 `Flash_fwd_kernel_traits<Headdim, kBlockM, kBlockN, kNWarps, ...>`：head 维、M tile、N tile、warp 数在编译期定死，`kBlockM`、`kBlockN` 决定 shared memory 大小和每块的计算量。
 
-打开 [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)，定位这三个文件：`csrc/flash_attn/src/flash_fwd_kernel.h`（前向主 kernel）、`csrc/flash_attn/src/flash_fwd_launch_template.h`（按 head 维与数据类型选 kernel 变体的分发模板）、以及按 head 维/数据类型实例化的文件（如 `flash_fwd_hdim64_fp16_sm80.cu`）。读的顺序反过来：先看 launch template——它告诉你给定 head 维和数据类型，实际跑的是哪个 kernel 变体；再进 kernel 本体；先看循环骨架，再看头尾细节。为什么顺序要反过来？因为工业代码是“先分发、后计算”的结构：同一个算法针对不同的 head 维、不同的数据类型、不同的 GPU 代际，会实例化出很多个 kernel 变体，直接钻进某一个 `.cu` 文件，你不知道它代表的是哪种情况；先看 launch template，等于先看目录再看正文，知道每个变体管的是哪种输入。
+主循环的骨架可以压成下面这段示意。它保留了 `flash_fwd_kernel.h` 的结构，删掉了模板、边界判断和 dropouts 等分支，不是可直接编译的代码：
 
-在 `flash_fwd_kernel.h` 里找第 3 周的对应物：外层按 K/V 分块的循环、每步的 `m` / `l` / `acc` 更新（online softmax 的 rescale）、Q/K/V 的 tile 加载。代码是 CUDA，数学是第 3 周的推导——你读源码时要做的就是把每一行 CUDA 对回推导里的一行公式。对上了，说明第 3 周的东西是真的；对不上，先怀疑自己读错了位置，再怀疑实现用了别的等价形式。对照的方法可以具体一点：第 3 周样稿里的更新规则是 `α = exp(m_old − m_new)`，`l_new = l_old · α + rowsum(P_block)`，`Õ_new = Õ_old · α + P_block · V_block`。在 kernel 里找这三件事：`m` 是不是每来一块就取新最大值，`l` 是不是乘了 `exp(m_old − m_new)` 再加块内和，累加器 `acc` 是不是同样先乘 `α` 再加 `P_block · V_block`。三个对上两个，骨架就确认了；第三个如果长得不一样，很可能是实现把 rescale 和 matmul 的顺序换了——比如先算 `P_block · V_block` 再统一乘 `α`，数学等价，只是写法不同。Q 的加载也值得留意：Q 只加载一次、驻留在寄存器里反复用，K、V 则是每步换一块——这正是第 3 周 tiling 的结构：外层循环走 K/V，Q 不动。读到 Q 的加载只出现一次、K/V 的加载出现在循环里，结构图就对上了。
+```cpp
+// 示意：按 flash_fwd_kernel.h 的主循环简化，省去模板参数与边界处理
+int n_block_max = ceil_div(seqlen_k, kBlockN);
+if (Is_causal) {
+    n_block_max = min(n_block_max,
+        ceil_div((m_block + 1) * kBlockM + seqlen_k - seqlen_q, kBlockN));
+}
+for (int n_block = n_block_max - 1; n_block >= n_block_min; --n_block) {
+    cp_async_wait<0>(); __syncthreads();
+    copy(gV[n_block], sV);           // 当前块的 V 搬进 shared memory
+    cp_async_fence();
 
-再找 FA2 的痕迹：工作是怎么在 thread block 与 warp 之间分配的（第 1 节的三处改动在代码里落在哪些地方）。不用全读懂，定位到位置并写下来就是本节的目标。定位有三个抓手：跨 block 并行看 block 的划分方式——单个 head 的 attention 是不是拆到了多个 block 上，每个 block 算哪几行输出；warp 间分工看同一个 block 内的 warp 是不是各算各的一块、中间结果经不经过 shared memory；减非 matmul FLOPs 看 softmax 与 rescale 的代码是不是被收敛到了最少的几步，有没有把能合并的逐元素操作合并到 matmul 的间隙里。三个抓手对应第 1 节的三处改动，定位到一个就是一处落点。读的时候可以带着第 1 节的演进表去找：表里每一行改动，都应该在代码里有一个对应的位置，找不到的先记下来，到第 5 节再回头对。
+    gemm(acc_s, Q, K);               // S = Q K^T
 
-注意边界：flash-attn 是工业级实现，里面有大量为特定硬件与 head 维特化的分支——读源码的目标是“定位结构”，不是“背下实现”。遇到看不懂的分支，先记下它在管什么（比如某个 `#ifdef` 是为哪代 GPU 开的），不要卡住。特化分支的存在本身就是一个知识点：head 维 64 和 head 维 128 的 kernel 是不同的实例化文件，文件名里的 `hdim64`、`sm80` 就是分发的条件——head 维和 GPU 代际（sm80 对应 Ampere 架构）决定了用哪个变体。工业代码里这种分支越多，说明算法对硬件形状越敏感；第 3 周的 Triton 版没有这些分支，是因为编译器把特化藏起来了，不是特化不存在。
+    cp_async_wait<0>(); __syncthreads();
+    if (n_block > n_block_min) {     // 预取下一块的 K
+        copy(gK[n_block - 1], sK);
+        cp_async_fence();
+    }
 
-一个常见的误解：“读不懂源码就是基础差”——读工业级 CUDA 代码卡住是常态，卡住的位置往往是特化分支和模板技巧，不是 attention 的数学。正确的做法是先画骨架再抠细节：外层循环、rescale 更新、tile 加载这三件确认了，主循环就读完了；剩下的分支是“这份代码为了跑得快多做的事”，不是“这道题必须有的事”。反过来，把骨架和分支混在一起读，每一行都像在讲新东西，读一小时也画不出结构图。
+    mask.apply(acc_s, n_block, m_block);   // causal/边界 mask
+    softmax.softmax_rescale_o(acc_s, acc_o, scale_log2);  // m/l/O 更新
+    gemm_rs(acc_o, P, V);            // O += P V
+}
+```
 
-读完之后怎么验证自己真的读懂了？合上代码，凭记忆回答四个问题：Q、K、V 各自在什么位置加载，Q 加载几次、K/V 加载几次；`m` / `l` / `acc` 的更新发生在循环内的第几步，rescale 乘在哪些量上；外层循环走完一块之后，哪些量留到了下一块、哪些量被写回；FA2 的三处改动里，至少一处在代码里的落点在哪。四个问题答得出来，结构图就是你自己的；答不上来，说明刚才读的是文字，不是结构。这四个问题也可以当成结构图的检查清单：图上每个框都应当能回答其中至少一个问题，答不上任何问题的框就是装饰，应当删掉。最后把这份结构图和第 3 节的 CUTLASS 三级结构图并排看：flash-attn 的分发模板按 head 维和数据类型选 kernel 变体，CUTLASS 的模板参数按 tile 形状生成 kernel，两边都在做同一件事——把“针对某种输入形状特化”的决定交给编译期，运行期的 kernel 只负责算。读懂了这一层，第 3 节读 CUTLASS 模板参数时就不会陌生。
+把这段和第 21 章的推导对齐，只需要认三个量。`acc_s` 是当前块的 S，对应推导里的 `Q_block · K_block^T`；`acc_o` 是输出累加器，对应 `Õ`；`softmax_rescale_o` 内部的 `row_max`、`row_sum` 对应 `m`、`l`。`softmax.h` 里的 rescale 逻辑是：先存旧的 `row_max`，取新最大值，算 `scale = exp2((m_old − m_new) · softmax_scale_log2)`，把 `row_sum` 和 `acc_o` 都乘上 `scale`，再对当前块做 `exp2` 并累加。这与第 21 章的更新规则逐项对应，只是实现把乘法顺序和 `exp2` 的缩放常数合并了。
 
-和第 3 周的联系可以直接写进结构图：外层循环对应第 3 周的 K/V 分块，`m` / `l` / `acc` 对应 online softmax 的三个运行量，Q 常驻、K/V 轮换对应 tiling 的数据流向。第 1 节的演进表也可以画进去：在结构图的边上标出 FA2 的三处改动各落在哪个位置——跨 block 并行落在 block 划分上，warp 分工落在 block 内的 warp 划分上，减非 matmul FLOPs 落在 softmax 与 rescale 的写法上。一张图同时装下数学结构和工程改动，就是本节要的产出。
+循环从 `n_block_max − 1` 倒着走到 `n_block_min`，不是正着走。causal 下 `n_block_max` 由当前 query 行块决定，倒序走可以先处理对角线附近需要 mask 的块，再进入整块无需 mask 的区域；完全在对角线上方的块根本不进循环。实际代码把循环拆成两段：前 `n_masking_steps` 次带 mask，后面所有块不带 mask，避免在主体循环里反复判断。这是按块跳过 causal 计算在代码里的落点。
 
-**产出**：一张前向 kernel 的结构图（循环、分块、rescale 更新、warp 分工的位置）。
+流水线体现在两处。Q 在循环外只搬一次，之后常驻 shared memory 或寄存器；K、V 每块轮换，当前块的 V 在 `QK^T` 之前搬入，下一块的 K 在当前块计算期间预取，`cp_async_fence` 与 `cp_async_wait<0>` 负责“搬完再算、算完再覆盖”的次序。`kernel_traits.h` 里 `kSmemKVSize = size(SmemLayoutKV) * 2 * sizeof(Element)`，K、V 各留两份，双缓冲让预取和计算重叠。
+
+warp 的分工看 `TiledMma`：`Layout<Shape<Int<kNWarps>, _1, _1>>` 把 warp 排到 M 维，`Tile<Int<16 * kNWarps>, _16, _16>` 让每个 warp 负责一段 query 行。head 维 128、`kBlockM = 128`、`kNWarps = 4` 时，每个 warp 拿 32 行，行内的 softmax 归约在 warp 内完成，warp 之间不通信。这正是 FA2 用 split-Q 取代 split-K 的代码形态：FA1 的 split-K 需要把每个 warp 的部分和写回 shared memory 再相加，FA2 不需要。
+
+读工业代码的边界：特化分支按 head 维（32/64/96/128/192/256）、架构（sm80/sm90）、causal、local、alibi、softcap、dropout、split-KV、paged KV 展开，组合数很大。读的目标是定位结构，不是读完每个分支。遇到看不懂的模板或 `#ifdef`，先记它管哪个维度，再回到主循环。Triton 版没有这些分支，不等于特化不存在，是编译器把一部分特化藏了起来；第 20 章的 kernel 与这里的差距，主要就在这些显式决定上。
+
+合上代码，能回答四个问题，主循环就算读通了：Q、K、V 各在哪里加载，Q 加载几次、K/V 各几次；`m`、`l`、`acc_o` 在循环的第几步更新，rescale 乘在哪些量上；循环走完一块后，哪些量留到下一块、哪些写回 global；FA2 的三处改动至少一处在代码里的落点。答不出来的位置，就是还没读成结构的地方。
 
 ### 第 3 节 · CUTLASS 三级结构：threadblock / warp / thread + MMA pipeline
 
-**目标**：能画出 CUTLASS GEMM 的三级分工与数据流向，知道每一级在管什么。
+CUTLASS 的最小例子和 3.x 的抽象不在同一层 API 上，先把两层分开。`examples/00_basic_gemm/basic_gemm.cu` 用 `cutlass::gemm::device::Gemm<float, ColumnMajor, ...>`，默认 threadblock tile 是 128×128×8；`default_gemm_configuration.h` 里对应的默认值是 `ThreadblockShape = 128×128×8`、`WarpShape = 32×64×8`、`InstructionShape = 1×1×1`、`Stages = 2`。`InstructionShape` 是 1×1×1，说明这个 float 实例走的是 SIMT 的标量乘加，不是 Tensor Core；要看 MMA 指令的形状，得换成 half/bf16 的 tensor-op 实例，那是 16×8×8 一类的形状。这一层区分很重要：后面的算术账都成立，但“最终落到 Tensor Core”这句话只对 tensor-op 实例成立。
 
-**怎么做**（60 分钟，无 GPU 可做）：
+先把默认 tile 的账算清楚。128×128×8 表示一个 block 算输出矩阵 128 行 × 128 列的一块，K 维每步推进 8。一个 K 步搬入 A 的 128×8 和 B 的 8×128，各 1024 个 float，合计 2048 × 4 = 8192 字节 = 8 KiB；计算量是 2 × 128 × 128 × 8 = 262144 FLOP；算术强度 262144 ÷ 8192 = 32 FLOP/字节。`Stages = 2` 时 shared memory 占 2 × 8 = 16 KiB。4096×4096 的输出按 128×128 切，是 32 × 32 = 1024 个 block；K 维 4096 按 8 切，是 512 步。WarpShape 32×64 把 block 分成 (128/32) × (128/64) = 4 × 2 = 8 个 warp，共 256 个线程。
 
-打开 [NVIDIA/cutlass](https://github.com/NVIDIA/cutlass)，读 `examples/00_basic_gemm/basic_gemm.cu`：它用 `cutlass::gemm::device::Gemm<float, ColumnMajor, ...>` 搭一个 GEMM，默认 threadblock tile 是 128×128×8；调用方式是先构造 `CutlassGemm::Arguments` 再调 `gemm_operator(args)`；文件里还带了一个 naive 参考 GEMM 供对照。先把这个最小例子跑通结构：输入怎么进、tile 怎么分、结果怎么出。naive 参考 GEMM 的作用是当“对照组”：同样的输入，naive 版逐元素算，CUTLASS 版分块算，结果应当一致；对照组存在的意义是让你改配置之后有东西可比——第 4 节改 tile 配重编之后，第一件事就是拿 naive 版验算结果对不对，再谈快慢。
+三级分工与 3.x 的对应关系：
 
-先把默认 tile 128×128×8 的账算清楚，这是理解三级结构最实在的入口。128×128×8 的意思是：一个 threadblock 一次算输出矩阵里 128 行 × 128 列的一块，K 维每次推进 8。A 的一块 tile 是 128×8 = 1024 个元素，B 的一块 tile 是 8×128 = 1024 个元素，两块加起来 2048 个元素；例子用的是 float（单精度浮点，4 字节），2048 × 4 = 8192 字节，即 8 KB——这就是一个 K 步里从 global memory（全局内存，GPU 上容量最大、速度最慢的那层）搬进 shared memory 的数据量。这一 K 步的计算量是 2 × 128 × 128 × 8 = 262144 次浮点操作（乘加各算一次，所以乘 2），262144 ÷ 8192 = 32，即每从 global memory 搬 1 字节，就做 32 次浮点操作——这个比值就是这一 tile 的算术强度（每字节搬运对应的计算量），第 1 周 Roofline 的语言在这里直接用得上。输出的一块 tile 是 128 × 128 = 16384 个元素。K 维如果一共是 4096，K tile 是 8，外层循环就要走 4096 ÷ 8 = 512 步；每一块输出 tile 都要经过这 512 步的累加。再算 block 的数量：一个 4096×4096 的输出矩阵，用 128×128 的 tile 切，（4096 ÷ 128）×（4096 ÷ 128）= 32 × 32 = 1024 个 block。1024 个 block、每块 512 步、每步 8 KB 搬运和 262144 次操作——这就是默认配置下一张 GEMM 的完整工作量画像。
+| 层级 | 2.x 模板参数（float 例子） | 3.x 的写法 | 管什么 |
+|---|---|---|---|
+| threadblock | `ThreadblockShape = 128×128×8` | `TileShape`、`ClusterShape` | 一个 CTA 的输出 tile、shared memory 缓冲、TMA 或 cp.async 搬运 |
+| warp | `WarpShape = 32×64×8` | `TiledMMA` 的线程布局，由 MMA atom 推导 | block 内每个 warp 算哪一块、寄存器里放什么 |
+| thread | `InstructionShape = 1×1×1` | `MMA_Atom` 与 `TiledCopy` 的分片 | 每条指令、每次访存处理多少元素 |
 
-三级分工（对照例子里的模板参数）：
-- **threadblock 级**：一个 block 算输出矩阵的一块 tile（默认 128×128），负责从 global memory 把 A/B tile 搬进 shared memory；
-- **warp 级**：一个 block 内的多个 warp 再分 tile（WarpShape），每个 warp 算自己的一块；
-- **thread 级**：每个线程算一小块（InstructionShape），最终落到 Tensor Core 的 MMA 指令上。
-- 数据流向：global → shared（block 级搬运）→ registers（warp/thread 级）→ Tensor Core MMA → 写回 global。每一级都在回答“这块数据现在放在哪、谁来算”。
+数据流向是 global memory → shared memory（block 级搬运）→ registers（warp/thread 级分片）→ MMA 或 FFMA → 写回 global。每一级回答“这块数据现在在哪、谁来算”。三级不是 CUTLASS 的发明，是硬件层级的映射：block 对应 SM 与 shared memory，warp 对应 warp 调度器与寄存器，thread 对应最细的指令分片。分级把一次大搬运拆成三级小搬运，每级只需喂饱对应硬件的带宽。
 
-为什么是三级？因为硬件就是三级：第 1 周讲过，block 对应 SM 和 shared memory，warp 对应 warp 调度器和 MMA，thread 对应寄存器和 MMA 的分片。CUTLASS 的结构不是凭空设计的，是硬件结构的映射——每一级管的就是它对应的那层硬件。这个映射关系可以反过来，如果只有一级分工，比如所有线程直接从 global memory 读数据算 MMA，global memory 的带宽会被几千个线程同时打爆；分了三级之后，global memory 只需要喂饱 block 级的 tile 搬运，shared memory 喂 warp，寄存器喂 thread，每一级的带宽需求都比上一级小一个量级。分级的本质是把一次大搬运拆成三级小搬运，每一级的搬运量都刚好配得上那一级硬件的带宽。MMA（Matrix Multiply-Accumulate，矩阵乘累加指令，Tensor Core 一次算一小块矩阵乘加的硬件指令）落在最底层，是因为 Tensor Core 吃的就是寄存器里的小块数据——thread 级的分片形状，最后要对齐 MMA 指令一次能吃的数据形状。
+CUTLASS 3.x 换了词汇，读代码先认五个词（名称随版本变化，以当前版本文档为准）：
 
-另外注意 CUTLASS 是模板库：“代码”主要是编译期生成 kernel 的模板，读它要读模板参数，不是读生成出来的代码；改一个 Shape 参数就是换一个实例化，所以下一节每改一次都要重编。模板库这个概念值得展开：你写的 `Gemm<float, ColumnMajor, ...>` 不是一段跑起来的代码，是一张“生成代码的图纸”；编译器读到这张图纸，才生成真正跑在 GPU 上的 kernel。改 ThreadblockShape 不会改任何一行“代码”，它改的是图纸上的一个尺寸，编译器按新尺寸重新生成 kernel——所以第 4 节每改一次配置都要重编，重编不是麻烦，是模板库的工作方式。读 CUTLASS 也因此和读 flash-attn 不一样：flash-attn 读的是已经写出来的 kernel，CUTLASS 读的是生成 kernel 的参数；前者找循环骨架，后者找三个 Shape 参数。
+- **CuTe**：CUTLASS 3.x 的布局代数层，用 `Layout`、`Tensor`、`local_tile`、`partition` 描述“哪块数据在哪个线程的哪个寄存器里”。`cute::gemm(tiled_mma, A, B, C)` 是这一层的通用 GEMM 调用。
+- **MMA**：矩阵乘加 atom。3.x 用 `TiledMMA` 把一个 `MMA_Atom` 平铺到 warp/thread；Hopper 上是 WGMMA 系列，atom 名称形如 `SM90_*`。
+- **TMA**：Hopper 的异步张量搬运。用 `make_tma_copy` 构造拷贝 atom，运行时由 `SM90_TMA_LOAD` 发起；一个 CTA 可以一次搬一整块 tile，不需要每个线程算地址。
+- **cluster**：thread block cluster，多个 CTA 组成一个簇，可以互相访问对方的 shared memory（DSMEM），TMA 还能把同一块数据 multicast 给簇内多个 CTA。
+- **pipeline**：生产者/消费者流水线。`cutlass::PipelineTmaAsync<Stages>` 管理多级 shared memory buffer 的 barrier，生产者 `producer_acquire/commit`，消费者 `consumer_wait/release`。
 
-MMA pipeline：理解“流水线”的意思——下一个 tile 的搬运与当前 tile 的计算重叠，靠的是 shared memory 的双缓冲（甚至多级缓冲）与异步拷贝。画一张两级缓冲的时序图：tile k 在 buffer 0 里算的时候，tile k+1 正往 buffer 1 里搬；算完切换，搬完的那个 buffer 接着算。异步拷贝（cp.async）是让重叠成立的关键——搬运不用等算完，算也不用等搬完。先画出时序图，不用深究每一级缓冲的同步原语。双缓冲的账也可以用上一段的数字算：默认配置下一 K 步搬 8 KB、算 262144 次操作，双缓冲就是两块 buffer 各 8 KB，一共 16 KB 的 shared memory 被流水线占着。16 KB 这个数本身不大，关键在它让“搬”和“算”同时发生：没有双缓冲，每步都是先搬 8 KB 再算，搬运时间全暴露在关键路径上；有了双缓冲，搬运被藏到了上一块的计算时间里。同步原语（保证“搬完再算、算完再覆盖”的机制）这一节不用深究，知道它的作用是“防踩”就够了：buffer 1 没搬完不能开始算，buffer 0 没算完不能往里搬下一块——流水线的正确性就靠这两条规则。
+3.x 的入口是一个 collective builder，下面这段是示意，省略了类型别名与布局细节，参数顺序以当前版本的 `CollectiveBuilder` 文档为准：
 
-定位改配置的入口：tile 配置由 ThreadblockShape / WarpShape / InstructionShape 三个模板参数决定，在 `cutlass/gemm/device/gemm.h` 与 `cutlass/gemm/device/default_gemm_configuration.h` 里找它们的定义与默认值。下一节要改的就是它们。三个参数的分工正好对应三级结构：ThreadblockShape 定 block 级 tile 的大小，WarpShape 定 warp 级的分块，InstructionShape 定 thread 级落到 MMA 指令上的小块形状。改配置就是改这三张图纸上的尺寸，改完重编，编译器生成新的 kernel。第 4 节会先只动 ThreadblockShape，再动 WarpShape，一次只改一个——这既是第 1 周阶梯优化的老规矩，也是模板库的特性决定的：一次改两个参数，性能变了你不知道是哪个参数的功劳。
+```cpp
+// 示意：Hopper 上的 3.x collective GEMM，不保证按当前版本原样编译
+using TileShape    = cute::Shape<cute::_128, cute::_128, cute::_64>;
+using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
 
-**产出**：一张三级分工与数据流向图 + 改配置的入口位置（三个 Shape 参数的文件与默认值）。
+using Collective = typename cutlass::gemm::collective::CollectiveBuilder<
+    cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
+    cutlass::half_t, cutlass::layout::RowMajor, 8,
+    cutlass::half_t, cutlass::layout::ColumnMajor, 8,
+    float,
+    TileShape, ClusterShape,
+    cutlass::gemm::collective::StageCountAuto,
+    cutlass::gemm::collective::KernelScheduleAuto
+  >::CollectiveOp;
+```
+
+`TileShape` 的三个数分别是 block 级 M、N、K tile；`ClusterShape` 决定 cluster 里几个 CTA、沿哪个维度排；`StageCountAuto` 让 builder 按 shared memory 预算选流水级数；`KernelScheduleAuto` 选调度策略，在 Hopper 上通常落到 TMA + warp-specialized 的 mainloop。warp 与 instruction 级的形状不再由用户直接给，而是由 `OpClassTensorOp`、元素类型和 atom 选择推导出来。这是 3.x 与 2.x 最大的结构差异：2.x 让人手填三个 Shape，3.x 让人填一个 tile 和一个 cluster，其余交给 builder。
+
+流水线的账可以直接按 tile 算。half 的 128×128×64 tile，一个 stage 的 A 是 128×64×2 = 16 KiB，B 是 64×128×2 = 16 KiB，合计 32 KiB；3 级流水占 96 KiB，4 级占 128 KiB。Hopper 每个 SM 有 228 KiB shared memory，级数越多，预取越深，能同时驻留的 CTA 越少。这条取舍与第 19 章 occupancy 的账是同一个：shared memory 占用上升，驻留的 warp 数下降，延迟藏不住时，深流水反而变慢。
+
+改 tile 的入口在两层 API 上不同。2.x 的 `cutlass::gemm::device::Gemm` 把 `ThreadblockShape`、`WarpShape`、`InstructionShape`、`Stages` 列为模板参数，默认值在 `default_gemm_configuration.h`；3.x 改的是 `TileShape`、`ClusterShape`、`StageCount`，warp/instruction 形状跟着 atom 走。下一节的实验按这两条路径分别设计。
 
 ### 第 4 节 · 动手改一个 CUTLASS GEMM：改 tile 配置，重编，测出变化
 
-**目标**：改一个 CUTLASS GEMM 的 tile 配置，重编，测出变化。
+这一节是一次待补测的实验设计，不是实测报告。本章没有在 GPU 上跑过这些配置，下面的耗时列全部留空；能先确定的是改动步骤、按定义算出的预期方向和失败模式。
 
-**怎么做**（60 分钟，需 GPU + nvcc；无卡时先完成第 3 节的结构图，实测标注“待补测”）：
+先立基线。按仓库 README 用 CMake 编出 `00_basic_gemm`，跑默认 128×128×8，先用 naive 参考 GEMM 验算结果，再计时。当前版本的 `00_basic_gemm` 只打印 `Passed.`，没有自带计时，需要自己在 `gemm_operator(args)` 前后插 CUDA Events，或者用 nsys 抓 kernel 时间。计时口径要固定：预热若干次，正式跑多次取中位数，只计 kernel 时间，不把编译和进程启动算进去。单次运行的第一个数通常偏冷，时钟没拉起来，抖动可能比配置带来的差异还大。
 
-按 CUTLASS 仓库 README 的构建说明（CMake）编出 `00_basic_gemm`，先跑默认配置，记下耗时（例子自带计时输出；也可以用第 1 周的 CUDA Events 自己包一层）。记的是 kernel 的耗时，不是整条命令的 wall-clock——编译时间和进程启动不算在内。这个区分值得强调：`00_basic_gemm` 的一次运行里，编译可能占几分钟、进程启动占毫秒级，kernel 本身可能只有毫秒级；把 wall-clock 当成 kernel 耗时，结论会差出几个数量级。CUDA Events（第 1 周学过的 GPU 端计时方法，在 kernel 前后各打一个时间戳）量的才是 kernel 的时间；例子自带的计时输出如果已经是 kernel 计时，直接用它就行。
+三组 2.x 配置的预期账如下。每 K 步搬运按 A tile + B tile 算，shared memory 按 `Stages = 2` 算，输出仍是 4096×4096：
 
-改配置之前，先把三组配置的账算好，带着预测去测，而不是测完再想。默认配置 128×128×8 的账第 3 节算过：每 K 步搬 8 KB、算 262144 次操作、算术强度 32 次操作每字节、双缓冲占 16 KB shared memory、4096×4096 的输出切成 1024 个 block。往小改的 64×128×8：A tile 是 64×8 = 512 个元素，B tile 还是 8×128 = 1024 个元素，两块加起来 1536 个元素，1536 × 4 = 6144 字节，即 6 KB；计算量是 2 × 64 × 128 × 8 = 131072 次操作，131072 ÷ 6144 ≈ 21.3，即算术强度约 21.3 次操作每字节；双缓冲占 12 KB；4096×4096 的输出切成（4096 ÷ 64）×（4096 ÷ 128）= 64 × 32 = 2048 个 block，是默认的 2 倍。往大改的 256×128×8：A tile 是 256×8 = 2048 个元素，B tile 1024 个元素，两块加起来 3072 个元素，3072 × 4 = 12288 字节，即 12 KB；计算量是 2 × 256 × 128 × 8 = 524288 次操作，524288 ÷ 12288 ≈ 42.7，即算术强度约 42.7 次操作每字节；双缓冲占 24 KB；4096×4096 的输出切成（4096 ÷ 256）×（4096 ÷ 128）= 16 × 32 = 512 个 block，是默认的一半。三组数排在一起，取舍就清楚了：tile 越大，每字节搬运对应的计算越多（42.7 对 32 对 21.3），数据复用越好；但 block 越少（512 对 1024 对 2048），并行度越低，同时每个 block 占的 shared memory 越多（24 KB 对 16 KB 对 12 KB），SM 上能同时驻留的 block 数越少。改 tile 配置不是在调一个“越大越好”的旋钮，是在复用和并行度之间找平衡点——这个平衡点没有公式可算，只能实测。
+| ThreadblockShape | 每 K 步搬运 | 算术强度 | shared memory（2 级） | block 数 | 预期方向 | 实测 |
+|---|---:|---:|---:|---:|---|---|
+| 64×128×8 | 6 KiB | 21.3 FLOP/字节 | 12 KiB | 2048 | 并行度高、单块复用低，适合 SM 填不满的形状 | 待补测 |
+| 128×128×8 | 8 KiB | 32 FLOP/字节 | 16 KiB | 1024 | 基线 | 待补测 |
+| 256×128×8 | 12 KiB | 42.7 FLOP/字节 | 24 KiB | 512 | 单块复用高、并行度低，可能受寄存器与驻留数限制 | 待补测 |
 
-改配置：把 ThreadblockShape 从默认的 128×128×8 改成另一组（例如 64×128×8 或 256×128×8），只改这一处，重编，重跑，记下耗时变化。一次只改一个参数，否则变化归因不清——两个地方一起动，时间变了你不知道是谁的功劳，这是第 1 周阶梯优化的老规矩。64×128×8 是往小改：每个 block 算得少了、shared 占用降了、同时驻留的 block 多了，但每块 tile 的复用也少了；256×128×8 是往大改：反过来，还可能撞上 shared memory 上限、编不过或跑不起来——那也是结果，记下来。编不过这件事要特别说明：它不是“你改错了”，是配置本身越过了硬件的硬限制——一个 block 的 shared memory 占用超过上限，编译器会直接拒绝生成这个 kernel。记下“编不过”时，要把配置和报错一起记下来，这条记录本身就是结论：这条路在当前硬件上走不通。跑不起来也一样：如果程序编过了但跑起来结果不对，先拿 naive 参考 GEMM 验算——结果错了是正确性问题，耗时数字没有意义；结果对了耗时变了，才是性能结论。
+改法只动一个参数。2.x 的 `Gemm` 可以在模板参数里显式给三个 Shape 与 Stages，下面这段是示意，参数顺序以当前版本 `gemm.h` 为准：
 
-再试 WarpShape：改一档，重编，重跑，记下变化。把三次结果填进同一张表：配置、耗时、相对默认的变化。WarpShape 的改动和 ThreadblockShape 的改动不在同一个层级：ThreadblockShape 改的是 block 级 tile 的大小，WarpShape 改的是 block 内 warp 之间的分工。改 WarpShape 时 ThreadblockShape 保持默认，这样两次改动的归因才分得开。表里的“相对默认的变化”建议写成百分比：比如某配置耗时是默认的 1.2 倍，或者 0.85 倍——百分比比绝对毫秒数更容易跨机器比较，绝对毫秒数换一台卡就变了，相对变化的趋势才有参考价值。
+```cpp
+// 示意：把默认的 128×128×8 换成 64×128×8，其余保持默认
+using CutlassGemm = cutlass::gemm::device::Gemm<
+    float, cutlass::layout::ColumnMajor,
+    float, cutlass::layout::ColumnMajor,
+    float, cutlass::layout::ColumnMajor,
+    float,
+    cutlass::arch::OpClassSimt, cutlass::arch::Sm50,
+    cutlass::gemm::GemmShape<64, 128, 8>,   // ThreadblockShape
+    cutlass::gemm::GemmShape<32, 64, 8>,    // WarpShape
+    cutlass::gemm::GemmShape<1, 1, 1>,      // InstructionShape
+    2>;                                     // Stages
+```
 
-用第 1 周的分析框架解释结果：tile 变大 → 每个 block 算得更多、shared memory 占用上升、同时驻留的 block 数下降；tile 变小则反之。实测数字与这个分析对不上时，先怀疑测量（是不是只跑了一次、是不是含了编译时间），再怀疑分析。测量上最常见的坑是只跑一次：第一次跑常常包含预热（缓存冷、时钟没拉起来），单次数字的抖动可能比配置带来的变化还大；第 1 周的做法是跑多次取中位数，同样适用于这里。另一个坑是把编译时间算进去：CUTLASS 的编译不快，改一次配重编一次是正常的——把等待时间用来写第 5 节的对比表。如果实测和预测反着来，比如 tile 变大反而变慢了，先对一下账：是不是 block 数从 1024 掉到 512 之后，并行度不够填满所有 SM 了；是不是 shared 占用从 16 KB 涨到 24 KB 之后，SM 上同时驻留的 block 数少了，延迟藏不住了。预测错了不丢人，错的位置就是新的认识：Roofline 和第 1 周的分析框架给的是方向，具体的平衡点永远在实测里。
+改完重编，先验算再计时。结果不对，耗时没有意义；结果对，才把耗时填进表里。64×128 与 256×128 各改一次，每次只改一个 Shape，WarpShape 和 Stages 保持默认，否则时间变了归因不清。
 
-注意：CUTLASS 的编译不快，改一次配重编一次是正常的——把等待时间用来写第 5 节的对比表。
+3.x 路径改的是另一组参数，预期方向也不同：
 
-**产出**：一份“改前改后”实测记录（至少两组配置变化 + 耗时 + 一句归因）。
+| 改动 | 预期方向 | 实测 |
+|---|---|---|
+| `TileShape` 的 K 从 64 降到 32 | mainloop 步数翻倍，每级 shared memory 减半，流水开销占比上升 | 待补测 |
+| `TileShape` 的 N 从 128 升到 256 | B tile 复用提高，寄存器与 shared memory 占用上升，CTA 数减少 | 待补测 |
+| `ClusterShape` 从 1×1×1 改为 2×1×1 | TMA multicast 让两个 CTA 共享一次 B 搬运，HBM 流量下降；网格必须能被 cluster 整除 | 待补测 |
+| `StageCount` 从 3 改为 4 | 预取更深，抗延迟更好；shared memory 多一级，驻留 CTA 数可能下降 | 待补测 |
+
+3.x 只改 `TileShape` 或 `ClusterShape` 一行，重编后同样先验算再计时。cluster 大于 1 时，还要确认 grid 的维度能被 cluster 形状整除，否则 launch 会失败。
+
+失败模式按出现顺序记：
+
+- **编译失败。** shared memory 超过每个 block 的上限、TMA 对齐不满足（如 leading dimension 不是 16 字节对齐）、cluster 形状与 grid 不匹配、模板约束不满足，都会在编译期报错。把配置和报错原文一起记下来，这条记录本身就是结论：这条配置在当前硬件上走不通。
+- **结果错误。** 编过了但结果不对，先查 tile 与 layout 的对齐、边界处理、cluster 下的数据分区，再查计时。结果错误时的耗时数字一律作废。
+- **测速假象。** 把编译时间或首次运行的冷启动算进去、只跑一次、不同配置跑在不同时钟状态上，都会让比较失真。固定预热次数、重复次数和计时口径，再谈差异。
+
+预期与实测对不上时，先查测量，再查分析。tile 变大反而变慢，常见原因是 block 数掉到填不满 SM、shared memory 占用上升导致驻留 CTA 减少、寄存器溢出；tile 变小反而变慢，常见原因是每块复用下降、流水启动开销占比上升。Roofline 和第 19 章的分析给方向，平衡点在实测里。
 
 ### 第 5 节 · 小结：Triton 版 vs CUTLASS 版 attention 的性能与可维护性
 
-**目标**：写出“什么时候自己写 kernel，什么时候直接用库”的判断。
+把第 20、21 章的 Triton 经验与本章的工业实现放在同一张表上，按四个维度比。表里的性能数字来自论文，不是本章实测；可维护性、可移植性、调试成本是工程判断，依据写在后面的段落里。
 
-**怎么做**（60 分钟，无 GPU 可做）：
-
-对照第 3–4 周的实测数据，填这张表：
-
-| 维度 | Triton 版（第 3 周） | CUTLASS / flash-attn 版 | 结论 |
+| 维度 | Triton 版（第 20、21 章） | CUTLASS / flash-attn 版 | 判断依据 |
 |---|---|---|---|
-| 代码量 | 短，几十行 | 长，模板层层嵌套 | 快速验证选 Triton |
-| 性能天花板 | 接近但到不了顶（缺 warp specialization 等精细控制） | 最高（FA3 的 75% 利用率是这么来的） | 榨干性能选 CUDA/CUTLASS |
-| 可维护性 | 好读好改 | 难读难改，改一处牵全身 | 长期维护选 Triton 或直接用库 |
-| 硬件适配 | 编译器兜底一部分 | 每代硬件要重写特化 | 换芯片时两边都要重做（M3 的主题） |
+| 可维护性 | 一个文件几十到几百行，改 tile 就是改一个 `BLOCK_M`，autotune 扫参数 | 模板层层嵌套，dispatch 按 head 维/架构/causal 展开，改一处要确认影响哪个实例 | Triton 的抽象层级高，代码短；CUTLASS 把控制权交给用户，代码长 |
+| 可移植性 | 编译到 PTX，同一份代码可跑 NVIDIA 与部分 AMD 后端；换架构主要靠编译器 | 绑定 CUDA 与具体架构，SM80、SM90 等不同架构世代的 atom 与流水线不同；换芯片要重写 | Triton 的移植成本低，但性能依赖后端成熟度；CUTLASS 的移植是重写 |
+| 性能上限 | 能表达分块、cp.async、软件流水；TMA、warp specialization、cluster 的支持随版本推进，能写到什么程度以当前版本文档为准 | 能直接用手写 warp 分工、TMA、cluster、WGMMA 与 FP8 atom | FA3 从 35% 到 75% 的差距，靠的正是 Triton 当前表达不了的那部分控制 |
+| 调试成本 | 报错在 Python/Triton 层，可用 `tl.device_print`、解释器模式、autotune 日志 | 编译期模板报错长，编译慢，运行时要用 ncu、SASS 和 barrier 级日志 | Triton 定位快；CUTLASS 定位慢，但一旦跑对，行为更可预测 |
 
-这张表每一行都可以对回本周的具体内容。代码量一行：第 3 周的 Triton 版几十行，flash-attn 光是前向 kernel 加分发模板加各 head 维的实例化文件就有多个文件，CUTLASS 更是模板套模板——代码量的差距不是风格问题，是控制粒度的问题：Triton 把分块、流水线、内存层级交给了编译器，代码短是因为编译器替你写了那部分；CUDA/CUTLASS 把控制权拿回自己手里，代码长是因为每一层分工都要亲手写出来。性能天花板一行：第 1 节的数字就是证据——FA3 在 H100 上做到 75% 利用率、740 TFLOPs/s，靠的是 warp specialization、matmul/softmax 交错、FP8 这些 Triton 语言里表达不出来的精细控制；Triton 版能接近这个天花板，但缺了这些控制手段就到不了顶。75% 和 35% 之间差了 40 个百分点，这 40 个百分点就是“精细控制”的价值，也是 Triton 版和工业版之间的性能差距。可维护性一行：第 2 节读 flash-attn 的体会可以直接写进来——定位一个结构要先看分发模板再进 kernel 本体，特化分支按 head 维和 GPU 代际展开，改一处要确认它影响的是哪个变体；第 4 节的体会也一样：改一个 Shape 参数就要重编整个 kernel，编译一次不快。硬件适配一行：第 1 节 FA2 在 H100 上只剩 35% 利用率就是现成的例子——换一代硬件，旧的特化就失效一部分；M3 换一块芯片（Ascend）时，同样的重排要再做一遍，Triton 版和 CUTLASS 版谁也躲不掉。
+四个维度不能压成一个“谁更快”。Triton 的代码量优势来自抽象：分块、流水线、内存层级由编译器管，代价是编译器不暴露的控制它也写不出来。CUTLASS 把这些控制暴露出来，代码量和调试成本随之上升。性能上限的差距有明确证据：FA2 在 H100 上 35%、FA3 到 75%，中间靠的是 warp specialization、TMA、GEMM-softmax 交错与 FP8 布局这些在写作时仍主要靠 CUDA/CUTLASS 表达的手段；Triton 对这些能力的支持在版本间变化，以当前文档为准。可移植性的方向相反：Triton 一份代码能编译到不同后端，CUTLASS 的每个架构 atom 都要单独适配；第四部分换到 Ascend 时，两条路都要重做一遍，Triton 侧至少有 TritonAscend 这类后端承接，CUTLASS 侧则是重写。
 
-判断标准：瓶颈在访存模式与融合时，Triton 够用；瓶颈在硬件细节（bank conflict、流水线、异步拷贝）时，回 CUDA/CUTLASS；瓶颈已经是“别人写好的库比你快”时，直接用库。三条标准对应三种情况：优化能说成“哪个 block 读哪块”时用 Triton；优化必须说到“哪个 warp 干什么、流水线第几级”时回 CUDA/CUTLASS；优化到最后发现库已经比你快时，别较劲，直接用库——第 6 周的 CustomOp 收口就是第三种情况的实践：自己写的 kernel 要接进引擎，而不是停在 standalone。
+选择按瓶颈所在层级定，不按“库是不是更快”定：
 
-三条标准可以各配一个本周的具体场景，判断就不再是口号。访存模式与融合的场景：第 3 周的 fused attention——把 QK^T、softmax、乘 V 融合成一个 kernel，省掉 S、P 矩阵过 HBM 的往返，这件事用 Triton 几十行就能写出来，瓶颈在“数据走哪条路”，不在“哪个 warp 在哪个周期干什么”，Triton 够用。硬件细节的场景：第 1 节 FA3 的 warp specialization 和 matmul/softmax 交错——瓶颈在“搬运 warp 和计算 warp 怎么重叠”“Tensor Core 在 softmax 阶段闲不闲”，这些要精确到 warp 分工和流水线级数，Triton 表达不出来，回 CUDA/CUTLASS。直接用库的场景：第 1 节 FA3 的 FP8 版——740 TFLOPs/s 的 FP16 和接近 1.2 PFLOPs/s 的 FP8，配上比基线低 2.6 倍的误差控制，自己从头写一个同等水平的 FP8 attention，工作量是数周起步，库已经摆在那里，直接用就是最优解。三个场景的区别不在“难不难”，在瓶颈落在哪个层级：访存层用 Triton，硬件层用 CUDA/CUTLASS，库已经封顶时用库。
+- 优化能说清“哪个 block 读哪块、哪个算子融进去”时，Triton 够用。第 21 章的 fused attention 就属于这一层：省掉 S、P 过 HBM 的往返，几十行能写出来，也能验证。
+- 优化必须说清“哪个 warp 搬数据、哪个 warp 算、流水第几级、cluster 怎么分”时，回 CUDA/CUTLASS。FA3 的三项技术都在这一层，Triton 没有对应表达。
+- 库已经比自写实现快，且没有特殊形状要适配时，直接用库。自己维护一份 FP8 attention 的成本是数周起步，还要跟硬件代际更新；库已经把这条路径封好。
+- 还有时间成本：Triton 改一版很快，适合验证想法；CUTLASS 改一个 tile 就要重编，适合想法已经验证、只剩最后一段性能要榨。第 24 章把自写 kernel 接进引擎，选的是 Triton 路径，原因也在这里：接入、验证、回滚的成本低。
 
-还有一个判断容易被忽略：时间成本。Triton 版几十行，改一次重编快、验证快，适合“先验证想法对不对”；CUTLASS 版改一个 Shape 参数就要重编，第 4 节已经体会过编译等待的时间，适合“想法已经验证过，现在要榨干最后一点性能”。第 6 周的 CustomOp 收口把这个判断落到了工程上：自己写的 kernel 接进引擎，跑在真实推理链路里，才算完成；停在 standalone 的 kernel 再快，也只是个 benchmark 数字。换句话说，选工具的标准不只有“能跑多快”，还有“多久能跑起来”和“接进系统要多少成本”——本周的表里，“可维护性”和“硬件适配”这两行，讲的就是后两个成本。
+本章没有给出 Triton 版与 CUTLASS 版在同一张卡、同一序列长度上的实测对比。要做这个对比，需要固定模型配置、head 维、序列长度、精度和计时口径，分别跑 Triton fused attention、flash-attn 与一个 CUTLASS GEMM 基线；在那之前，本章的性能结论只到“论文宣称的区间”和“控制手段的有无”，不到“我的机器上快多少”。
 
-把本周的检查清单并进总清单，加两条：“FA1→2→3 每一代的瓶颈与改动能说出来吗”“CUTLASS 的三个 Shape 参数改过并测出变化了吗”。这两条正好对应本周的两个核心产出：第一条对的是第 1 节的演进表，能说出来才算链条立住了；第二条对的是第 4 节的实测记录，改过并测出变化才算三级结构理解了。无卡的同学第二条先标“待补测”，有卡之后补上——清单的作用是记下“什么还没做”，不是假装“都做完了”。
+**延伸**：[FlashAttention（Dao 等，2022）](https://arxiv.org/abs/2205.14135)、[FlashAttention-2（Dao，2023）](https://arxiv.org/abs/2307.08691)、[FlashAttention-3（Shah 等，2024）](https://arxiv.org/abs/2407.08608)、[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)、[NVIDIA/cutlass](https://github.com/NVIDIA/cutlass)。
 
-**产出**：一页对比表 + 取舍笔记。
 ## 第 24 章 · 收口：把自写 kernel 接入推理引擎
 
 > 注意：vLLM 的 attention 走 Attention 后端，不走 CustomOp（CustomOp 的可替换面是激活、归一化这类算子），所以接入引擎的载体是 Triton 版 SiluAndMul（与第 3 周的 fused attention 共享同一套“写 kernel → 验证 → 接入”流程）；fused attention 仍在第 3 周做 standalone 验证。
