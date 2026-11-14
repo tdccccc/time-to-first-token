@@ -7,6 +7,9 @@ name: Deploy site
 on:
   push:
     branches: [main]
+    # 笔记同步只提交 notes/，不需要重新部署站点。
+    paths-ignore:
+      - "notes/**"
   workflow_dispatch:
 
 permissions:

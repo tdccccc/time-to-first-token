@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if page %}
+    <meta name="notes-page" content="{{ (page.url or 'index') | e }}">
+    <meta name="notes-title" content="{{ (page.title or config.site_name) | e }}">
+  {% endif %}
+  <meta name="notes-repo" content="{{ (config.repo_url or '') | replace('https://github.com/', '') | e }}">
+  <meta name="notes-branch" content="main">
+{% endblock %}
+
+{% block container %}
+  {{ super() }}
+  {% if page and page.file %}
+    {% include "partials/notes.html" %}
+    <div class="notes-backdrop" id="notes-backdrop" aria-hidden="true"></div>
+    <button class="notes-fab" id="notes-fab" type="button" aria-controls="notes-panel" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+      <span>笔记</span>
+    </button>
+  {% endif %}
+{% endblock %}

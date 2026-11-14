@@ -1,0 +1,300 @@
+/* ---------------------------------------------------------------------------
+   Book layout + notes panel for 边做边学 LLM 推理服务
+   - Chinese-first system font stack (no Google Fonts request)
+   - Left: collapsible book navigation (Material's nav, toc.integrate)
+   - Right: page notes panel; turns into a drawer below desktop width
+   --------------------------------------------------------------------------- */
+
+:root {
+  --md-text-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC", "Source Han Sans SC", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --md-code-font: "SFMono-Regular", "JetBrains Mono", "Cascadia Code",
+    Consolas, "Liberation Mono", monospace;
+  --notes-width: 22rem;
+}
+
+/* A three-column book: navigation | content | notes. */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    /* 1rem = 20px under Material's desktop scale; 72rem = 1440px.
+       Keeps the reading column around 730-750px at large widths. */
+    max-width: 72rem;
+  }
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.76rem;
+}
+
+.md-typeset .md-button {
+  margin: 0.2rem 0.5rem 0.2rem 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Notes panel (desktop column)
+   --------------------------------------------------------------------------- */
+
+.notes-panel {
+  order: 2;
+  flex: 0 0 var(--notes-width);
+  align-self: flex-start;
+  position: sticky;
+  top: 2.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: calc(100vh - 4rem);
+  max-height: calc(100vh - 4rem);
+  margin-left: 1.4rem;
+  padding: 0.2rem 0.1rem 0.6rem 1.2rem;
+  border-left: 0.05rem solid var(--md-default-fg-color--lightest);
+  overflow-y: auto;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.notes-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.2rem 0 0.4rem;
+  background: var(--md-default-bg-color);
+}
+
+.notes-panel__heading {
+  min-width: 0;
+}
+
+.notes-panel__title {
+  display: block;
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.notes-panel__page {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.63rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notes-panel__close {
+  display: none;
+  flex: 0 0 auto;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notes-panel__input {
+  flex: 1 1 12rem;
+  width: 100%;
+  min-height: 12rem;
+  padding: 0.55rem 0.6rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-typeset-color);
+  font-family: var(--md-text-font-family);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.notes-panel__input:focus {
+  outline: none;
+  border-color: var(--md-accent-fg-color);
+}
+
+.notes-panel__input::placeholder {
+  color: var(--md-default-fg-color--light);
+  opacity: 0.8;
+}
+
+.notes-panel__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.62rem;
+}
+
+.notes-panel__actions,
+.notes-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.notes-panel .md-button {
+  padding: 0.22rem 0.55rem;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.notes-panel__link {
+  display: block;
+  color: var(--md-accent-fg-color);
+  font-size: 0.65rem;
+  word-break: break-all;
+}
+
+.notes-panel__link[hidden],
+.notes-backdrop[hidden] {
+  display: none !important;
+}
+
+.notes-feedback {
+  min-height: 1.1em;
+  margin: 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.63rem;
+  word-break: break-word;
+}
+
+.notes-feedback.is-error {
+  color: #c62828;
+}
+
+.notes-settings {
+  margin-top: 0.2rem;
+  padding-top: 0.4rem;
+  border-top: 0.05rem solid var(--md-default-fg-color--lightest);
+  font-size: 0.65rem;
+}
+
+.notes-settings summary {
+  cursor: pointer;
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+}
+
+.notes-settings label {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.notes-settings input {
+  display: block;
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.3rem 0.4rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.15rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-typeset-color);
+  font-family: var(--md-code-font-family);
+  font-size: 0.64rem;
+}
+
+.notes-settings__hint {
+  margin: 0.5rem 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.61rem;
+  line-height: 1.55;
+}
+
+[data-md-color-scheme="slate"] .notes-feedback.is-error {
+  color: #ff8a80;
+}
+
+/* Mobile / tablet: turn the notes column into a right drawer. */
+.notes-fab {
+  display: none;
+}
+
+.notes-backdrop {
+  display: none;
+}
+
+@media screen and (max-width: 76.234375em) {
+  .notes-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    width: min(92vw, 24rem);
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 1rem;
+    border-left: 0;
+    background: var(--md-default-bg-color);
+    box-shadow: var(--md-shadow-z3);
+    transform: translateX(105%);
+    visibility: hidden;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.25s;
+  }
+
+  html.notes-open {
+    overflow: hidden;
+  }
+
+  html.notes-open .notes-panel {
+    transform: none;
+    visibility: visible;
+  }
+
+  .notes-panel__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .notes-fab {
+    position: fixed;
+    right: 1rem;
+    bottom: 5rem;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.5rem 0.8rem;
+    border: 0;
+    border-radius: 2rem;
+    background: var(--md-primary-fg-color);
+    color: var(--md-primary-bg-color);
+    font-size: 0.7rem;
+    font-family: var(--md-text-font-family);
+    cursor: pointer;
+    box-shadow: var(--md-shadow-z2);
+  }
+
+  html.notes-open .notes-fab {
+    display: none;
+  }
+
+  html.notes-open .notes-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: block;
+    background: rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media print {
+  .notes-panel,
+  .notes-fab,
+  .notes-backdrop {
+    display: none !important;
+  }
+}

@@ -1,46 +1,149 @@
 # 学习计划的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
+# 书籍式结构：左侧可折叠目录（toc.integrate 把本页小节目录也并入左侧），
+# 右侧是本页笔记栏；笔记默认存浏览器，配置 GitHub token 后可提交到 notes/。
+#
 # Markdown 仍是唯一事实来源：改内容请改 md，推送后 Actions 自动重新生成上线。
+# site-build.sh 会把 README / 模块 README 拆成每周/每节页面再构建。
+#
 # 本地预览（默认 http://127.0.0.1:8010/time-to-first-token/）：
 #   uv venv .venv-mkdocs
 #   uv pip install --python .venv-mkdocs/bin/python -r requirements.txt
 #   bash site-build.sh serve
 # 没有 uv 时：python3 -m venv .venv-mkdocs && .venv-mkdocs/bin/pip install -r requirements.txt
+#
 # 推送到 main 后，.github/workflows/pages.yml 会自动构建并发布到 GitHub Pages。
 site_name: 边做边学 LLM 推理服务
+site_description: 一份 11 周、每天 60 分钟的中文 LLM 推理服务学习计划，覆盖 M0 基础与度量到 M4 跨芯片综合项目。
 site_url: https://tdccccc.github.io/time-to-first-token/
 repo_url: https://github.com/tdccccc/time-to-first-token
 repo_name: tdccccc/time-to-first-token
-# MkDocs 不允许 docs_dir 就是仓库根目录，所以先由 site-build.sh 把
-# Markdown（README.md、progress.md、docs/、assets/、tracker/）原样复制到
-# site-src/ 再构建；布局和仓库一致，内部链接不需要改。
+copyright: 基于 CC BY 4.0 发布 · 上游 patchy631/time-to-first-token
+
 docs_dir: site-src
 site_dir: site
+
+# 构建时把警告当错误：坏链接、未登记页面会直接让 CI 失败。
+strict: true
 
 theme:
   name: material
   language: zh
+  custom_dir: overrides
+  font: false
+  icon:
+    logo: material/book-open-page-variant
   features:
-    - navigation.tabs
+    - navigation.indexes
+    - navigation.path
     - navigation.top
+    - navigation.footer
+    - navigation.tracking
+    - toc.integrate
+    - toc.follow
+    - search.suggest
+    - search.highlight
     - content.code.copy
+    - content.tooltips
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色模式
+
+extra_css:
+  - assets/extra.css
+extra_javascript:
+  - assets/notes.js
+
+plugins:
+  - search:
+      lang: zh
 
 markdown_extensions:
   - toc:
       permalink: true
+      toc_depth: 3
   - tables
   - fenced_code
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
   - pymdownx.highlight
   - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
 nav:
-  - M1 · 框架路线图: README.md
+  - 首页: index.md
+  - 课程总目录: docs/catalog.md
   - 模块地图: docs/MODULES.md
-  - M0 · 基础与度量: docs/modules/M0-foundations/README.md
-  - M2 · 算子优化: docs/modules/M2-operators/README.md
-  - M3 · 国产芯片适配: docs/modules/M3-domestic-chips/README.md
-  - 附录:
-      - 进度跟踪清单: progress.md
-      - M0 · 基线报告模板: docs/modules/M0-foundations/baseline-report-template.md
-      - M3 · 跨芯片对比报告模板: docs/modules/M3-domestic-chips/cross-chip-report-template.md
+
+  - M0 · 基础与度量:
+      - 模块概览: docs/modules/M0-foundations/index.md
+      - 第 1 节 · Roofline: docs/modules/M0-foundations/section-1.md
+      - 第 2 节 · 推理度量: docs/modules/M0-foundations/section-2.md
+      - 第 3 节 · Profiling: docs/modules/M0-foundations/section-3.md
+      - 第 4 节 · 压测脚本: docs/modules/M0-foundations/section-4.md
+      - 第 5 节 · 第一份基线: docs/modules/M0-foundations/section-5.md
+      - 基线报告模板: docs/modules/M0-foundations/baseline-report-template.md
+
+  - M1 · 11 周路线图:
+      - 路线图总览: docs/m1/index.md
+      - 第 1 周 · 心智模型: docs/m1/week-01.md
+      - 第 1 周（续）· 模型架构: docs/m1/week-02.md
+      - 第 2 周 · vLLM: docs/m1/week-03.md
+      - 第 3 周 · 度量基础设施: docs/m1/week-04.md
+      - 第 4 周 · SGLang 与批处理: docs/m1/week-05.md
+      - 第 5 周 · 压测到 1000 并发: docs/m1/week-06.md
+      - 第 6 周 · 量化取舍: docs/m1/week-07.md
+      - 第 7 周 · 投机解码与 KV 淘汰: docs/m1/week-08.md
+      - 第 8 周 · 解耦与 Kubernetes: docs/m1/week-09.md
+      - 第 8 周（续）· 大规模集群 PD: docs/m1/week-10.md
+      - 第 9 周 · 单位经济学与路由器: docs/m1/week-11.md
+      - 第 10 周 · 发表与阅读习惯: docs/m1/week-12.md
+      - 第 11 周 · TensorRT-LLM（可选）: docs/m1/week-13.md
+      - 附录:
+          - 跟踪进度的三种方式: docs/m1/tracking.md
+          - 发表 benchmark 之前: docs/m1/benchmark-checklist.md
+          - 决策点: docs/m1/decision-points.md
+          - 参考资料: docs/m1/references.md
+          - 来源、贡献与许可: docs/m1/colophon.md
+
+  - M2 · 算子优化:
+      - 模块概览: docs/modules/M2-operators/index.md
+      - 第 1 周 · CUDA 优化阶梯: docs/modules/M2-operators/week-01.md
+      - 第 2 周 · Triton 入门: docs/modules/M2-operators/week-02.md
+      - 第 3 周 · Fused Attention: docs/modules/M2-operators/week-03.md
+      - 第 4 周 · 量化 Matmul: docs/modules/M2-operators/week-04.md
+      - 第 5 周 · FlashAttention 与 CUTLASS: docs/modules/M2-operators/week-05.md
+      - 第 6 周 · 接入推理引擎: docs/modules/M2-operators/week-06.md
+
+  - M3 · 国产芯片适配:
+      - 模块概览: docs/modules/M3-domestic-chips/index.md
+      - 第 1 周 · 芯片与软件栈地图: docs/modules/M3-domestic-chips/week-01.md
+      - 第 2 周 · CANN 与 AscendC: docs/modules/M3-domestic-chips/week-02.md
+      - 第 3 周 · Ascend 跑通与插件: docs/modules/M3-domestic-chips/week-03.md
+      - 第 4 周 · 算子覆盖分析: docs/modules/M3-domestic-chips/week-04.md
+      - 第 5 周 · 移植案例: docs/modules/M3-domestic-chips/week-05.md
+      - 第 6 周 · 精度回归与报告: docs/modules/M3-domestic-chips/week-06.md
+      - 跨芯片对比报告模板: docs/modules/M3-domestic-chips/cross-chip-report-template.md
+
+  - M4 · 综合项目: docs/modules/M4-capstone/README.md
+
+  - 进度:
+      - 跟踪进度清单: progress.md
+      - 进度打卡页: tracker/index.html
+
+  - 资料:
       - 上游英文原文: docs/original-README.md
-  - 进度打卡页: tracker/index.html

@@ -1,0 +1,44 @@
+<aside class="notes-panel" id="notes-panel" aria-label="本页笔记">
+  <div class="notes-panel__head">
+    <div class="notes-panel__heading">
+      <span class="notes-panel__title">笔记</span>
+      <span class="notes-panel__page">{{ (page.title or '') | e }}</span>
+    </div>
+    <button class="notes-panel__close" id="notes-close" type="button" aria-label="关闭笔记">×</button>
+  </div>
+
+  <textarea id="notes-input" class="notes-panel__input" placeholder="在这里记笔记……自动保存在本浏览器。" spellcheck="false" aria-label="笔记内容"></textarea>
+
+  <div class="notes-panel__meta">
+    <span id="notes-status" aria-live="polite">尚未输入</span>
+    <span id="notes-count">0 字</span>
+  </div>
+
+  <div class="notes-panel__actions">
+    <button id="notes-sync" class="md-button md-button--primary" type="button">同步到仓库</button>
+    <button id="notes-download" class="md-button" type="button">导出 .md</button>
+    <button id="notes-clear" class="md-button" type="button">清空</button>
+  </div>
+
+  <a class="notes-panel__link" id="notes-link" target="_blank" rel="noopener" hidden>在 GitHub 查看本页笔记 →</a>
+  <p class="notes-feedback" id="notes-feedback" aria-live="polite"></p>
+
+  <details class="notes-settings" id="notes-settings">
+    <summary>同步设置（GitHub token）</summary>
+    <label>仓库
+      <input id="notes-repo" type="text" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+    </label>
+    <label>分支
+      <input id="notes-branch" type="text" placeholder="main" autocomplete="off" spellcheck="false">
+    </label>
+    <label>Token
+      <input id="notes-token" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="notes-settings__hint">token 只保存在本浏览器。建议新建<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">细粒度 token</a>，只勾选本仓库的 <b>Contents: Read and write</b>。公开仓库里同步的笔记也会公开；只想自己看，请把仓库换成私有仓库。</p>
+    <div class="notes-settings__actions">
+      <button id="notes-save-settings" class="md-button" type="button">保存设置</button>
+      <button id="notes-load" class="md-button" type="button">从仓库载入</button>
+      <button id="notes-forget" class="md-button" type="button">清除 token</button>
+    </div>
+  </details>
+</aside>

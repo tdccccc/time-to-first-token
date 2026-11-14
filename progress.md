@@ -5,6 +5,8 @@ title: 'Roadmap progress: [your name or handle]'
 labels: progress
 ---
 
+> **在网站上**：这是 GitHub issue 模板的静态副本，网页上的勾选不会保存。要保存进度，请用[进度打卡页](tracker/index.html)（数据存在浏览器本地），或按下面的方式在 GitHub issue 里勾选。
+
 Tick sessions as you finish them. GitHub saves checkbox state to your account, so this works across every device you sign in from.
 
 论文均为选读：README 对应章节已有每篇论文的详细总结（核心思想、逻辑链、关键机制、关键数字），打勾跟踪的是课程本身，读不读全文不影响进度。
@@ -111,4 +113,4 @@ If you finish, link your benchmark writeup here. Open a PR to add it to the READ
 
 ---
 
-本 fork 新增模块：M0 基础与度量、M2 算子优化、M3 国产芯片适配、M4 综合项目，见 [docs/MODULES.md](docs/MODULES.md)；M2–M3 的进度用各自模块 README 里的清单跟踪，M4 内容待写、暂无清单。
+本 fork 新增模块：M0 基础与度量、M2 算子优化、M3 国产芯片适配、M4 综合项目，见 [模块地图](docs/MODULES.md)；M2–M3 的进度用各自模块页面里的清单跟踪，M4 已上线[占位页](docs/modules/M4-capstone/README.md)（目标、交付物与检查清单），正文待写。

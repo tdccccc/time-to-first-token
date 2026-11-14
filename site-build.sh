@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Build (or preview) the MkDocs site from the repo's Markdown.
+# Build (or preview) the book-style MkDocs site from the repo's Markdown.
 #
-# MkDocs forbids docs_dir = repo root, so assemble a staging tree first
-# (same layout as the repo, so internal links need no changes), then build.
+# MkDocs forbids docs_dir = repo root, so assemble a staging tree first.
+# tools/build_site_content.py then splits the monolithic README files into
+# per-week / per-section pages, rewrites links, and generates the catalog.
 #
 # Usage:
 #   bash site-build.sh        # build into site/
@@ -21,11 +22,15 @@ MKDOCS="${MKDOCS:-mkdocs}"
 if ! command -v "$MKDOCS" >/dev/null 2>&1 && [[ -x .venv-mkdocs/bin/mkdocs ]]; then
   MKDOCS=.venv-mkdocs/bin/mkdocs
 fi
+PYTHON="${PYTHON:-python3}"
 
 rm -rf site-src
 mkdir -p site-src
 cp README.md progress.md site-src/
 cp -r docs assets tracker site-src/
+
+# Generate docs/m1/, module week pages, docs/catalog.md and index.md.
+"$PYTHON" tools/build_site_content.py
 
 if [[ "${1:-build}" == "serve" ]]; then
   # Note: edits to README.md / docs/ need a re-run of this script to reach site-src/.
