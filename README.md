@@ -1205,6 +1205,25 @@ W4A16（权重 4 位、激活 16 位）与 W8A8（权重与激活都是 8 位）
 
 AWQ 与 GPTQ 的检查点不是同一个东西的两个名字。它们是两种不同的量化算法产出的两种检查点，权重数值不一样，质量也不一样。跑 AWQ 检查点时，引擎要按 AWQ 的缩放规则反量化；跑 GPTQ 检查点时，引擎要按 GPTQ 的规则来。检查点与引擎的搭配按 vLLM 量化文档的支持列表来，不要自己拼：文档里写支持的组合才跑，没写的组合，跑出来的数也没有对照意义。
 
+三个变体用同一条底座与同一组非量化参数，只换检查点和量化开关；端口分开，避免同时驻留抢显存：
+
+```bash
+COMMON="--max-model-len 4096 --gpu-memory-utilization 0.9"
+vllm serve <awq-checkpoint>  --quantization awq  $COMMON --port 8000
+vllm serve <gptq-checkpoint> --quantization gptq $COMMON --port 8001
+vllm serve <fp8-checkpoint>  --quantization fp8  $COMMON --port 8002
+```
+
+`--quantization` 的取值与检查点格式以当前 vLLM 量化文档为准；先 `vllm serve --help` 确认参数名，检查点是本地目录就换成路径。质量表用同一套评测命令，只换端口与输出文件：
+
+```bash
+lm_eval --model local-completions \
+  --model_args base_url=http://localhost:8000/v1/completions,model=<served-model-name> \
+  --tasks mmlu --num_fewshot 5 --output_path awq-quality.json
+```
+
+跑之前先确认三个检查点与 FP16 基线是同一个底座模型；跑完把每条命令、端口、检查点名字与版本记进报告。
+
 吞吐不要只跑一遍就记下来。先跑一段预热（warmup，正式计时前先跑几轮，让 KV 缓存、CUDA 图与显存分配进入稳定状态），再开始计时；启用了 CUDA 图，也要把捕获成本排除在正式计时之外；计时那段跑多遍，记下每次的结果，看波动有多大。波动本身就是信息：三次运行的吞吐差很多，说明负载或环境里有没控制住的变量，先找变量，再记数字。第 11 章的扫描输出 p50、p95、p99，量化对比里同样要记延迟分位，而不是只记平均吞吐：一个变体平均吞吐高了，但 p99 延迟恶化了，对在线服务来说可能是更差的选择。
 
 显存的测量容易误读。服务启动后占用的显存，和推理过程中实际用掉的显存，是两个数：框架会预分配一块显存给 KV 缓存，预分配的大小取决于配置，不是当前跑了几个请求。记显存时要写清记的是哪个数、在哪个阶段记：刚启动、预热之后、扫描进行中，三个时点的数可能都不一样。最不容易误读的做法，是记扫描进行中的峰值占用，并注明配置里的 KV 缓存上限。12.1 那笔账在这里用得上：权重从 14 GB 砍到 3.5 GB，省下的约 10.5 GB 是理论值；测到的显存下降如果远小于这个数，先看 KV 缓存预分配与激活占了多少，再怀疑量化本身。
