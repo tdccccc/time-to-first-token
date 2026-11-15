@@ -643,7 +643,39 @@ Prometheus 的工作方式是拉（pull），不是推（push）。vLLM 不向�
 
 搭起来的链条有三段，每段各有一个要确认的点。第一段，确认服务真的在暴露指标：对服务的 `/metrics` 发一个请求，看返回里有没有 `vllm:num_requests_running` 这样的行。返回里如果只有 Python 进程的默认指标、没有 `vllm:` 前缀的行，说明指标暴露还没生效，先查服务的启动方式与版本，而不是去改 Prometheus 的配置。第二段，确认 Prometheus 的配置指对了地方：`scrape_configs` 里要写对服务的地址与端口、`metrics_path` 是 `/metrics`、抓取间隔是你想要的值。地址写错一个端口，Prometheus 抓到的就是别人的服务或者干脆抓不到，而面板不会告诉你抓错了——它只会安静地画出另一台机器的曲线，或者画出一条直线。第三段，确认 Grafana 连上了 Prometheus 这个数据源：Grafana 本身不存指标，它只是把 PromQL 查询发给 Prometheus、把返回的结果画出来。数据源配错了，面板上所有图一起空白；数据源配对了、查询写错了，只空白一张图。这个“一起空白还是一张空白”的区别，是定位问题在数据源还是在查询的最快方法。
 
-vLLM 仓库里的监控示例已经把这套链条写成了 `docker-compose.yaml`：Prometheus 用上面的 `prometheus.yaml` 抓 `host.docker.internal:8000`，Grafana 的数据源填 `http://prometheus:9090`，看板 JSON 是同一目录下的 `grafana.json`。照抄之前先确认端口与容器网络：`host.docker.internal` 只在 Docker Desktop 这类环境里默认可用，Linux 上要靠 `extra_hosts: host-gateway`。
+vLLM 仓库的监控示例也把这套链条写成了 `docker-compose.yaml`：Prometheus 抓 `host.docker.internal:8000`，Grafana 的数据源填 `http://prometheus:9090`，看板 JSON 是同一目录下的 `grafana.json`。下面给一份最小版本；照抄之前先确认端口与容器网络：`host.docker.internal` 只在 Docker Desktop 这类环境里默认可用，Linux 上要靠 `extra_hosts: host-gateway`。
+
+一份最小配置如下。`prometheus.yml`：
+
+```yaml
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: vllm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+```
+
+配套的 `docker-compose.yaml`：
+
+```yaml
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+```
+
+`latest` 只用于本地验证；报告里要钉具体 tag 或 digest。`docker compose up -d` 之后，先打开 Prometheus 的 `:9090/targets` 确认目标是 UP，再在 Grafana 的 `:3000` 里把数据源填成 `http://prometheus:9090`。
 
 PromQL 是这条链上真正要学的东西，Grafana 的点击界面只是它的外衣。三个最常用的查询形态，覆盖看板的大部分面板。
 
@@ -652,6 +684,14 @@ PromQL 是这条链上真正要学的东西，Grafana 的点击界面只是它�
 对 Counter 求速率：`rate(vllm:generation_tokens_total[5m])`，取最近 5 分钟里生成 token 总数的增长除以时间，得到每秒生成的 token 数。某个 60 秒窗口里，`vllm:generation_tokens_total` 从 12000 涨到 18000，增长 6000 个 token，除以 60 秒，速率就是 6000 ÷ 60 = 100 token/秒。`[5m]` 是窗口：窗口太短，速率抖动大；窗口太长，速率反应慢。5 分钟是常用的折中，压测时想看秒级的吞吐变化，要把窗口缩短。Counter 在 vLLM 重启时归零，`rate()` 和 `increase()` 会处理这种重置；直接拿两个时刻的累计值相减，会在重启处算出负数。
 
 对 Histogram 求分位数：`histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))`。`_bucket` 序列带 `le` 标签，`sum by (le)` 把多个实例、多个 `model_name` 的桶按上界合并，`rate()` 把累计桶计数变成每秒增量，`histogram_quantile()` 再在桶里插值出 p95。三个查询形态合起来：状态看 Gauge，吞吐看 Counter 的速率，延迟看 Histogram 的分位数。
+
+三个查询可以直接贴进 Grafana 的 PromQL 输入框：
+
+```promql
+vllm:num_requests_running
+rate(vllm:generation_tokens_total[5m])
+histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))
+```
 
 `histogram_quantile` 只做插值，不检查样本量。窗口内 `_count` 的增量只有 3，p95 就是那 3 个样本的最大值，读数没有统计意义。判断一个分位数能不能信，先看两件事：窗口内的 `_count` 够不够（几百个样本起步），分位数落在的桶有多宽。5 分钟、15 秒间隔，窗口里有 20 次抓取，但抓取次数不等于样本数：这 5 分钟只完成 5 个请求，`_count` 的增量就是 5。分位数的精度是样本量加桶宽的函数，不是 Grafana 的分辨率。
 
@@ -685,7 +725,7 @@ Histogram 类面板：TTFT 与 TPOT 的分位数。发 5 个请求之后，`_cou
 
 为什么是 5 个请求，不是 1 个？这里有一笔采样概率账。抓取间隔 15 秒，一个请求持续 2 秒；抓取时刻与负载在时间轴上相互独立，一次抓取恰好落进这 2 秒窗口的概率是 2 ÷ 15 ≈ 13%。发 1 个请求，约 87% 的概率面板纹丝不动——不是面板坏了，是请求跑完了抓取还没来。
 
-5 个请求并发跑，窗口仍是 2 秒，但 `vllm:num_requests_running` 的幅度从 1 变成 5，KV 占用与 token 计数的变化也放大 5 倍：只要撞上一次，读数就没有歧义。要把撞上的概率也提上去，得动另一个旋钮：验证时把 `scrape_interval` 临时改成 5 秒，命中概率变成 2 ÷ 5 = 40%；或者把同一组请求连发几轮，让负载持续 10 秒，15 秒间隔下的命中概率是 10 ÷ 15 ≈ 67%。两个旋钮一起用——5 个请求、5 秒间隔、负载持续 10 秒——至少能抓到两次抓取，验证才有可比对的样本。
+5 个请求并发跑，窗口仍是 2 秒，但 `vllm:num_requests_running` 的幅度从 1 变成 5，KV 占用与 token 计数的变化也放大 5 倍：只要撞上一次，读数就没有歧义。要把撞上的概率也提上去，得动另一个旋钮：验证时把 `scrape_interval` 临时改成 5 秒，命中概率变成 2 ÷ 5 = 40%；或者把同一组请求连发几轮，让负载持续 10 秒，15 秒间隔下的命中概率是 10 ÷ 15 ≈ 67%。两个旋钮一起用——5 个请求、5 秒间隔、负载持续 10 秒——通常能抓到 2 次，边界错位时只有 1 次；要保证至少 2 次，把负载持续到 15 秒以上，验证才有可比对的样本。
 
 发 500 个请求不是办法：服务一旦被压出排队，面板上的数就混进了排队的影响，验证“面板通没通”这个简单问题，反而要先排除排队这个干扰。验证要的是干净的信号，不是大的信号。
 
