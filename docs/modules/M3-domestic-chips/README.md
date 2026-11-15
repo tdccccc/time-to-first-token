@@ -503,7 +503,7 @@ curl -sS -N http://localhost:8000/v1/completions \
   -d '{"model":"Qwen/Qwen3-0.6B","prompt":"Beijing is a","max_tokens":32,"temperature":0,"stream":true}'
 ```
 
-非流式请求的 `time_total` 是一次请求的总耗时，不是首 token 延迟。TTFT（Time to First Token，首 token 延迟：从发请求到收到第一个输出 token 的时间）与 ITL（Inter-Token Latency，token 间延迟：相邻输出 token 的平均间隔）要从流式响应的每个数据块到达时间算；`curl -N` 关掉客户端缓冲，数据块才会一个个到，不加 `-N` 时 curl 可能攒够一块才输出，看起来像非流式。流式响应最后的 `[DONE]` 是结束标记，不是 token，不要把它算进 ITL。
+非流式请求的 `time_total` 是一次请求的总耗时，不是首 token 延迟。TTFT（Time to First Token，首 token 延迟：从发请求到收到第一个输出 token 的时间）与 ITL（Inter-Token Latency，token 间延迟：相邻输出 token 的间隔；逐个间隔看分布，平均值是 TPOT）要从流式响应的每个数据块到达时间算；`curl -N` 关掉客户端缓冲，数据块才会一个个到，不加 `-N` 时 curl 可能攒够一块才输出，看起来像非流式。流式响应最后的 `[DONE]` 是结束标记，不是 token，不要把它算进 ITL。
 
 要数字，用第 4 章的 `scripts/bench_openai.py`：它按流式 chat completions 计时，逐请求记 TTFT、总耗时、输出 token 数与 ITL。字段含义见第 5 章；命令里的参数按你的服务与模型改，只把 `--base-url` 指向 Ascend 服务。
 

@@ -7,9 +7,13 @@ Usage (against a running vLLM / SGLang / llama.cpp server):
         --model Qwen2.5-7B-Instruct --concurrency 1 8 32 --requests 20
 
 What it measures per request (streaming, ``/v1/chat/completions``):
-  * TTFT — time to first streamed chunk (first token time).
+  * TTFT — time to the first content chunk (first token time).
   * total latency — time to the final streamed chunk.
-  * ITL — inter-token latency, (total - TTFT) / (completion_tokens - 1).
+  * ITL — interval between consecutive content chunks; per-interval samples
+    are aggregated across requests. A chunk may carry more than one token,
+    so this is a chunk-level approximation.
+  * TPOT — average time per output token,
+    (last content time - first content time) / (completion_tokens - 1).
   * completion tokens — read from the final chunk ``usage`` field when the
     server supports ``stream_options.include_usage`` (vLLM does); otherwise
     estimated as ``len(text) / 4`` characters and marked as an estimate.
@@ -48,6 +52,21 @@ def percentile(values, pct):
     return ordered[low] * (1 - frac) + ordered[high] * frac
 
 
+def dist(values, pcts=(50, 95, 99)):
+    """Summary for a list of samples; None when there are no samples."""
+    if not values:
+        return {"mean": None, "max": None, "samples": 0,
+                **{f"p{p}": None for p in pcts}}
+    out = {
+        "mean": round(statistics.mean(values), 4),
+        "max": round(max(values), 4),
+        "samples": len(values),
+    }
+    for p in pcts:
+        out[f"p{p}"] = round(percentile(values, p), 4)
+    return out
+
+
 def stream_request(base_url, model, max_tokens, timeout):
     """One streamed chat completion. Returns a dict of measurements."""
     body = json.dumps(
@@ -67,7 +86,9 @@ def stream_request(base_url, model, max_tokens, timeout):
         method="POST",
     )
     start = time.perf_counter()
-    ttft = None
+    first_content = None
+    last_content = None
+    content_times = []
     text_parts = []
     usage_tokens = None
     try:
@@ -83,17 +104,24 @@ def stream_request(base_url, model, max_tokens, timeout):
                     chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
-                if ttft is None:
-                    ttft = time.perf_counter() - start
-                for choice in chunk.get("choices", []):
-                    text_parts.append(choice.get("delta", {}).get("content") or "")
+                content = "".join(
+                    choice.get("delta", {}).get("content") or ""
+                    for choice in chunk.get("choices", [])
+                )
+                if content:
+                    now = time.perf_counter()
+                    if first_content is None:
+                        first_content = now - start
+                    last_content = now - start
+                    content_times.append(now)
+                    text_parts.append(content)
                 usage = chunk.get("usage") or {}
                 if usage.get("completion_tokens"):
                     usage_tokens = usage["completion_tokens"]
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
-    if ttft is None:
-        # 200 OK but no streamed chunk at all (e.g. only "[DONE]"): this is
+    if first_content is None:
+        # 200 OK but no streamed content at all (e.g. only "[DONE]"): this is
         # not a measurable request. Report it as failed instead of letting
         # a None TTFT crash the statistics below.
         return {"ok": False, "error": "no streamed content received (empty response)"}
@@ -101,14 +129,23 @@ def stream_request(base_url, model, max_tokens, timeout):
     text = "".join(text_parts)
     estimated = usage_tokens is None
     tokens = usage_tokens if usage_tokens else max(1, len(text) // 4)
-    itl = (total - ttft) / max(tokens - 1, 1) if ttft is not None else float("nan")
+    intervals = [
+        content_times[i] - content_times[i - 1]
+        for i in range(1, len(content_times))
+    ]
+    # A single content chunk means there are no intervals; fall back to the
+    # request tail so TPOT is not silently reported as zero.
+    decode_s = last_content - first_content if len(content_times) > 1 else total - first_content
+    tpot = decode_s / max(tokens - 1, 1)
     return {
         "ok": True,
-        "ttft_s": ttft,
+        "ttft_s": first_content,
         "total_s": total,
-        "itl_s": itl,
+        "itl_samples": intervals,
+        "tpot_s": tpot,
         "completion_tokens": tokens,
         "tokens_estimated": estimated,
+        "content_chunks": len(content_times),
     }
 
 
@@ -135,8 +172,8 @@ def sweep_level(base_url, model, max_tokens, concurrency, requests, timeout):
             else "no requests were run",
         }
     ttfts = [r["ttft_s"] for r in ok]
-    totals = [r["total_s"] for r in ok]
-    itls = [r["itl_s"] for r in ok]
+    itl_samples = [s for r in ok for s in r["itl_samples"]]
+    tpots = [r["tpot_s"] for r in ok]
     total_tokens = sum(r["completion_tokens"] for r in ok)
     return {
         "concurrency": concurrency,
@@ -149,11 +186,8 @@ def sweep_level(base_url, model, max_tokens, concurrency, requests, timeout):
             "p95": round(percentile(ttfts, 95), 4),
             "p99": round(percentile(ttfts, 99), 4),
         },
-        "itl_s": {
-            "mean": round(statistics.mean(itls), 4),
-            "p50": round(percentile(itls, 50), 4),
-            "p95": round(percentile(itls, 95), 4),
-        },
+        "itl_s": dist(itl_samples),
+        "tpot_s": dist(tpots, (50, 95)),
         "throughput_tok_per_s": round(total_tokens / wall, 1),
         "tokens_estimated": any(r["tokens_estimated"] for r in ok),
     }
@@ -199,16 +233,20 @@ def main():
             fh, indent=2, ensure_ascii=False,
         )
 
-    print("\n| 并发 | 成功 | TTFT p50 / p95 (s) | ITL p50 (s) | 吞吐 (tok/s) |")
-    print("|---|---|---|---|---|")
+    def fmt(value):
+        return "n/a" if value is None else value
+
+    print("\n| 并发 | 成功 | TTFT p50 / p95 (s) | ITL p50 / p95 (s) | TPOT p50 (s) | 吞吐 (tok/s) |")
+    print("|---|---|---|---|---|---|")
     for lv in levels:
         if "ttft_s" not in lv:
-            print(f"| {lv['concurrency']} | 0/{lv['requests']} | 失败：{lv.get('error')} | | |")
+            print(f"| {lv['concurrency']} | 0/{lv['requests']} | 失败：{lv.get('error')} | | | |")
             continue
         print(
             f"| {lv['concurrency']} | {lv['ok']}/{lv['requests']} | "
-            f"{lv['ttft_s']['p50']} / {lv['ttft_s']['p95']} | "
-            f"{lv['itl_s']['p50']} | {lv['throughput_tok_per_s']} |"
+            f"{fmt(lv['ttft_s']['p50'])} / {fmt(lv['ttft_s']['p95'])} | "
+            f"{fmt(lv['itl_s']['p50'])} / {fmt(lv['itl_s']['p95'])} | "
+            f"{fmt(lv['tpot_s']['p50'])} | {lv['throughput_tok_per_s']} |"
         )
     print(f"\n完整结果见 {args.output}。")
     return 0
