@@ -6,12 +6,19 @@
    --------------------------------------------------------------------------- */
 
 :root {
-  --md-text-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-    "Noto Sans SC", "Source Han Sans SC", system-ui, -apple-system,
-    "Segoe UI", sans-serif;
-  --md-code-font: "SFMono-Regular", "JetBrains Mono", "Cascadia Code",
+  --md-text-font: "Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    "Source Han Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --md-code-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular",
     Consolas, "Liberation Mono", monospace;
   --notes-width: 17rem;
+}
+
+/* Material 默认把正文字体解析成 Roboto；这里直接覆盖 body 上的变量，
+   避免中文回退到 Windows 的等线。 */
+body {
+  --md-text-font-family: var(--md-text-font), sans-serif;
+  font-family: var(--md-text-font-family);
 }
 
 [data-md-color-scheme="default"] {
