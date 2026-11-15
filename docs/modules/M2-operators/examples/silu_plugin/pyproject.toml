@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inference-book-silu-plugin"
+version = "0.1.0"
+description = "Chapter 24 teaching plugin; GPU and vLLM runtime validation pending"
+requires-python = ">=3.10"
+# Use an already compatible CUDA/PyTorch/Triton/vLLM environment; do not
+# install or upgrade a large accelerator stack as a side effect of this demo.
+dependencies = []
+
+[project.entry-points."vllm.general_plugins"]
+my_plugin = "my_plugin:register"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["my_plugin*"]

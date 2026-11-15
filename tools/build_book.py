@@ -37,34 +37,34 @@ PART_LEDES = {
     1: "先把“快”与“慢”算清楚：Roofline、四个度量、profiling、压测脚本与第一份基线。",
     2: "围绕一个 OpenAI 兼容的推理服务，从心智模型、vLLM/SGLang，到量化、投机解码、解耦、单位经济学与发表。",
     3: "打开推理引擎的盒子：CUDA/Triton、fused attention、量化 matmul、FlashAttention/CUTLASS，最后把自写 kernel 接回引擎。",
-    4: "同一模型、同一评测集，在国产芯片上跑通、压测、归因，写出一份可复现的对比报告。",
+    4: "以昇腾为主线，在同一模型、评测集与负载下跑通、分析覆盖、设计迁移并完成回归报告。",
     5: "把前面所有工具合到一份跨芯片推理优化报告里。",
 }
 
 PART_INTROS = {
-    1: """本部分先把“度量”补齐：Roofline 判断一个 kernel 受算力还是带宽限制，四个指标定义 TTFT、ITL、吞吐与排队深度，profiling 定位时间花在哪个算子上，最后用一套可复现的压测脚本跑出第一份基线。
+    1: """先建立测量口径，再解释性能：第 1–2 章做 Roofline 与指标手算，第 3 章读时间线，第 4–5 章把方法固化成压测和基线。
 
-本部分不需要 GPU 就能读完前三章；第 4、5 章需要一台跑着推理服务的机器。读完这五章，你手里会有：一张 Roofline 图、一张指标对照表、一套 profiling 读数方法、一份基线报告。""",
-    2: """本部分围绕一个不断长大的 OpenAI 兼容推理服务展开：先建立心智模型与模型架构的账本，再部署 vLLM、SGLang，做度量、压测、量化、投机解码、解耦与单位经济学，最后把结果写成一份可复现的 benchmark。
+首次动手从[快速上手](../quickstart.md)开始：无 GPU 可用完整 mock SSE 验证客户端；真实基线先完成[第 8 章的部署入口](../chapters/chapter-08.md#82)。mock 结果不代替模型性能。交付物是一张 Roofline 草图、一张指标表和一份带原始记录的基线。""",
+    2: """围绕同一个 OpenAI 兼容服务，按“部署 → 度量 → 容量 → 按瓶颈优化 → 阶段报告”推进。第一次不必先读完全部架构推导：从[快速上手](../quickstart.md)或第 8 章部署开始，再回第 6–7 章解释观测。
 
-13 章中，第 6–11 章是主线；第 12–17 章可以按需跳读；第 15 章（大规模集群 PD）与第 18 章（TensorRT-LLM）是选读。
+第 8–11 章是服务主线；第 12–16 章按量化、投机、部署和成本问题选读；第 17 章收成阶段报告。第 15 章集群与第 18 章三引擎对照是扩展，不是入门门槛。
 
 ### 适合谁
 
-熟悉 Python、了解 Transformer、会用命令行的工程师；不需要 serving、Kubernetes 或 CUDA 经验。已经做过 serving 的读者可以从第 8 章开始，把前面当查漏补缺。
+熟悉 Python、Transformer 和命令行的工程师；不要求先会 Kubernetes 或 CUDA。已有服务的读者可直接从监控与容量章节查漏补缺。
 
 ### 需要准备
 
-7–8B 模型约需一块 24GB 显卡；少数实验需要 H100。vLLM、SGLang、Prometheus/Grafana、Python 3.10+。""",
-    3: """本部分打开推理引擎的盒子：先用 CUDA 与 Triton 写 kernel，再读 fused attention 与量化 matmul 的推导，最后读 FlashAttention/CUTLASS 并把自己写的 kernel 接回 vLLM。
+7–8B 的 16 位权重通常约 14–17 GB；还要为 KV、工作区和图捕获预留空间。24GB 卡可作为短上下文单机起点，实际并发以日志与实测为准，不保证所有 8B 模型都适用。1000 个客户端在途请求不意味着 1000 条序列同时驻留，也不自动要求 H100；多设备 PD 与特定精度另看支持矩阵。""",
+    3: """把算子优化做成可核验的实验：第 19 章比较四版 GEMM，第 20 章写 Triton，第 21–22 章实现融合注意力与量化矩阵乘，第 23 章读工业实现，第 24 章接回引擎。
 
-前置：第二部分第 6–8 章（vLLM 服务已跑通）；需要 GPU 与 CUDA 工具链，部分实验需要 `ncu`。
+前置是第 1/3/6 章的上限、时间线与执行模型；直到第 24 章才需要已跑通的 vLLM 服务。内核编译和计时需要匹配工具链与 GPU，无卡可先核对数学和完整参考源码。每一步分别记录数值正确性、实际调用路径和端到端收益；没变快也是有效结果。""",
+    4: """以昇腾 Ascend 为教学主线，其他国产平台保留软件栈地图与扩展入口。推荐顺序是第 25 章画地图 → 第 27 章装环境并跑通同一模型 → 第 26 章读 AscendC 开发链 → 第 28–30 章覆盖、迁移设计与回归。
 
-6 章：第 19–21 章写 kernel，第 22–23 章读工业实现，第 24 章接回引擎。""",
-    4: """本部分以 Ascend 为主线：先画国产芯片的软件栈地图，再读 CANN/AscendC，跑通同一模型，做算子覆盖分析、移植案例与精度回归，最后写一份跨芯片对比报告初稿。
+前置是基础度量和一个已跑通的推理服务，不要求完成第二部分所有部署扩展。缺 NPU 时只查实现、做配置与迁移设计，不能把 GPU 自查升级成 NPU 验证。最终交付带版本、数据路径与配对质量回归的跨芯片初稿。""",
+    5: """升级第 30 章的同一份初稿，不重建一套记录：沿用实验编号、条件和原始数据，补齐重复运行、优化后正确性/质量回归、负面结果与选型边界。
 
-前置：第二部分（vLLM/SGLang 已跑通）；需要 Ascend NPU 或云上试用环境；无卡时按各章的替代路径做阅读与配置。""",
-    5: """把前四部分的工具合到同一模型、同一评测集上：两套硬件、同一负载、同一指标，写出一份可复现的跨芯片推理优化报告。""",
+两平台未齐时，交付框架与待测条件；实测终稿必须能追溯到原始记录。所有部分使用同一份[实验约定](../experiments.md)。""",
 }
 
 # (chapter number, part number, title, source module, source index, optional)
@@ -74,20 +74,20 @@ CHAPTERS = [
     (3, 1, "Profiling：看时间花在哪", "m0", 2, False),
     (4, 1, "写压测脚本：bench_openai.py", "m0", 3, False),
     (5, 1, "跑出第一份基线", "m0", 4, False),
-    (6, 2, "心智模型", "m1", 0, False),
+    (6, 2, "推理瓶颈判断：计算、带宽与启动开销", "m1", 0, False),
     (7, 2, "模型架构", "m1", 1, False),
     (8, 2, "vLLM：先部署，再读内部实现", "m1", 2, False),
-    (9, 2, "度量基础设施", "m1", 3, False),
+    (9, 2, "推理服务监控：Prometheus 与 Grafana", "m1", 3, False),
     (10, 2, "SGLang、RadixAttention 与批处理内部", "m1", 4, False),
-    (11, 2, "压测到 1000 并发", "m1", 5, False),
+    (11, 2, "容量评估：并发曲线、SLO 与抢占边界", "m1", 5, False),
     (12, 2, "量化取舍", "m1", 6, False),
     (13, 2, "投机解码与 KV 淘汰", "m1", 7, False),
     (14, 2, "解耦式服务与 Kubernetes", "m1", 8, False),
     (15, 2, "大规模集群 PD 优化", "m1", 9, True),
     (16, 2, "单位经济学与路由器", "m1", 10, False),
     (17, 2, "发表，然后养成阅读习惯", "m1", 11, False),
-    (18, 2, "TensorRT-LLM：编译式推理引擎", "m1", 12, True),
-    (19, 3, "CUDA 优化阶梯：一个 GEMM，四次提速", "m2", 0, False),
+    (18, 2, "TensorRT-LLM：执行后端与三引擎对比", "m1", 12, True),
+    (19, 3, "GEMM 的四版实现：优化、计时与归因", "m2", 0, False),
     (20, 3, "Triton 入门：用 Python 写 kernel", "m2", 1, False),
     (21, 3, "Fused Attention 深讲：先推导，再写 kernel", "m2", 2, False),
     (22, 3, "量化 Matmul 深讲：量化方案本身", "m2", 3, False),
@@ -97,7 +97,7 @@ CHAPTERS = [
     (26, 4, "CANN 与 AscendC 深讲：算子从定义到编译到调用", "m3", 1, False),
     (27, 4, "同一模型在 Ascend 上跑通 + vllm-ascend 插件架构", "m3", 2, False),
     (28, 4, "算子覆盖分析", "m3", 3, False),
-    (29, 4, "移植案例：把 Triton kernel 搬到 Ascend", "m3", 4, False),
+    (29, 4, "迁移前检查与实验设计：从 Triton 到 Ascend", "m3", 4, False),
     (30, 4, "精度回归与调优报告", "m3", 5, False),
     (31, 5, "跨芯片推理优化报告", "m4", 0, False),
 ]
@@ -116,14 +116,14 @@ CHAPTER_SUMMARIES = {
     10: "RadixAttention 用基数树复用前缀；连续批处理让 batch 流动，分块 prefill 解耦 prefill 与 decode。",
     11: "压测要扫出整条吞吐—延迟曲线；拐点决定容量，1000 并发只是观测边界。硬件不够时，写清饱和段与待补测条件。",
     12: "量化省的是搬运量，代价落在精度；先看质量表，再看加速比。",
-    13: "投机解码看接受率与交叉点，不看头条加速比；KV 淘汰省显存与 TPOT，代价是窗口外信息。",
+    13: "投机统计分清 token 比例与起草轮次，收益用同负载验证；KV 窗口同时检查位置处理和任务质量。",
     14: "先算干扰与 KV 传输账，再在 Kubernetes 上按排队深度扩缩容。",
     15: "大规模 PD 的难点在 KV 池、传输和容错，不在把两个服务拆开。",
     16: "每百万 token 成本由利用率、输入输出比例和批量共同决定；路由器与预算中间件把这笔账写进代码。",
     17: "把 benchmark 的条件、命令与分位数写全，让读者能复现；用固定流程读论文，把结论写回项目。",
-    18: "编译把执行计划提前，收益与变更频率成反比；选型先看负载与硬件边界，再看加速比。",
+    18: "区分历史 TensorRT 流程与当前 PyTorch 后端，按执行配置、图覆盖、kernel、调度和冷启动比较三引擎。",
     19: "同一个 GEMM 写四版，每版只改一个变量；用 ncu 定位瓶颈，用 Roofline 验证收益。",
-    20: "Triton 用 block 换掉线程管理；能用 block 说清的留在 Triton，说到 warp 与流水线时回 CUDA。",
+    20: "从 block、mask 和 tl.dot 写出最小 kernel，再按目标设备与编译器版本选择合适的抽象和优化路径。",
     21: "先证 online softmax 精确，再按 SRAM 与寄存器定 block，最后用正确性、计时和 Roofline 验收。",
     22: "量化 matmul 的收益分两笔：INT8 峰值与权重搬运减半；scale 粒度决定哪一笔能兑现。",
     23: "从 FA2 的工作划分到 FA3 的异步流水，读懂 flash-attn 主循环与 CUTLASS 三级结构。",
@@ -137,12 +137,53 @@ CHAPTER_SUMMARIES = {
     31: "综合项目的重点是同一套条件、可追溯的数据和明确的证据等级：把同一模型在两套硬件上的差异做两遍并写清楚。",
 }
 
+def _guidance(environment: str, prerequisite: str, deliverable: str) -> dict[str, str]:
+    return {"environment": environment, "prerequisite": prerequisite, "deliverable": deliverable}
+
+
+# These describe the learning environment, not a claim that a hardware lab
+# has been compiled or benchmarked. Evidence and pending work stay explicit.
+CHAPTER_GUIDANCE = {
+    1: _guidance("纸面推导，无需 GPU", "基础算术、目标模型配置与硬件规格", "一页权重/KV 手算记录与 Roofline 草图"),
+    2: _guidance("纸面时间线，无需 GPU", "一条流式请求的起止时间与输出长度", "指标定义、分位数算法与测量条件表"),
+    3: _guidance("CPU 可读框架时间线；GPU 细节需设备与 profiler", "第 1–2 章；先确认采集权限和测量粒度", "热点、时间线空白与下一步对照实验"),
+    4: _guidance("Python 标准库客户端；CPU mock 或运行中的服务", "快速上手中的 mock 路径，或第 8 章部署入口", "完整请求记录、汇总 JSON 与计时口径检查"),
+    5: _guidance("真实服务基线需 GPU；mock 只验证客户端方法", "第 4 章脚本已跑通，第 8 章服务已就绪", "带条件编号与原始记录的有限工作负载基线"),
+    6: _guidance("纸面估算；可用 profiler 验证实际瓶颈", "第 1 章 Roofline 与第 3 章时间线", "计算、搬运、启动与同步的判断流程"),
+    7: _guidance("阅读模型配置即可，不必下载全部模型权重", "Transformer 基础；首次部署先读主模型与 KV 账", "主模型参数、激活量、KV 状态与优化清单"),
+    8: _guidance("能容纳权重、KV 与工作区的支持设备", "匹配的驱动/运行时、模型许可与下载条件", "可复现启动命令、流式冒烟与环境记录"),
+    9: _guidance("运行中的推理服务；监控示例另需 Docker", "第 8 章服务与第 2 章指标边界", "经已知负载验证的 Prometheus/Grafana 面板"),
+    10: _guidance("同一设备先后运行 vLLM 与 SGLang", "第 8–9 章；固定模型、负载与缓存设置", "前缀重/轻两组对照与调度分析"),
+    11: _guidance("CPU 压测客户端、真实服务与监控", "第 5 章基线；区分客户端在途数与服务端并发", "SLO 容量、拐点、过载段与抢占边界"),
+    12: _guidance("支持目标量化格式的设备与引擎", "相同底座的检查点、基线与预先定义的质量门槛", "性能/显存/任务质量的同条件对照"),
+    13: _guidance("支持投机或窗口缓存路径的目标引擎", "第 11–12 章；草稿成本、采样设置与 KV 位置约定", "接受 token/轮次记录、收益区间与质量回归"),
+    14: _guidance("实测需多设备及 KV 传输；本地集群只作部署演练", "单机基线、连接器协议与两池请求协调", "传输账、路径证据与部署验收记录"),
+    15: _guidance("集群与互联实测；无集群可完成纸面设计", "第 14 章数据路径与目标负载", "KV 池、拓扑、配比与故障恢复的证据清单"),
+    16: _guidance("成本手算与 CPU 路由逻辑；输入来自已有实测", "第 5/11 章吞吐、利用率和 SLO 记录", "单位成本表、路由规则与预算策略"),
+    17: _guidance("无需新增硬件，使用前面留下的原始记录", "可追溯实验编号、条件和已验证结论", "阶段报告、复现步骤与局限清单"),
+    18: _guidance("NVIDIA 支持矩阵内的设备与匹配后端", "同模型/同负载的 vLLM、SGLang 基线", "具体后端、执行配置与冷启动的三引擎对照"),
+    19: _guidance("CUDA 工具链与 GPU；无卡仅核对源码和数学", "第 1/3/6 章；先读完整参考程序与验证边界", "四版 GEMM 的正确性、计时与归因表"),
+    20: _guidance("受支持的 Triton 设备；部分练习可解释执行", "线程/分块基础、边界 mask 与计时口径", "向量、矩阵与融合算子的最小实现"),
+    21: _guidance("Triton GPU、FP32 参考与 PyTorch SDPA", "第 20 章；纸面 online softmax 可先无卡推导", "因果/非因果与尾块正确性、计时记录"),
+    22: _guidance("数值准备可做 CPU 检查，内核计时需支持的 GPU", "第 12/20 章；FP32 scale 与相同量化参考", "零值/极小值/形状边界与 INT8/fused 对照"),
+    23: _guidance("读源码无需 GPU；FA3 实验需对应 Hopper 能力", "第 19–22 章；核对 CUDA/CUTLASS/Triton 版本", "工业实现机制与单参数 tile 对照设计"),
+    24: _guidance("Python 可查注册；端到端必须使用实际引擎与 GPU", "第 8/20 章；完整插件入口与当前 CustomOp 接口", "注册/启用/分发证据和同负载端到端报告"),
+    25: _guidance("公开软件栈文档，无需设备", "一个目标模型和待适配的平台范围", "带来源、版本与核实日期的软件栈地图"),
+    26: _guidance("AscendC 编译/运行需匹配 SDK 与 NPU", "先完成第 27 章环境与冒烟；无卡只做链路设计", "最小算子的定义、编译、注册与调用检查点"),
+    27: _guidance("支持的 Ascend NPU 与匹配版本组合", "第 8/25 章同模型接口与软件栈地图", "安装、模型加载、流式冒烟与版本记录"),
+    28: _guidance("真实 profiler 清单；无卡只查实现存在性", "第 3/27 章；明确算子/kernel 的计数粒度", "覆盖矩阵、执行路径与耗时加权归因"),
+    29: _guidance("GPU 自查与 NPU 目标验证分别记录", "第 20/27/28 章；无 NPU 仅完成迁移设计", "基线、失效假设、单点修改与待验证记录"),
+    30: _guidance("两平台服务与同题配对评测集", "第 27–29 章；预先确定数值与质量退化门槛", "质量/性能/路径证据齐全的跨芯片初稿"),
+    31: _guidance("两套真实平台；缺一边只交框架和待测条件", "升级第 30 章同一份初稿，复用原始编号", "优化后回归、重复运行与可复现终稿"),
+}
+
+
 CHAPTER_FIGURES = {
     1: ("roofline.svg", "Roofline 示意图：横轴为算术强度，纵轴为可达性能；斜线是带宽上限，横线是算力上限，交点是脊点；decode 点在斜线一侧，prefill 点越过脊点", "先看斜线、横线与交点（本算例的脊点是 156 FLOP/字节），再找 decode 与 prefill 示例点。结论：decode 在带宽斜线一侧，增加算力不改第一瓶颈；prefill 越过脊点后更受算力限制。"),
     2: ("timeline.svg", "一次流式请求的时间线：请求到达、排队、prefill、TTFT、逐 token decode 与 ITL", "先看 TTFT 在哪里结束，再看其后的 token 间隔如何组成 ITL。结论：排队和 prefill 都计入 TTFT，不能和 decode 的 step time 混成一个数。"),
     3: ("profiler-trace.svg", "CPU 与 GPU 双泳道 trace 示意：CPU 侧依次是 Python 调度、连续 kernel 启动与 synchronize，GPU 侧是若干短 kernel、一段空白、一个长 kernel 与更多短 kernel；空白与 CPU 的同步等待对齐", "先对齐 CPU 与 GPU 两条泳道，看 GPU 空白下方 CPU 在做什么；再区分发射跟不上、同步等待与拷贝。结论：GPU 时间线上的空白不是没有成本，它和 kernel 一样要归因。"),
     7: ("model-ledgers.svg", "五个模型的两列点图：左列总参数（对数轴，8.19B 到 2.78T），右列每 8K 请求的全局 KV（对数轴，6.953 MiB 到 1,152 MiB）；Qwen3-8B 参数最少而 KV 最大，V4.1 Flash 参数第二而 KV 最小", "先看两列的横向位置：同一行是一个模型，参数从少到多排，8K 全局 KV 却没有同向变化。结论：参数规模不决定 KV 账，优化清单要按模型重排。"),
-    6: ("kernel-anatomy.svg", "kernel 时间账：计算、显存搬运、启动与同步三项取最大，并指向不同优化动作", "先看三项时间哪一项最大，再看底部对应的动作。结论：判断瓶颈在计算、带宽还是启动，优化清单才选得对。"),
+    6: ("kernel-anatomy.svg", "计算与实际数据搬运的必要下界，启动与同步开销单独列出", "先比较时间尺度，再检查重叠与串行依赖。重叠只能减少相加的时间，不能突破同口径下的计算与搬运下界；实际瓶颈仍要用时间线验证。"),
     8: ("kv-pages.svg", "PagedAttention 的块表映射：左侧逻辑块 L0–L5，经中间块表映射到右侧非连续物理页", "先看左侧逻辑块和中间块表，再沿映射看右侧物理页；相邻逻辑块可以落在不相邻的物理页。结论：按需分页把浪费压到最后一个未满 block，代价是 attention 按块表 gather。"),
     10: ("batching.svg", "两条时间线示意：静态批处理中先结束的请求留下空槽等最慢请求，连续批处理在请求结束时换入新请求；看空白段与换入点，结论是提高 GPU 占用率与吞吐、缩短短请求排队等待，但不改变单个 token 的计算速度", "先对齐两条时间轴看空白与换入点：静态批处理等最慢请求，连续批处理在请求结束时释放槽位并换入新请求。结论：提高 GPU 占用率与吞吐，缩短短请求的排队等待，但不改变单个 token 的计算速度。"),
     11: ("throughput-knee.svg", "吞吐与 p95 延迟随并发变化的示意曲线，标出拐点与饱和段", "先看吞吐何时停止线性增长，再对照 p95 何时陡增。结论：拐点是容量结论的起点；1000 并发只是观测边界，不是考核指标。"),
@@ -150,7 +191,7 @@ CHAPTER_FIGURES = {
     13: ("spec.svg", "投机解码：draft 模型先猜多个 token，target 模型一次验证并接受前缀", "先看 draft 猜了几个，再看 target 验证后接受几个、在哪里截断。结论：收益由接受率和额外计算成本共同决定，低 QPS 的加速比不能外推。"),
     14: ("pd.svg", "解耦式服务：请求经 router 进入 prefill 池，产出的 KV 经传输层或共享池进入 decode 池，两池各自扩缩容", "先看 router 如何把请求分到 prefill 池，再沿 KV 箭头看传输与共享池两条路径。结论：拆分的收益是消掉的干扰与硬件错配，成本是 KV 传输、两池空闲与运维；两池卡数与扩缩容信号要一起设计。"),
     15: ("pd.svg", "大规模 PD 的抽象示意：prefill 池、decode 池与 KV 传输；未展开跨节点拓扑", "这张图只抽象两池与 KV 传输，不代表跨节点拓扑。先看 KV 路径，再回到正文核对跨机带宽、池配比和容错；结论必须落在你自己的传输账上。"),
-    18: ("trtllm-pipeline.svg", "编译式引擎的两段：加载时把权重与模型配置、图优化、kernel 选择、执行图捕获与 KV 布局定成执行计划；运行时循环按计划取请求、调度（三预算）、准备 KV、执行、采样。模型、形状、GPU 或引擎版本一变，计划失效，回到加载时重做", "先看上半部分加载时的五个方框如何汇成执行计划，再看下半部分运行时循环的五个步骤与回环；底部箭头说明变更会触发重新加载。结论：编译的收益在每步更少的决定，代价是变更要把计划重做。"),
+    18: ("trtllm-pipeline.svg", "TensorRT-LLM PyTorch 后端的准备与运行：预先准备常见执行路径，运行时按请求调度并复用可用计划与图；不是与 vLLM 的 eager 二分", "上半部分是加载与预热阶段的准备，下半部分仍按实际请求调度。编译缓存、kernel 与图捕获不是某个引擎独有的机制；变更时核对图覆盖与后端规则，再决定重载、补捕获或回退。"),
     19: ("cuda-ladder.svg", "CUDA 优化阶梯：朴素版、shared memory 分块、向量化访存、占用率调优", "先看横轴四个版本，再看每一步只改哪个变量；柱高是示意，不是实测。结论：每一步都要由 ncu 读数和 Roofline 点验证，不能只看总时间。"),
     22: ("quant.svg", "FP16、FP8、INT4 的位数与 7B 模型权重体积对比：先看位数与体积随位宽减半，再回到正文核对 8 位权重的搬运账。结论：位宽减半，权重搬运减半，这是 fused dequant 要利用的第一笔账。", "先比较三种格式的位数与权重体积，再回到正文核对 8 位权重的搬运账。结论：位宽减半，权重搬运减半；这是 fused dequant 要利用的第一笔账。"),
     25: ("chip-stack.svg", "国产芯片软件栈：驱动与固件、SDK/运行时、算子库、框架插件、推理引擎", "从下往上看五层软件栈，再检查同一模型经过哪些层。结论：跑通和性能问题都要按层定位，不能只归因到芯片本身。"),
@@ -165,10 +206,10 @@ TERM_GLOSSARY = [
     {"id": "ridge_point", "aliases": ("脊点", "ridge point"), "en": "ridge point", "zh": "脊点", "desc": "硬件峰值算力与峰值显存带宽之比，用来判断计算受限还是带宽受限"},
     {"id": "memory_bound", "aliases": ("显存带宽受限", "memory-bound", "memory bound"), "en": "memory-bound", "zh": "显存带宽受限", "desc": "运行时间主要受显存带宽而不是计算能力限制的状态"},
     {"id": "compute_bound", "aliases": ("计算受限", "compute-bound", "compute bound"), "en": "compute-bound", "zh": "计算受限", "desc": "运行时间主要受计算能力而不是显存带宽限制的状态"},
-    {"id": "ttft", "aliases": ("TTFT",), "en": "Time to First Token", "zh": "首 token 延迟", "desc": "从请求发出到客户端收到第一个输出 token 的时间"},
+    {"id": "ttft", "aliases": ("TTFT",), "en": "Time to First Token", "zh": "首 token 延迟", "desc": "从请求发出到首次输出的时间；本书客户端以首个非空内容 chunk 到达作近似，不把 role 或 usage 空块当首 token"},
     {"id": "itl", "aliases": ("ITL",), "en": "Inter-Token Latency", "zh": "token 间延迟", "desc": "同一请求相邻两个输出 token 之间的间隔（逐个间隔；报告时看 p50/p95/最大间隔）"},
-    {"id": "tpot", "aliases": ("TPOT",), "en": "Time Per Output Token", "zh": "每输出 token 时间", "desc": "decode 阶段平均生成一个输出 token 所需的时间，通常为 (总延迟 − TTFT) / (输出 token 数 − 1)"},
-    {"id": "prefill", "aliases": ("prefill", "Prefill", "预填充"), "en": "prefill", "zh": "预填充", "desc": "在生成前一次性处理输入 prompt，并写入 KV 缓存的前向阶段"},
+    {"id": "tpot", "aliases": ("TPOT",), "en": "Time Per Output Token", "zh": "每输出 token 时间", "desc": "首末内容到达时间差除以输出 token 数减一；不足两个输出 token 或只有一个内容 chunk 时不报告，chunk 聚合仍影响近似"},
+    {"id": "prefill", "aliases": ("prefill", "Prefill", "预填充"), "en": "prefill", "zh": "预填充", "desc": "处理新输入 prompt 并写入 KV 缓存的前向阶段，可整段或分块执行"},
     {"id": "decode", "aliases": ("decode", "Decode", "解码阶段", "解码请求"), "en": "autoregressive decoding", "zh": "解码", "desc": "逐 token 生成输出、并复用已有 KV 缓存的自回归阶段"},
     {"id": "kv_cache", "aliases": ("KV 缓存", "KV Cache", "KV cache"), "en": "Key-Value Cache", "zh": "键值缓存", "desc": "保存历史 token 的注意力 K/V 向量、避免 decode 时重复计算的显存区域"},
     {"id": "mha", "aliases": ("MHA",), "en": "Multi-Head Attention", "zh": "多头注意力", "desc": "每个 query 头拥有独立 K/V 头的标准注意力结构"},
@@ -196,17 +237,17 @@ TERM_GLOSSARY = [
     {"id": "hpa", "aliases": ("HPA",), "en": "Horizontal Pod Autoscaler", "zh": "水平 Pod 自动扩缩容", "desc": "Kubernetes 中按指标自动调整 Pod 副本数的控制器"},
     {"id": "keda", "aliases": ("KEDA",), "en": "Kubernetes Event-driven Autoscaling", "zh": "Kubernetes 事件驱动扩缩容", "desc": "把事件或外部指标接入 HPA 的扩缩容组件"},
     {"id": "router", "aliases": ("router", "Router", "路由器"), "en": "router", "zh": "路由器", "desc": "在多后端或多模型之间按成本、延迟或质量选择目标服务的组件"},
-    {"id": "tensorrt_llm", "aliases": ("TensorRT-LLM",), "en": "TensorRT for Large Language Models", "zh": "TensorRT 大语言模型推理引擎", "desc": "NVIDIA 的编译式 LLM 推理引擎，在加载时生成执行计划并做图优化"},
+    {"id": "tensorrt_llm", "aliases": ("TensorRT-LLM",), "en": "TensorRT for Large Language Models", "zh": "TensorRT-LLM 推理引擎", "desc": "NVIDIA 的 LLM 推理系统，须区分历史 TensorRT engine 流程和当前 PyTorch 执行后端；编译与图捕获不是其独有机制"},
     {"id": "cuda", "aliases": ("CUDA",), "en": "Compute Unified Device Architecture", "zh": "统一计算设备架构", "desc": "NVIDIA 的 GPU 并行计算平台与编程模型"},
     {"id": "cuda_graph", "aliases": ("CUDA Graph", "CUDA 图"), "en": "CUDA Graph", "zh": "CUDA 图", "desc": "把多次 kernel 启动录制成一张图，以减少重复启动开销"},
     {"id": "triton", "aliases": ("Triton",), "en": "Triton", "zh": "Triton GPU 编程语言", "desc": "用 Python 风格语法编写 GPU kernel 的语言与编译器"},
     {"id": "shared_memory", "aliases": ("shared memory", "Shared Memory", "共享内存"), "en": "shared memory", "zh": "共享内存", "desc": "同一线程块内可见、延迟远低于显存的可编程片上存储"},
-    {"id": "warp", "aliases": ("warp", "Warp"), "en": "warp", "zh": "线程束", "desc": "GPU 上一次调度执行的 32 个线程组成的硬件执行单位"},
+    {"id": "warp", "aliases": ("warp", "Warp"), "en": "warp", "zh": "线程束", "desc": "NVIDIA CUDA 中通常由 32 个线程组成的指令执行组；其他平台的线程组与调度规则需另查"},
     {"id": "occupancy", "aliases": ("occupancy", "Occupancy", "占用率"), "en": "occupancy", "zh": "占用率", "desc": "SM 上实际驻留 warp 数占硬件上限的比例"},
     {"id": "bank_conflict", "aliases": ("bank conflict", "Bank Conflict", "存储体冲突"), "en": "bank conflict", "zh": "存储体冲突", "desc": "多个线程访问同一 shared memory bank 的不同地址而被迫串行"},
     {"id": "gemm", "aliases": ("GEMM",), "en": "General Matrix Multiplication", "zh": "通用矩阵乘法", "desc": "注意力投影、MLP 和大多数线性层的基础计算算子"},
     {"id": "fused_attention", "aliases": ("fused attention", "Fused Attention", "融合注意力"), "en": "fused attention", "zh": "融合注意力", "desc": "把 attention 的多个步骤融进一个 kernel，避免中间矩阵写入显存"},
-    {"id": "flash_attention", "aliases": ("FlashAttention",), "en": "FlashAttention", "zh": "闪存注意力", "desc": "通过分块与在线 softmax 减少 attention 中间矩阵读写的高效实现"},
+    {"id": "flash_attention", "aliases": ("FlashAttention",), "en": "FlashAttention", "zh": "FlashAttention", "desc": "通过分块与在线 softmax 减少 HBM 中间矩阵读写的 IO 感知精确注意力实现，不是闪存技术"},
     {"id": "online_softmax", "aliases": ("online softmax", "Online Softmax", "在线 softmax"), "en": "online softmax", "zh": "在线 softmax", "desc": "分块计算 softmax 时维护运行最大值与归一化因子的数值稳定算法"},
     {"id": "cutlass", "aliases": ("CUTLASS",), "en": "CUDA Templates for Linear Algebra Subroutines", "zh": "CUDA 线性代数模板库", "desc": "NVIDIA 提供的可组合 GEMM 与流水线 kernel 模板库"},
     {"id": "cann", "aliases": ("CANN",), "en": "Compute Architecture for Neural Networks", "zh": "昇腾神经网络计算架构", "desc": "华为昇腾 NPU 的软件栈与算子开发平台"},
@@ -596,7 +637,8 @@ def glossary_annotation(term: str, entry: dict[str, str]) -> str:
         inside = f"{en}：{desc}"
     else:
         inside = f"{en}，{zh}：{desc}"
-    return f'{term}<span class="term-def">（{inside}）</span>'
+    tooltip = html.escape(inside, quote=True)
+    return f'[{term}](../glossary.md#{entry["id"]}){{ .term-ref title="{tooltip}" }}'
 
 
 class TermAnnotator:
@@ -1184,6 +1226,37 @@ def subhead_level(h: Heading, module: str) -> int:
     return h.level
 
 
+def render_glossary() -> str:
+    out = [
+        "# 术语表", "",
+        "正文首次出现的术语链接到这里；悬停链接可查看简短解释。定义描述机制，不替代具体版本、形状和负载下的验证。", "",
+        "[快速上手](quickstart.md) · [统一实验约定](experiments.md)", "",
+    ]
+    for entry in TERM_GLOSSARY:
+        label = entry["zh"] if entry["zh"] == entry["en"] else f'{entry["zh"]}（{entry["en"]}）'
+        aliases = "、".join(f"`{alias}`" for alias in dict.fromkeys(entry["aliases"]))
+        out += [f'## {label} {{ #{entry["id"]} }}', "", entry["desc"], "", f"常用写法：{aliases}。", ""]
+    return "\n".join(out)
+
+
+def build_glossary_page() -> None:
+    write("docs/glossary.md", render_glossary())
+
+
+def chapter_start(chapter: Chapter, source_dir: str) -> list[str]:
+    info = CHAPTER_GUIDANCE[chapter.num]
+    links = [("统一实验约定", "docs/experiments.md"), ("快速上手", "docs/quickstart.md"), ("术语表", "docs/glossary.md")]
+    footer = " · ".join(f"[{label}]({posixpath.relpath(path, source_dir)})" for label, path in links)
+    return [
+        '??? note "开始前：环境、前置与交付物"', "",
+        f'    - **环境**：{info["environment"]}。',
+        f'    - **前置**：{info["prerequisite"]}。',
+        f'    - **交付物**：{info["deliverable"]}。', "",
+        "    环境要求不代表本书已在该设备上验证；实验状态与证据按正文和原始记录判断。", "",
+        f"    {footer}", "",
+    ]
+
+
 def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     hs = scan(raw)
     if not hs:
@@ -1217,6 +1290,7 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
             f'<p class="chapter-goal"><strong>本章目标</strong>：{goal_text}</p>',
             "",
         ]
+    out += chapter_start(chapter, source_dir)
     figure_lines = chapter_figure(chapter)
     placement = CHAPTER_FIGURE_PLACEMENT.get(chapter.num, (None, 1) if not sections else (1, 1))
     target_section, figure_after = placement
@@ -1253,7 +1327,6 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
             out.append("")
     if figure_lines:
         out += ["", *figure_lines, ""]
-    out = TermAnnotator().annotate_lines(out)
     unique_refs: list[str] = []
     seen_refs: set[str] = set()
     for ref in references:
@@ -1268,6 +1341,7 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     text = "\n".join(out)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = rewrite_links(text, source_dir, "docs/chapters")
+    text = "\n".join(TermAnnotator().annotate_lines(text.splitlines()))
     text = re.sub(r"^\*\*(?:怎么做|本章产出|产出|产出物|阅读材料|缓冲)[^\n]*\n?", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
     write(f"docs/chapters/{chapter.slug}.md", text)
@@ -1382,9 +1456,10 @@ def build_part_page(part: Part, sources: dict[str, Source]) -> None:
 
     post = strip_blank(source_post(sources["m0" if part.num == 1 else "m2" if part.num == 3 else "m3"])) if part.num in (1, 3, 4) else []
     if post:
-        out += ["## 本部分检查清单", ""]
         post_text = "\n".join(post)
-        post_text = post_text.replace("## 本模块检查清单", "")
+        post_text = post_text.replace("## 本模块检查清单", "## 本部分检查清单")
+        if not re.search(r"^## ", post_text, re.MULTILINE):
+            out += ["## 本部分检查清单", ""]
         module = "m0" if part.num == 1 else "m2" if part.num == 3 else "m3"
         ch = CH_BY_NUM[1 if part.num == 1 else 19 if part.num == 3 else 25]
         post_text = rewrite_links(transform_text(post_text, module, ch), "docs/modules/M0-foundations" if part.num == 1 else "docs/modules/M2-operators" if part.num == 3 else "docs/modules/M3-domestic-chips", "docs/parts")
@@ -1463,7 +1538,7 @@ Fork 本仓库，新建一个 issue，把根目录 [progress.md](https://github.
 
 
 def build_catalog(parts: dict[int, Part]) -> None:
-    out = ["# 全书目录", "", "5 部分 · 31 章。左侧目录用于跳转，这一页适合一次看完。", ""]
+    out = ["# 全书目录", "", "5 部分 · 31 章是知识地图，不必一次完成。先看[快速上手](quickstart.md)与[统一实验约定](experiments.md)，再按目标选读。", ""]
     for part in parts.values():
         out += [f"## {PART_CN[part.num]} {part.title}", "", f"[本部分导览](parts/{part.slug}.md)", ""]
         for ch in part.chapters:
@@ -1475,7 +1550,7 @@ def build_catalog(parts: dict[int, Part]) -> None:
 
 
 def build_structure_page(parts: dict[int, Part]) -> None:
-    out = ["# 全书结构", "", "全书按主题分为五部分，共 31 章；章内小节按编号排列。", "", "| 部分 | 章节 | 主题 |", "|---|---|---|"]
+    out = ["# 全书结构", "", "全书按主题分为五部分，共 31 章；章内小节按编号排列。这是知识地图，不必一次完成；先看[快速上手](quickstart.md)与[统一实验约定](experiments.md)，再按目标选读。", "", "| 部分 | 章节 | 主题 |", "|---|---|---|"]
     for part in parts.values():
         nums = f"{part.chapters[0].num}–{part.chapters[-1].num}" if len(part.chapters) > 1 else str(part.chapters[0].num)
         out.append(f"| [{PART_CN[part.num]} {part.title}](parts/{part.slug}.md) | {nums} | {PART_LEDES[part.num]} |")
@@ -1565,6 +1640,7 @@ def main() -> None:
     build_catalog(PARTS)
     build_structure_page(PARTS)
     build_progress_page(PARTS)
+    build_glossary_page()
     shutil.copyfile(ROOT / "tools" / "homepage.md", SITE / "index.md")
     cleanup_sources()
     print("built 5 parts / 31 chapters:", ", ".join(f"P{p.num}={len(p.chapters)}" for p in PARTS.values()))

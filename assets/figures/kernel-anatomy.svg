@@ -13,11 +13,11 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 </defs>
 <rect width="900" height="430" fill="#fbfcfe"/>
 <text x="40" y="40" class="title">一个 kernel 慢：先看它在等什么</text>
-<text x="40" y="64" class="sub">把计算、显存搬运、启动同步分别估出来；最大的一项决定优化方向。</text>
+<text x="40" y="64" class="sub">分别估计计算、数据搬运与固定开销；再用时间线判断实际瓶颈。</text>
 
 <g>
 <rect x="40" y="92" width="250" height="150" rx="10" fill="#eef2ff" stroke="#c7d2fe"/>
-<text x="60" y="122" class="label">计算时间</text>
+<text x="60" y="122" class="label">计算下界</text>
 <text x="60" y="146" class="small">FLOPs ÷ 峰值算力</text>
 <text x="60" y="172" class="small">典型：大矩阵乘、长 prompt</text>
 <text x="60" y="194" class="small">判断：算术强度 &gt; 脊点</text>
@@ -26,8 +26,8 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 
 <g>
 <rect x="325" y="92" width="250" height="150" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
-<text x="345" y="122" class="label">显存搬运</text>
-<text x="345" y="146" class="small">字节数 ÷ 有效带宽</text>
+<text x="345" y="122" class="label">数据搬运下界</text>
+<text x="345" y="146" class="small">实际字节 ÷ 峰值带宽</text>
 <text x="345" y="172" class="small">典型：decode 读权重、逐元素链</text>
 <text x="345" y="194" class="small">判断：算术强度 &lt; 脊点</text>
 <text x="345" y="220" class="hint">动作：量化、融合、复用、少读写</text>
@@ -43,11 +43,11 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 </g>
 
 <rect x="40" y="262" width="820" height="52" rx="9" fill="#f8fafc" stroke="#cbd5e1"/>
-<text x="60" y="284" class="label">总时间 ≈ max（计算时间，搬运时间，启动与同步）</text>
-<text x="60" y="304" class="small">这是近似：重叠执行会让实测略低，但省不掉最大那一项本身。</text>
+<text x="60" y="284" class="label">执行时间 ≥ max（计算下界，搬运下界）</text>
+<text x="60" y="304" class="small">重叠可减少串行叠加；启动、同步与依赖另计，不能突破上述下界。</text>
 
 <line x1="450" y1="318" x2="450" y2="338" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
 <rect x="250" y="344" width="400" height="38" rx="8" fill="#e0e7ff" stroke="#c7d2fe"/>
-<text x="450" y="368" class="small" text-anchor="middle" style="font-weight:600;fill:#1f2937">先记录最大项，再用 ncu / 压测验证；不要只凭总时间猜</text>
+<text x="450" y="368" class="small" text-anchor="middle" style="font-weight:600;fill:#1f2937">先列假设，再用时间线与计数器验证</text>
 <text x="40" y="410" class="note">示意：小 kernel 的启动开销可能比计算和搬运都大；大 decode 通常由带宽决定。</text>
 </svg>

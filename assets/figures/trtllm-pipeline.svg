@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="编译式引擎：加载时定执行计划，运行时按计划循环">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="TensorRT-LLM PyTorch 后端的准备与运行">
 <style>
 text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 .title{font-size:25px;font-weight:700;fill:#1f2937}
@@ -9,11 +9,11 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 </style>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
 <rect width="900" height="430" fill="#fbfcfe"/>
-<text x="40" y="40" class="title">编译式引擎：加载时定计划，运行时按计划走</text>
-<text x="40" y="64" class="sub">权重不变，变的是图、kernel、执行图与 KV 布局；这些决定在加载时定死。</text>
+<text x="40" y="40" class="title">TensorRT-LLM PyTorch 后端：准备与运行</text>
+<text x="40" y="64" class="sub">编译缓存、kernel 与图捕获共同决定执行路径；它们不是某个引擎独有的机制。</text>
 
-<text x="40" y="94" class="label">加载时（一次性）</text>
-<text x="190" y="94" class="small">权重、图、kernel 与 KV 布局在这里定死</text>
+<text x="40" y="94" class="label">加载与预热</text>
+<text x="190" y="94" class="small">常见形状预先准备；未覆盖形状按后端处理</text>
 <g>
 <rect x="40" y="106" width="150" height="58" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
 <text x="115" y="130" class="label" text-anchor="middle">权重与模型配置</text>
@@ -29,7 +29,7 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <text x="600" y="150" class="small" text-anchor="middle">KV 缓存布局</text>
 <rect x="690" y="106" width="130" height="58" rx="8" fill="#fffbeb" stroke="#fde68a"/>
 <text x="755" y="131" class="plan" text-anchor="middle">执行计划</text>
-<text x="755" y="151" class="small" text-anchor="middle">形状绑定</text>
+<text x="755" y="151" class="small" text-anchor="middle">形状与配置</text>
 </g>
 <line x1="190" y1="135" x2="198" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
 <line x1="350" y1="135" x2="358" y2="135" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -39,7 +39,7 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <text x="745" y="190" class="small" text-anchor="end">运行时按计划执行</text>
 
 <rect x="40" y="202" width="820" height="132" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 4"/>
-<text x="56" y="226" class="label">运行时循环（执行计划已定）</text>
+<text x="56" y="226" class="label">运行时循环：调度仍按实际请求变化</text>
 <g>
 <rect x="60" y="244" width="120" height="54" rx="8" fill="#ffffff" stroke="#dbe3ef"/>
 <text x="120" y="276" class="label" text-anchor="middle">取请求</text>
@@ -60,8 +60,8 @@ text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
 <line x1="695" y1="298" x2="695" y2="316" stroke="#94a3b8" stroke-width="1.5"/>
 <line x1="695" y1="316" x2="120" y2="316" stroke="#94a3b8" stroke-width="1.5"/>
 <line x1="120" y1="316" x2="120" y2="300" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="407" y="310" class="small" text-anchor="middle">下一步：循环，不重编</text>
+<text x="407" y="310" class="small" text-anchor="middle">复用可用计划与图，必要时回退或补捕获</text>
 
 <text x="40" y="358" class="small">调度三预算：max_batch_size（并发）、max_seq_len（序列长）、max_num_tokens（每步 token 数）。</text>
-<text x="40" y="382" class="small">变更模型结构、形状分布、GPU 架构或引擎版本 → 执行计划失效，回到加载时重做。</text>
+<text x="40" y="382" class="small">配置、形状或版本变化 → 核对缓存与图覆盖；按后端决定重载、补捕获或回退。</text>
 </svg>

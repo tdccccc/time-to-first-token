@@ -24,10 +24,9 @@ if ! command -v "$MKDOCS" >/dev/null 2>&1 && [[ -x .venv-mkdocs/bin/mkdocs ]]; t
 fi
 PYTHON="${PYTHON:-python3}"
 
-rm -rf site-src
-mkdir -p site-src
-cp README.md site-src/
-cp -r docs assets tracker site-src/
+# Resolve and verify generated paths before cleanup; do not publish Helm plans
+# or Python caches alongside the public book sources.
+"$PYTHON" tools/stage_site.py stage
 
 # Generate docs/parts/, docs/chapters/, docs/catalog.md, docs/progress.md and index.md.
 "$PYTHON" tools/build_book.py
@@ -37,5 +36,5 @@ if [[ "${1:-build}" == "serve" ]]; then
   exec "$MKDOCS" serve -f mkdocs.yml -a "${MKDOCS_ADDR:-127.0.0.1:8010}"
 fi
 
-rm -rf site
+"$PYTHON" tools/stage_site.py clean-site
 "$MKDOCS" build -f mkdocs.yml

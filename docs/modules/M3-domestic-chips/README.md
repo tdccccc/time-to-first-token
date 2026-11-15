@@ -2,11 +2,11 @@
 
 > 前置：第一部分（度量、profiling、压测脚本）与第二部分（vLLM/SGLang 已跑通）。本部分的终点：同一模型、同一评测集，在 NVIDIA 与至少一种国产芯片上都跑通、压测，并写出一份可复现的对比报告。
 >
-> 规则：国产芯片适配进展极快，任何写死的支持矩阵都会很快过时。本部分不写静态结论，只给方法论和可复现的验证脚本；涉及具体芯片、具体版本的实测结果，按「某年某月某版本实测」记录，由读者自行验证后填写。
+> 范围：通用软件栈地图配 Ascend 主线，不代表九家芯片均已验证。支持、覆盖与性能结论绑定来源、版本和日期；历史实测对原条件仍有效，新环境需重新核验。记录与质量/性能验收统一按[跨章节实验约定](../../experiments.md)填写；无 NPU 时只做源码和计划检查，不标实机通过。
 
 ## 为什么单开一个模块
 
-调研结论：国产芯片适配**没有任何动手的学习材料**，只有框架插件、一张支持状态追踪表和零散厂商文档。M3 要补的就是这一块：从“知道有这些芯片”到“真的在上面跑起模型、量出数字”。
+已有厂商样例、框架插件与社区追踪表，本模块把它们连成“认设备 → 跑服务 → 查算子 → 单点实验 → 质量/性能验收”的路径。实机读者先完成第 27 章环境，再执行第 26 章算子实验；阅读顺序和操作顺序不必相同。
 
 ## 第 25 章 · 芯片与软件栈地图：先画地图，再谈适配
 
@@ -16,7 +16,7 @@
 
 本章先画这张地图：9 块芯片的清单、4 面墙的判断、5 层软件栈、插件与统一算子层各自的位置，最后合成一张每个格子都带核实日期的表。地图不回答哪块芯片更强，只回答这块芯片走到了哪一步、下一步该查什么。
 
-**本章目标。** 给定一块国产芯片和一个目标模型，能画出它从驱动到推理引擎的五层软件栈，用生态、显存、通信、精度四面墙判断它能不能跑推理，并写出一张每格都带核实日期、过期即作废的软件栈地图。
+**本章目标。** 给定一块国产芯片和一个目标模型，能画出它从驱动到推理引擎的五层软件栈，用生态、显存、通信、精度四面墙判断它能不能跑推理，并写出一张每格都带核实日期、带适用条件和复核日期的软件栈地图。
 
 ### 第 1 节 · 国产芯片全景：先列清单，再问“能不能跑推理”
 
@@ -26,7 +26,7 @@
 
 显存墙先算一笔账，因为它是四面墙里最像算术的一面。7B 模型（70 亿参数）在 FP16 下，每个参数 2 字节，70 亿 × 2 = 140 亿字节，即 14 GB。GB 按十进制算，1 GB = 10<sup>9</sup> 字节，与第 1 章 7B 权重 14 GB 的算法一致。同样算法换两个规模：0.5B 模型是 5 亿 × 2 = 10 亿字节，1 GB；32B 模型是 320 亿 × 2 = 640 亿字节，64 GB。同一个 7B 模型压到 INT8，每参数 1 字节，70 亿字节即 7 GB，正好是 FP16 的一半。这些是算例，不是实测：只算权重，不含 KV 缓存与激活，真实占用只会更大。模型规模翻倍，权重显存跟着翻倍；量化把这一格减半，代价记在精度墙上。
 
-生态墙落到清单上，就是“接入方式”那一栏，大体三种：vLLM 插件（引擎原生支持，插件把平台注册进来）、容器镜像（厂商把驱动、SDK、引擎与模型打包，拉下来就能跑）、原生框架（芯片自己的框架，不走 vLLM 这条路）。三种方式没有高下，只有代价不同：插件复用引擎生态，版本要与引擎对齐；镜像开箱即用，版本钉死在镜像里；原生框架自由度大，接引擎的活要自己干。这一栏比峰值算力稳：峰值数字一个季度就可能变，一块芯片走插件还是走镜像，变得慢得多。
+生态墙落到清单上，就是“接入方式”那一栏，大体三种：vLLM 插件（引擎原生支持，插件把平台注册进来）、容器镜像（通常锁定用户态 SDK、框架和引擎；宿主驱动/固件仍需独立兼容）、原生框架（芯片自己的框架，不走 vLLM 这条路）。三种方式没有高下，只有代价不同：插件复用引擎生态，版本要与引擎对齐；镜像减少用户态安装工作，但设备节点、宿主驱动/固件和权限并没有被镜像锁定；原生框架自由度大，接引擎的活要自己干。这一栏比峰值算力稳：峰值数字一个季度就可能变，一块芯片走插件还是走镜像，变得慢得多。
 
 通信墙与精度墙算不出一个整齐的数，却一样能挡住推理。通信墙问多卡并行顺不顺：一块卡装不下或单卡跑不快，就要把模型切开分到多张卡上，切开之后卡与卡之间要不断交换中间结果，交换走卡间互联，带宽与延迟由硬件给定。单卡能跑与多卡能扩展是两个结论，清单里分开记。精度墙问量化之后输出还能不能用：权重从 FP16 压到 INT8，每个权重的表示变粗，舍入误差逐层传到输出；误差会不会被模型本身消化掉，要看 scale（缩放系数）的取法与舍入方式，最终要看评测集上的实测。“支持量化”是功能有没有，“量化后可用”是质量够不够。
 
@@ -44,7 +44,7 @@
 |---|---|---|
 | 驱动 / 固件 | 认卡、分配显存、提供设备接口 | 设备列表里根本没有这块卡，后面所有层都无从谈起 |
 | SDK / 运行时 | 厂商软件栈：编译器、运行时、集合通信，CANN、DTK、MUSA 在这一层 | 编译不过，或运行时找不到符号，报错里出现 SDK 自己的组件名 |
-| 算子库 | 芯片侧算子实现与融合算子，AscendC、TBE 写的算子在这一层 | 某个算子没有实现，引擎不报错，回退到 CPU 或低效实现，服务能跑但慢 |
+| 算子库 | 芯片侧算子实现与融合算子，AscendC、TBE 写的算子在这一层 | 可能回退到通用路径，也可能直接报错；需查实际设备、分发与日志，不能假定自动 CPU 兜底 |
 | 框架插件 | 把芯片接进引擎：平台类、算子分发、注意力后端、通信配置 | 引擎启动不了，或启动时认不出这个平台 |
 | 推理引擎 | vLLM、SGLang 本身：模型结构、调度、KV 缓存、采样 | 长得最像应用问题：某个请求出错、某个配置不生效，根子可能在下面任何一层 |
 
@@ -101,15 +101,15 @@
 
 统一层是两个库加一个插件。按 [vllm-plugin-FL 文档](https://docs.flagos.io/projects/vllm-plugin-FL/en/latest/overview/features.html)可以确认这个结构：FlagGems 管算子、FlagCX 管多卡通信，插件把两者接进 vLLM 的分发链。三者缺一个，统一层就不完整：没有 FlagGems，算子还是要每家各写一份；没有 FlagCX，多卡通信还是要每家各写一份；没有插件，两个库再统一也进不了引擎。
 
-分发是一条三级优先级链：先找 FlagGems 的统一实现，没有再找厂商实现，再没有就回退到 PyTorch 参考实现（fallback）。启动时先识别当前芯片、选出后端，分发链的每一级都按这个后端去找。三级链的含义是：统一实现覆盖常见算子，厂商实现补上统一层没覆盖的部分，PyTorch 参考实现兜底，哪怕前两级都没有，结果也算得出来，只是慢。服务能跑起来的概率很高，跑得快不快，取决于落在哪一级：落在第一级是统一实现的速度，第二级是厂商实现的速度，第三级通常是三者中最慢的。
+分发是一条三级优先级链：先找 FlagGems 的统一实现，没有再找厂商实现，再没有就回退到 PyTorch 参考实现（fallback）。启动时先识别当前芯片、选出后端，分发链的每一级都按这个后端去找。三级链的含义是：统一实现覆盖常见算子，厂商实现补上统一层没覆盖的部分，PyTorch 参考实现兜底，只有参考路径在目标设备上可执行时才有兜底，缺底层实现仍可能报错。实际命中哪一级需查分发和 profiler：落在第一级是统一实现的速度，第二级是厂商实现的速度，第三级通常是三者中最慢的。
 
-按同一份文档，支持的平台列了 12 个：NVIDIA、Ascend、T-Head、Iluvatar、MetaX、摩尔线程、Tsingmicro、海光、燧原、昆仑芯、阿里巴巴 PPU、CPU ARM64。名单与数量以当前文档为准，平台增删比芯片型号变化得快。12 个平台共用一套分发链，一个算子写一份就能在这些平台上跑；没有统一层时，同一个算子要写 12 份，改一个 bug 也要改 12 处。
+按同一份文档，支持的平台列了 12 个：NVIDIA、Ascend、T-Head、Iluvatar、MetaX、摩尔线程、Tsingmicro、海光、燧原、昆仑芯、阿里巴巴 PPU、CPU ARM64。名单与数量以当前文档为准，平台增删比芯片型号变化得快。平台名单不等于每个算子在全部型号、dtype、shape 下都支持。统一层复用通用源码，也允许后端专用实现与调参，不能按平台数直接推算源码维护份数。
 
 回退的代价可以用一个算例讲清，它不是实测。假设某个算子占总时间的 20%，它的 PyTorch 参考实现比芯片侧实现慢 5 倍：总时间变成原来的 0.8 + 0.2 × 5 = 1.8 倍，也就是慢了 80%。同一个算例换一组数：这个算子只占总时间的 1%，同样慢 5 倍，总时间是 0.99 + 0.01 × 5 = 1.04 倍，只慢 4%。回退本身不可怕，回退落在关键路径上才可怕。判断一个回退要不要紧，要把支持状态与耗时占比一起看：只看状态不看占比，会把小问题当成大问题，也会把大问题当成小问题。
 
-统一层解决的是“一份 kernel 代码跑多家芯片”，没解决的是“每家芯片的峰值性能”。统一实现为了可移植，会牺牲一部分特化优化：一个 kernel 要在 12 个平台上都跑对，就不能用某块芯片独有的指令与访存技巧，写法要取各家都能接受的交集；交集的写法能跑，但跑不到某块芯片的上限。要榨干某块芯片的性能，最终还是要写它的原生算子：第 26 章的 AscendC、第 29 章的移植案例走的就是这条路。这与第 23 章 Triton 与 CUTLASS 的取舍是同一个逻辑，换了一块芯片：一份代码跑多处、省人力，特化为特定硬件、榨性能。
+统一层复用通用逻辑与接口，不保证任一芯片的性能。FlagGems 可包含后端优化和专用实现（见[官方项目](https://github.com/flagos-ai/FlagGems)），不必永远取硬件交集。先实测统一/厂商路径，再决定调参、补特化或写 AscendC；不从“统一”直接推出“必然慢”或“必须重写”。
 
-[FlagTree](https://github.com/flagos-ai/FlagTree) 是 FlagGems 背后的算子开发框架：算子用一套抽象写出来，再针对不同芯片生成实现。FlagGems 是生成出来的统一算子库，FlagTree 是写算子与生成实现的框架本身。第 29 章会回答三个问题：一个算子的“统一描述”长什么样，针对不同芯片的生成发生在什么时候，某块芯片上统一实现跑不起来时回退链是怎样的。
+[FlagTree](https://github.com/flagos-ai/FlagTree) 是多后端编译器项目，FlagGems 是维护算子源码与分发的库，两者不是“生成器和自动产物”的关系；编译与特化支持按版本核对。第 29 章会回答三个问题：一个算子的“统一描述”长什么样，针对不同芯片的生成发生在什么时候，某块芯片上统一实现跑不起来时回退链是怎样的。
 
 FlagCX 管的是多卡之间的集合通信：张量并行把模型切开之后，卡与卡要交换中间结果，交换用的原语由 FlagCX 统一提供，再由各家芯片的后端承接。算子统一解决单卡上的计算，通信统一解决多卡之间的协同，缺一个，多卡推理就接不起来。25.1 的通信墙问“多卡能不能扩展”，落到软件栈上就是这一层。单卡能跑的时候 FlagCX 的存在感很低，一上多卡，它就在关键路径上。
 
@@ -144,7 +144,7 @@ FlagCX 管的是多卡之间的集合通信：张量并行把模型切开之后�
 | 燧原 |  |  |  |  |  |  |
 | 沐曦 |  |  |  |  |  |  |
 
-定一条制度：本部分所有关于芯片与软件栈的事实陈述都必须带核实日期，超过 3 个月未核实即视为作废，需要重新核实。3 个月这个期限可以拿一个具体日期走一遍：假设某条状态是 2026 年 11 月 12 日核实的，3 个月后是 2027 年 2 月 12 日，到那天还没有重新核实，这条状态就作废，格子退回“未核实”。期限存在的理由是版本变化快：版本一变，支持状态、覆盖情况、性能数字都可能跟着变；写死一个没有日期的结论，等于把过期信息当成现成事实。
+定一条制度：支持、覆盖与性能结论都应带条件和核实日期。超过 3 个月未复核时不能直接用于当前选型，需重新核实；历史证据仍对原硬件和软件条件负责。3 个月这个期限可以拿一个具体日期走一遍：假设某条状态是 2026 年 11 月 12 日核实的，3 个月后是 2027 年 2 月 12 日，到那天还没有重新核实，当前适用状态退回“待复核”，旧条件下的记录和证据不删除。期限存在的理由是版本变化快：版本一变，支持状态、覆盖情况、性能数字都可能跟着变；写死一个没有日期的结论，等于把过期信息当成现成事实。
 
 检查清单并进总清单，加两条：Four Walls 四面墙能复述吗；地图上的每个状态都有核实日期吗。第一条防的是尺子没掌握，后面归因没有尺可用；第二条防的是日期没写，地图看起来完整，实际上每一格都无法信任。本章没有硬件、没有实测，所以地图上现在全是空格，这是它的初始状态，不是结论。
 
@@ -160,7 +160,7 @@ FlagCX 管的是多卡之间的集合通信：张量并行把模型切开之后�
 
 **本章目标。** 能画出 CANN 的分层并指出算子开发落在哪层；能读懂一个 AscendC 最小算子的流水线并算出它的访存账；能沿 RMSNorm 走完定义、编译、注册、调用四环，指出每环的文件与接口；能判断一个算子该不该自己写。
 
-版本锚点见第 27 章；本章只讲结构与链路，不重复具体版本号。下文出现的目录与接口名按当前公开源码整理，版本升级后可能改名或合并，以当前 CANN 与 vllm-ascend 版本为准。
+操作前先完成第 27 章的安装和三层验证；本章用于理解链路，算子编译/调用依赖那里实际安装的版本。下文出现的目录与接口名按当前公开源码整理，版本升级后可能改名或合并，以当前 CANN 与 vllm-ascend 版本为准。
 
 ### 第 1 节 · CANN 软件栈：先分清每一层是干什么的
 
@@ -211,7 +211,7 @@ TBE 仍然要读，原因有两个。存量算子库里还有 TBE 时代的实�
 
 向量加法是最小的完整流水线：三个全局内存地址进，一次搬运、一次加法、一次搬回，没有归约、没有矩阵乘。读它不是为了学加法，是为了看清 AscendC 把一个 kernel 拆成了哪些部件、这些部件怎么接力。
 
-kernel 入口长这样（示意，不保证编译通过；完整可编译版本以 CANN 文档的 `add_custom` 样例为准）：
+下面是单核阅读骨架，说明场景要求 totalLength 为 1024 整倍数，不是独立可执行工程。真实实验从对应 CANN 版本官方 `add_custom` 完整样例开始，记录样例 tag/路径、SoC、host tiling、构建和调用命令；先通过第 27 章再执行，不复制骨架冒充编译通过：
 
 ```cpp
 // 示意：AscendC 向量加法 kernel 入口，不保证编译通过
@@ -316,7 +316,7 @@ private:
 
 流水的收益可以算。假设 CopyIn、Compute、CopyOut 各花 1 个单位时间，有 n 块：串行是 3n；排成流水线，第一块走完三步要 3，之后每块多 1，总共 3 + (n − 1) = n + 2。n = 4 时，12 变成 6，2 倍；n = 1024 时，3072 变成 1026，接近 3 倍——3 是三个阶段给的上限。这组数是算例，不是实测：它假设三步等长、交接无开销、buffer 足够。向量加法的 Compute 远小于搬运，真实上限比 3 低，时间最终仍由 12 MiB 除以带宽决定。流水线能做的是把“等搬运”和“等计算”叠起来，不能突破带宽。
 
-尾巴要单独处理。向量长 10,000、每块 1024：块数是向上取整的 10，前 9 块各 1024 个元素，最后一块只剩 10,000 − 9 × 1024 = 784 个。最后一块若按 1024 搬，会多读多写 240 个元素，越界或污染结果。UB 的搬运按 32 字节对齐访问，长度不是 32 字节整数倍时，常见两种处理：用 `DataCopyPad` 按有效长度搬非对齐尾巴，或把尾巴交给标量循环。具体写法以文档为准，但账要记住：分块算术里永远有一块不满，tiling 必须把尾巴长度传给 kernel。
+尾巴要单独处理。向量长 10,000、每块 1024：块数是向上取整的 10，前 9 块各 1024 个元素，最后一块只剩 10,000 − 9 × 1024 = 784 个。最后一块若按 1024 搬，会多读多写 240 个元素，越界或污染结果。UB 的搬运按 32 字节对齐访问，长度不是 32 字节整数倍时，常见两种处理：用 `DataCopyPad` 按有效长度搬非对齐尾巴，或把尾巴交给标量循环。具体写法以文档为准，但账要记住：不能整除时有一块不满，tiling 必须把尾巴长度传给 kernel。
 
 核类型是最后一块。AIV 跑向量计算，AIC 跑矩阵乘；`KERNEL_TYPE_AIV_ONLY` 表示只用向量核。有的算子会声明混合模式，把向量部分与矩阵部分分给两种核。核类型在编译期确定，决定了这个算子的性能天花板落在哪：逐元素算子落在 AIV，矩阵乘落在 AIC。第 28 章做覆盖分析时，状态一列除了“有实现/没实现”，还该记核类型，因为它决定了这个算子还有多少优化空间。
 
@@ -413,7 +413,7 @@ printenv ASCEND_CUSTOM_OPP_PATH                 # 没输出说明当前 shell �
 
 ### 环境：CANN + torch_npu + vllm-ascend 的安装链
 
-写作时钉下的版本锚点是：Python 3.12、CANN 9.2.1、PyTorch 2.10.0、TorchNPU 2.10.0.post7、vllm-ascend v0.30.0（2026 年 10 月发布）。这是 vllm-ascend v0.30.0 安装文档标为“一起验证”的一套组合，不是永久有效的清单。动手那天先打开 vllm-ascend 仓库 README 与对应版本的 installation 页，核对当天写明的版本表，必要时再对照 CANN、PyTorch、TorchNPU 各自的发布说明，然后按那张表装；本章后面的安装命令、环境变量与启动参数都对应这一版，版本一变，写法以当前版本文档为准。安装记录留 6 项：上面 5 个版本，加驱动与固件（同一张兼容表里写作 Ascend HDK 26.1.1），每项后面写来源与日期。
+写作时钉下的版本锚点是：Python 3.12、CANN 9.2.1、PyTorch 2.10.0、TorchNPU 2.10.0.post7、vllm-ascend v0.30.0（2026 年 10 月发布）。这是 vllm-ascend v0.30.0 安装文档标为“一起验证”的一套组合，不是永久有效的清单。动手那天先打开 vllm-ascend 仓库 README 与对应版本的 installation 页，核对当天写明的版本表，必要时再对照 CANN、PyTorch、TorchNPU 各自的发布说明，然后按那张表装；本章后面的安装命令、环境变量与启动参数都对应这一版，版本一变，写法以当前版本文档为准。记录实际安装的 HDK/驱动/固件、CANN Toolkit/Ops、NNAL、Python、PyTorch、TorchNPU、vLLM、vllm-ascend，以及启用的 Triton-Ascend/FLA 等依赖。官方参考组合另列 NNAL 9.2.1 和 Triton-Ascend 3.6.0.post2；其硬件范围以安装页为准，不强行用于所有 Ascend 产品。每项留来源、日期与镜像 digest；这里是官方组合的 C 级引用，不是本机验证。
 
 `npu-smi` 的输出列、`torch.npu` 的设备接口与 `vllm serve` 的参数都随版本变化；下面出现的命令按 v0.30.0 书写，执行前以当前版本文档为准。
 
@@ -443,7 +443,7 @@ docker run --rm --name vllm-ascend --shm-size=1g \
   -it "$IMAGE" bash
 ```
 
-A3 是双 DIE（双裸片）设计，要挂两个 `/dev/davinci*` 节点；300I Duo、200I Pro 与 950DT 的设备节点、驱动路径和挂载项各不相同。这些差异照 installation 页对应的标签页抄，不要拿 A2 的命令改一个标签就当通用命令。第二条路径是在已有 CANN 环境里安装：按 installation 页的“CANN environment”一栏执行，PyTorch 与 TorchNPU 由该路径一并安装，vLLM 与 vllm-ascend 的版本号必须相同。两条路径共用一张版本表；镜像标签、pip 包与 CANN 版本对不上时，先回到 README 的兼容表，不要用“装最新版”来解决。
+A3 是双 DIE（双裸片）设计，要挂两个 `/dev/davinci*` 节点；300I Duo、200I Pro 与 950DT 的设备节点、驱动路径和挂载项各不相同。这些差异照 installation 页对应的标签页抄，不要拿 A2 的命令改一个标签就当通用命令。第二条路径是在已有 CANN 环境里安装：按 installation 页的“CANN environment”一栏执行，PyTorch 与 TorchNPU 由该路径一并安装，vLLM 与 vllm-ascend 的版本号必须相同。镜像只锁用户态，不锁宿主驱动/固件，容器内版本和宿主兼容性必须分别确认。镜像标签、pip 包与 CANN 版本对不上时，先回到 README 的兼容表，不要用“装最新版”来解决。
 
 装完先做三层验证，顺序从下往上。第一层是驱动与固件：`npu-smi info` 能列出预期的 NPU，Health 为 OK，没有驱动初始化错误。`npu-smi` 的输出列与 `torch.npu` 的设备名随驱动和 TorchNPU 版本变化，下面的命令按 v0.30.0 的环境书写，其他版本以对应文档为准。设备名、芯片数与列名随硬件和驱动版本变化，缺设备或 Health 不是 OK 时，先停下查驱动与固件，不要继续往上装。第二层是框架：`torch_npu` 能 import，`torch.npu.is_available()` 为真，能在 `npu:0` 上建张量并做一次运算。第三层是插件：vLLM 启动后，日志里出现平台插件被加载与激活的行。
 
@@ -457,7 +457,9 @@ import vllm_ascend
 
 assert torch.npu.is_available(), "No available Ascend NPU detected"
 x = torch.randn(2, 2, device="npu:0")
-print(x.device, torch.npu.device_count())
+y = x + x
+torch.npu.synchronize()
+print(y.device, torch.npu.device_count(), y.cpu())
 PY
 ```
 
@@ -503,13 +505,14 @@ curl -sS -N http://localhost:8000/v1/completions \
   -d '{"model":"Qwen/Qwen3-0.6B","prompt":"Beijing is a","max_tokens":32,"temperature":0,"stream":true}'
 ```
 
-非流式请求的 `time_total` 是一次请求的总耗时，不是首 token 延迟。TTFT（Time to First Token，首 token 延迟：从发请求到收到第一个输出 token 的时间）与 ITL（Inter-Token Latency，token 间延迟：相邻输出 token 的间隔；逐个间隔看分布，平均值是 TPOT）要从流式响应的每个数据块到达时间算；`curl -N` 关掉客户端缓冲，数据块才会一个个到，不加 `-N` 时 curl 可能攒够一块才输出，看起来像非流式。流式响应最后的 `[DONE]` 是结束标记，不是 token，不要把它算进 ITL。
+非流式 `time_total` 是总耗时，不是 TTFT。本书客户端以首个非空 `delta.content` chunk 到达近似 TTFT；ITL 记录内容 chunk 间隔，TPOT 另按首末内容跨度与实际 token 数计算。一个 chunk 可以包含多个 token，不能还原精确逐 token 时间。`curl -N` 只关闭 curl 自身缓冲，不能消除服务端、代理或网络缓冲；末尾 `[DONE]` 与 usage 不是内容，不计入 ITL。
 
-要数字，用第 4 章的 `scripts/bench_openai.py`：它按流式 chat completions 计时，逐请求记 TTFT、总耗时、输出 token 数与 ITL。字段含义见第 5 章；命令里的参数按你的服务与模型改，只把 `--base-url` 指向 Ascend 服务。
+要数字，用第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`：它按流式 chat completions 计时，逐请求记 TTFT、总耗时、输出 token 数与 ITL。字段含义见第 5 章；命令里的参数按你的服务与模型改，只把 `--base-url` 指向 Ascend 服务。
 
 ```bash
-python3 scripts/bench_openai.py --base-url http://localhost:8000 \
-  --model Qwen/Qwen3-0.6B --max-tokens 32 --concurrency 1 --requests 1
+python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
+  --model Qwen/Qwen3-0.6B --prompt 'Explain why the sky is blue.' \
+  --max-tokens 32 --concurrency 1 --requests 1 --test-id ascend-smoke --conditions-id ascend-smoke-v1
 ```
 
 一次请求的样本量是 1，能证明链路通，不能下性能结论。TTFT、ITL、吞吐要等第 30 章按三级并发、每级多次测量来跑；脚本读不到 usage 时会按字符估 token 数，记录里要注明 `tokens_estimated` 是 true 还是 false。
@@ -550,7 +553,7 @@ python3 scripts/bench_openai.py --base-url http://localhost:8000 \
 
 注意力后端是平台级分发，和算子级分发分开看。`get_attn_backend_cls()` 根据选择器里的 `use_mla`、`use_sparse`、`use_compress`、`use_pcp` 返回不同类路径：dense 在非 FA3 条件下走 `AscendAttentionBackend`，MLA 走 `AscendMLABackend`，稀疏走 `AscendSFABackend`，满足 FA3 条件时走 `AscendFABackend`。这些类在 `attention/` 目录下，负责 attention 的计算与 KV 布局；`ops/` 里的算子则是更细粒度的逐算子实现。读代码时先分清目录分工：找“attention 怎么算”去 `attention/`，找“某个逐元素算子在哪”去 `ops/`。
 
-动手定位一个算子，选 RMSNorm，因为它在 24.3 节作为 CustomOp 的可替换面出现过，这次看它的芯片侧版本。记录四站：模型代码里构造 `RMSNorm` 的位置（Qwen3 的 decoder layer 里 `input_layernorm` 与 `post_attention_layernorm` 都是它）、`CustomOp.__new__` 的查表、`utils.register_ascend_customop()` 里的 `"RMSNorm"` 映射、`ops/layernorm.py` 的 `AscendRMSNorm.forward_oot`。四站里任何一站只写“大概在附近”，定位就不算完成；文件路径、类名、方法名都要抄下来，并写上读的是哪个 tag。没有卡的读者做到这一步就够了：这条链不依赖运行，只依赖源码。
+动手定位一个算子，选 RMSNorm，沿用第 24 章的 CustomOp 检查方法，这次看它的芯片侧版本。记录四站：模型代码里构造 `RMSNorm` 的位置（Qwen3 的 decoder layer 里 `input_layernorm` 与 `post_attention_layernorm` 都是它）、`CustomOp.__new__` 的查表、`utils.register_ascend_customop()` 里的 `"RMSNorm"` 映射、`ops/layernorm.py` 的 `AscendRMSNorm.forward_oot`。四站里任何一站只写“大概在附近”，定位就不算完成；文件路径、类名、方法名都要抄下来，并写上读的是哪个 tag。没有卡的读者做到这一步就够了：这条链不依赖运行，只依赖源码。
 
 把插件想成薄翻译层会读错两件事。第一，它不是只转接算子调用：工作进程、模型执行器、注意力后端、通信、编译后端都有一份 Ascend 实现，任何一处没接上，服务都起不来或跑不对。第二，`attention/` 不是 attention 算子的全部：它装的是后端选择与后端实现，逐算子的实现还在 `ops/` 与 `_cann_ops_custom/`。目录名是入口，不是结论。
 
@@ -580,23 +583,23 @@ python3 scripts/bench_openai.py --base-url http://localhost:8000 \
 
 | 维度 | NVIDIA（第二部分的流程） | Ascend（本章的流程） | 差异在哪 | 先查什么 |
 |---|---|---|---|---|
-| 安装链 | 驱动 + CUDA/cuDNN → PyTorch → vLLM（原生支持） | HDK + CANN/NNAL → PyTorch + TorchNPU → vLLM + vllm-ascend | 多两层，版本组合从四个组件变成七个，升级单位是整组 | 安装记录里的 6 项版本与 vllm-ascend README 的兼容表 |
+| 安装链 | 驱动 + CUDA/cuDNN → PyTorch → vLLM（原生支持） | HDK + CANN/NNAL → PyTorch + TorchNPU → vLLM + vllm-ascend | 组件和可选加速库更多，兼容性按整组核验 | 完整安装记录与 vllm-ascend README 的兼容表 |
 | 启动命令 | `vllm serve <model>`，`CUDA_VISIBLE_DEVICES` 控设备 | 同一条命令，另加 `VLLM_WORKER_MULTIPROC_METHOD=spawn`，`ASCEND_RT_VISIBLE_DEVICES` 控设备，平台插件自动加载 | 命令相近，设备可见性变量与多进程启动方式不同 | 启动日志里的平台插件行与 `npu-smi info` |
 | 显存 | `nvidia-smi` 的已用显存；`torch.cuda.max_memory_allocated()` | `npu-smi info` 的 HBM-Usage；`torch.npu.max_memory_allocated()` | 工具与统计口径不同，权重与 KV 的算术相同 | 权重 + KV 的账，再看 HBM-Usage 与框架侧峰值 |
 | 图模式 | CUDA Graph，按 `--compilation-config` 的 `cudagraph_mode` 等开关配置 | ACLGraph 与 NPUGraph Ex，按 `--compilation-config`、`--additional-config` 的对应开关配置 | 捕获与重放的实现不同，可用开关与默认值不同 | 当前版本的 graph mode 文档；先 eager 跑通，再开图 |
 | 算子覆盖 | CUDA/Triton 实现 + CustomOp 替换 | CANN/AscendC 实现 + `register_ascend_customop()` 替换 | 未覆盖时，NVIDIA 侧通常还有 CUDA 或 Triton 实现可走；Ascend 侧走 `forward_native` 或直接报错 | 第 28 章的覆盖矩阵，再用 profiler 找热点算子 |
 | 调试工具 | `nvidia-smi`、`ncu`、`nsys`、PyTorch Profiler | `npu-smi`、msprof/msprobe、service profiling、PyTorch Profiler | 工具名、采集方式与指标名不同，能采到的项也不同 | 当前版本的 performance 与 debug 文档，确认支持哪个工具 |
-| 版本兼容 | CUDA、cuDNN、PyTorch、vLLM 之间的对应 | HDK、CANN、NNAL、PyTorch、TorchNPU、vLLM、vllm-ascend 之间的对应 | 组件更多，必须按兼容表整组换 | vllm-ascend README 的兼容表与 release notes |
+| 版本兼容 | 宿主驱动、实际 CUDA runtime/Toolkit、PyTorch、vLLM；`nvidia-smi` 的 CUDA 字段是驱动支持上限，不是已安装 runtime | HDK、CANN、NNAL、PyTorch、TorchNPU、vLLM、vllm-ascend 之间的对应 | 组件更多，必须按兼容表整组换 | vllm-ascend README 的兼容表与 release notes |
 
-结论：差异不在模型，在模型下面的栈。同一份模型代码、同一个 prompt、同一个输出长度，两边都能跑；换掉的是安装链、平台插件、图模式开关、算子实现与调试工具。把差异读成“谁更好”没有意义：两边的约束数量与工具链不同，NVIDIA 侧要对的版本少，Ascend 侧多两层，但把与芯片有关的选择都收进了插件，模型代码不用改。判断一次部署卡在哪，按这个顺序查：版本组合 → 平台识别 → 图模式 → 算子回退 → 性能。前两步不过，后面的数字都不用看。
+结论：差异不在模型，在模型下面的栈。同一份模型代码、同一个 prompt、同一个输出长度，两边都能跑；换掉的是安装链、平台插件、图模式开关、算子实现与调试工具。把差异读成“谁更好”没有意义：两边的约束数量与工具链不同，两侧都要核对用户态与宿主兼容性，Ascend 还需明确插件和可选加速库，但把与芯片有关的选择都收进了插件，模型代码不用改。判断一次部署卡在哪，按这个顺序查：版本组合 → 平台识别 → 图模式 → 算子回退 → 性能。前两步不过，后面的数字都不用看。
 
-这张表里依赖实测的格子——显存占用、TTFT/ITL、图模式收益、算子回退的耗时占比——没有卡就写“待补测”，并在备注里写触发条件。已经能确定的是流程与检查点：版本记录 6 项、三层验证 3 条结果、冒烟记录 1 张表、接口落点表 7 行、差异表 7 行。第 28 章接着这张表往下走：拿 profiler 导出的真实算子清单，逐条查它们在 Ascend 上由谁承接，把“算子覆盖”那一行从定性变成清单。
+这张表里依赖实测的格子——显存占用、TTFT/ITL、图模式收益、算子回退的耗时占比——没有卡就写“待补测”，并在备注里写触发条件。已经能确定的是流程与检查点：完整版本记录、三层验证 3 条结果、冒烟记录 1 张表、接口落点表 7 行、差异表 7 行。第 28 章接着这张表往下走：拿 profiler 导出的真实算子清单，逐条查它们在 Ascend 上由谁承接，把“算子覆盖”那一行从定性变成清单。
 
 **延伸**：[vllm-ascend 仓库](https://github.com/vllm-project/vllm-ascend)（README 的版本与硬件要求、`setup.py` 的入口点）、[vLLM Ascend v0.30.0 安装文档](https://docs.vllm.ai/projects/ascend/en/v0.30.0/installation.html)、[vLLM Ascend v0.30.0 Quick Start](https://docs.vllm.ai/projects/ascend/en/v0.30.0/quick_start.html)、[Introducing vLLM Hardware Plugin](https://blog.vllm.ai/2025/05/12/hardware-plugin.html)（Platform、Worker、ModelRunner、AttentionBackend、Communicator 的插件化背景）。
 
 ## 第 28 章 · 算子覆盖分析
 
-模型在 Ascend 上跑通了，吞吐却明显低于 NVIDIA 上的同一模型；日志没有报错，输出也对得上，`npu-smi` 看不出异常。这种时候先别调 batch，也别换 kernel：先确认这次推理的算子清单里，有多少算子真的落到了芯片上。一次前向会调用几十到上百个 PyTorch 算子，芯片侧不一定每个都有对应实现；没有实现的那个不会让程序崩溃，它可能退回 CPU、退到 PyTorch 参考实现、被拆到图外，或者悄悄换一条低精度路径。每一种退法的代价不同，检测方法也不同。
+模型在 Ascend 上跑通了，吞吐却明显低于 NVIDIA 上的同一模型；日志没有报错，输出也对得上，`npu-smi` 看不出异常。这种时候先别调 batch，也别换 kernel：先确认这次推理的算子清单里，有多少算子真的落到了芯片上。一次前向会调用几十到上百个 PyTorch 算子，芯片侧不一定每个都有对应实现；缺实现可能直接报错，也可能退到通用路径；图外执行和低精度路径是另外两个维度，不能预设自动 CPU 回退。每一种退法的代价不同，检测方法也不同。
 
 这几种退法要用不同的证据去查，顺序不能乱：清单不全，覆盖率就没有分母；状态定义不清，矩阵越填越像有结论；benchmark 的分数与模型覆盖不是一回事；归因放在最后，才不会把“没实现”与“实现了但慢”混成一笔。
 
@@ -695,7 +698,7 @@ Ascend 一侧的采集路径不同：把 `torch.profiler` 换成 `torch_npu.prof
 
 第一层是分发检查。模型代码调用的是 `SiluAndMul` 这个类；在 Ascend 上它应该解析到 vllm-ascend 的子类。当前主干里能找到的 Ascend 子类是 `vllm_ascend/ops/activation.py` 的 `AscendSiluAndMul`，`forward_oot` 调 `torch_npu.npu_swiglu`；它是否在你的模型与版本上命中，仍要用解析或日志确认。在进程里打印解析到的类，或在 `forward_oot` 里临时加一行日志，跑一次前向就能确认。attention 不走 CustomOp，查的是选中的 attention 后端，不是 `ops/` 下的类；第 27 章第 3 节讲过这条边界。分发检查不用改模型、不用重跑压测，是最便宜的一层。
 
-第二层是 profiler。看设备时间线上有没有该算子对应的 kernel；看 `aten::` 行有没有设备时间；看 CPU 自耗时是不是大得异常。一个算子如果在表里有 CPU 时间、没有设备时间，而它又应该算在设备上，基本可以判 CPU 回退。设备上有 kernel 但名字对不上，可能是融合或改名，不要直接判回退：先把 kernel 名与实现路径对上。设备时间线出现规则空洞，也要看空洞下方是 CPU 分发、拷贝还是同步；空洞本身不是回退的证据。
+第二层是 profiler。看设备时间线上有没有该算子对应的 kernel；看 `aten::` 行有没有设备时间；看 CPU 自耗时是不是大得异常。只有 CPU 时间、没有设备事件，也可能是采集漏项、图重放或异步工作进程；结合执行设备、拷贝和调用栈才能判 CPU 回退。设备上有 kernel 但名字对不上，可能是融合或改名，不要直接判回退：先把 kernel 名与实现路径对上。设备时间线出现规则空洞，也要看空洞下方是 CPU 分发、拷贝还是同步；空洞本身不是回退的证据。
 
 第三层是日志与编译缓存。日志里搜 fallback、unsupported、not implemented 一类字样；具体字符串随版本变，以你装的版本为准。编译缓存能回答“这个算子有没有被编译过”，但不能回答“这次有没有执行”：缓存可能是上一次留下的，清掉缓存重跑一次，才能把“没编译”和“没执行”分开。Triton kernel 的缓存在 `~/.triton/cache`（可用 `TRITON_CACHE_DIR` 改），triton-ascend 的缓存目录与 CANN 自定义算子的缓存路径以当前版本为准。缓存是辅助证据，不能单独拿来填矩阵。
 
@@ -822,7 +825,7 @@ C_time 有一个盲区：回退到 CPU 的算子没有设备时间，按设备�
 | C_time 低（默认 < 80%），Top 3 集中（默认 ≥ 50%）且含未覆盖算子 | 覆盖是主因，热点集中 | 先补 Top 3 的未覆盖算子；用 `1 + p(s-1)` 估收益，收益不够就转去查别的墙 |
 | C_time 低，但 Top 3 不集中（< 50%） | 覆盖是长尾问题，不是当前瓶颈 | 按“占比 × 回退倍数”排序，只补权重高的；不要为 0.1% 的算子投入 |
 | C_time 高，但设备时间线有大段空白 | 调度/启动/同步 | 看空白下方是 CPU 分发、拷贝还是同步；查图外算子、CPU 回退、锁与日志 |
-| C_time 高，设备几乎跑满且带宽接近峰值 | 显存带宽或 kernel 效率 | 用 Roofline 与 ncu 看是带宽、算力还是延迟受限；再决定融合、量化或换实现 |
+| C_time 高，设备几乎跑满且带宽接近峰值 | 显存带宽或 kernel 效率 | 用 Roofline 与目标设备 profiler（NVIDIA ncu、Ascend msprof 等）检查带宽、算力和等待；再决定融合、量化或换实现 |
 | 多卡，通信占比高 | 通信墙 | 查 collective、并行策略、拓扑与重叠（overlap）；单卡分析里这一格留空 |
 
 80% 到 90% 之间是边界区，不强行归类：看 Top 3 里有没有未覆盖、回退倍数多大、设备时间线有没有空白。阈值的作用是把讨论从形容词拉回数字，不是制造一个精确的分界。判定表第一行有一个前提：C_call 与 CPU 自耗时没有异常；如果高频小算子的 C_call 很低，先回到前面的盲区检查，不要直接判“覆盖不是主因”。
@@ -850,11 +853,11 @@ C_time 有一个盲区：回退到 CPU 的算子没有设备时间，按设备�
 **延伸**：[vLLM Ascend 仓库](https://github.com/vllm-project/vllm-ascend)
 **延伸**：[CANN 文档](https://www.hiascend.com/document)
 
-## 第 29 章 · 移植案例：把 Triton kernel 搬到 Ascend
+## 第 29 章 · 迁移前检查与实验设计：从 Triton 到 Ascend
 
 把一个在 GPU 上跑通的 Triton kernel 搬到 Ascend，最先遇到的往往不是“算子不存在”。更常见的是三种症状：编译过了，结果和参考实现对不上；结果对了，速度慢一个数量级；或者一启动就卡在图编译上。它们指向同一类原因——代码里有一批“默认这里是 CUDA”的假设，换了硬件之后假设不再成立，但代码不会主动报错。
 
-本章用一个示例仓库和一个小 kernel 把这批假设拆开。`nano-vllm-ascend` 是把小推理引擎移植到 Ascend 的示例仓库，体量小到可以读完；SiluAndMul 是第 24 章手写过的算子，在 TritonAscendBench 里有现成的迁移任务 L2_04。前者看移植会改动哪几层，后者把语义差异落到一行行代码上。最后收成一份可执行的检查清单。
+本章是迁移前检查与实验设计，不是一份已完成 NPU 迁移的报告。本轮没有 torch_npu/Triton-Ascend 运行环境，没有 NPU 编译、正确性或性能实测；GPU 自查也只有在 CUDA 依赖可用时才执行。用示例仓库和一个小 kernel 把这些假设拆开。`nano-vllm-ascend` 是把小推理引擎移植到 Ascend 的示例仓库，体量小到可以读完；SiluAndMul 是第 24 章手写过的算子，在 TritonAscendBench 里有现成的迁移任务 L2_04。前者看移植会改动哪几层，后者把语义差异落到一行行代码上。最后收成一份可执行的检查清单。
 
 **本章目标。** 给定一个小推理引擎和一份 Triton kernel，能列出它依赖 CUDA 的假设、判断哪些在 Ascend 上会失效、把失效点写成“现象—定位—改法—重测结果”的记录，并在没有 NPU 时把 NPU 步骤标成待补测，而不是标成通过。
 
@@ -871,11 +874,11 @@ C_time 有一个盲区：回退到 CPU 的算子没有设备时间，按设备�
 | 类别 | 改什么 | 失效时的症状 |
 |---|---|---|
 | 框架适配 | `device="cuda"` 换 `npu`，`torch.cuda.*` 换 `torch_npu` 的对应接口；分页 KV 写回换 `_npu_reshape_and_cache` | 引擎起不来，或算子找不到实现 |
-| 图编译 | torchair 把一次前向抓成图，编译后重放；形状变了要重编 | MoE 与 VL 标“暂时不支持入图”；动态 batch 反复重编 |
+| 图编译 | torchair 捕获/编译前向；形状变化是否重编取决于动态图、缓存和捕获档位 | MoE 与 VL 标“暂时不支持入图”；动态 batch 反复重编 |
 | 注意力后端 | FlashAttention 库版、NPU 原生版、PyTorch 原生版三选一 | 跑得对但慢，或后端不可用 |
 | 自定义算子 | rms_norm 的三种写法：PyTorch C++ 扩展、AscendC、`torch_npu` 内置 | 注册了但调用不到，或编译不过 |
 
-四类里，图编译与注意力后端最容易被当成“配置项”，它们各有一条边界。torchair（Ascend 上的图编译接口）把一次前向的计算图抓下来、编译成可重放的单元，省的是几十个小算子逐个下发的启动开销，计算量不变。省下来的开销有前提：图编好之后形状固定。形状一变就要重编，重编的代价可能比省下的启动开销还大——MoE 与 VL 标“暂时不支持入图”，边界就在形状上：MoE 的形状随路由结果变，VL 的形状随图像输入变，进图要反复重编。这个标注说的是图编译的适用边界，不是一个待修的 bug。
+四类里，图编译与注意力后端最容易被当成“配置项”，它们各有一条边界。torchair（Ascend 上的图编译接口）把一次前向的计算图抓下来、编译成可重放的单元，省的是几十个小算子逐个下发的启动开销，计算量不变。收益取决于图复用。静态捕获形状失配可能重新编译、换缓存图或回退 eager，动态 shape 支持也随版本变化。仓库中 MoE/VL 的“不支持入图”是该实现的状态；动态路由与图像形状是待查原因，不能没有 trace 就断言反复重编或不是 bug。
 
 注意力后端是同一笔计算的三份实现。README 用星级对比：性能上，FlashAttention 库版与 NPU 原生版都是五星，PyTorch 原生版两星；可读性上顺序相反，PyTorch 原生版五星，库版两星。星级是仓库自评，不是实测，它表达的是取舍方向：跑得快的写法难读，好读的写法慢。生产环境 GPU 选库版、NPU 选原生版，学习调试选 PyTorch 原生版——三条路并存，不是三选一之后另外两个作废。换到新芯片，注意力后端要重新选一次，依据是新芯片上有哪个后端可用、数值行为与性能如何。
 
@@ -900,7 +903,7 @@ PagedAttention 的账可以单独算，因为它是仓库里自带算例的优�
 
 版本之外，迁移是一套循环：GPU 自查、NPU 实测、逐条记录。循环的必要性在于不兼容点没法靠读文档想全：文档能划出可能出问题的范围，具体哪一行报错，要跑起来才知道。每跑一圈，把“可能”变成“是”或“不是”，记录表里多一行带证据的结论。
 
-GPU 自查在最前面，作用是分开两类 bug：kernel 本身的错，与迁移引入的错。先用 `tab run --backend gpu` 把第一类清零（第 28 章第 3 节讲过为什么顺序不能反），NPU 上报的错才只剩第二类。这与第 24 章先 standalone 验证、再接入引擎是同一条分层的规矩。
+GPU 自查在最前面，作用是分开两类 bug：kernel 本身的错，与迁移引入的错。先对 CUDA 参考做边界和同精度基准检查，减少已知 kernel 风险；GPU 自查通过仍不能清零所有 bug，NPU 上还要独立复验。这与第 24 章先 standalone 验证、再接入引擎是同一条分层的规矩。
 
 真正要逐条对照的是六类语义差异。它们不都出现在每个 kernel 里，但每一类都要先判断“这个 kernel 用不用得上”：
 
@@ -908,24 +911,24 @@ GPU 自查在最前面，作用是分开两类 bug：kernel 本身的错，与�
 |---|---|---|---|
 | 内存层级 | shared memory 加寄存器，tile 大小按 SM 的 shared memory 定 | UB、L1，矩阵乘的 A/B tile 还要进 L0A/L0B，累加器在 L0C | 按 GPU 经验取大 BLOCK，编译期报 `ub overflow` |
 | 同步 | `__syncthreads` 或 warp 内锁步；跨核靠全局内存加原子 | 搬运与计算分属不同流水，靠事件同步；Triton-Ascend 一般由编译器插同步 | 用全局内存加原子做跨核累加；int64 与 fp64 原子不支持 |
-| block 与核映射 | grid 里的 program 由硬件调度到几百个 SM | AI Core 只有几十个，Vector 核与 Cube 核约 2:1；超出的 program 分多轮下发 | 照搬几千个 program：能跑，但核启动开销吃掉收益；更大 grid 报 `coreDim` 超过 65535 |
-| `tl.dot` | 走 Tensor Core，形状由 MMA 指令约束 | 走 Cube；M/N/K tile、dtype、累加器决定能不能落到 Cube 与 L0 | INT8 的 dot 在当前支持表里没有对应项；fp32 累加要显式 |
-| dtype 与对齐 | int8 matmul 可用；对齐主要影响合并访存 | 尾轴对齐：纯 Vector 32 字节，CV 融合 512 字节；不对齐由硬件补齐；int64 与 fp64 支持有限 | 结果对但慢；cast 顺序变了，`max_abs` 超容限 |
-| 动态 shape | 运行时 n 变化，autotune 按 key 选配置 | JIT 按 constexpr 特化；图编译按捕获时的形状编，形状变了要重编 | batch 或序列长度每步变，图反复重编；或 padding 成固定形状，浪费带宽 |
+| block 与核映射 | 逻辑 program 调度到 SM，数量随型号变化 | 分开逻辑 grid、物理核和编译器 block mapping | 超核数不等于多次 host launch；核映射和 coreDim 上限按版本核验 |
+| `tl.dot` | 路径由 dtype、精度和后端约束决定 | 核验 Cube 支持、L0 容量、dtype 与累加器 | INT8 lowering 必须绑定版本；本例无 dot，不列为它的通过条件 |
+| dtype 与对齐 | 确认 dtype 支持与合并访问 | 指南的 Vector 32B/CV 512B 是特定路径要求，padding/标量化看编译产物 | 结果对但慢；cast 顺序变了，`max_abs` 超容限 |
+| 动态 shape | JIT 特化与运行时参数并存 | 区分 Triton 特化、图重编、图缓存命中和 eager 回退 | batch 或序列长度每步变，图反复重编；或 padding 成固定形状，浪费带宽 |
 
 表里的容量与支持项随版本变化，具体数字与 API 支持状态以 Triton-Ascend 当前文档为准。
 
-内存层级的差别决定 tile 怎么选。GPU 上 tile 大小按 shared memory 与寄存器预算；Ascend 上向量算子看 UB，矩阵乘看 L1 与 L0。UB（Unified Buffer，统一缓冲区：AI Core 上的片上暂存区，向量计算的输入输出先搬到这里）在 Atlas A2/A3 上是 192 KB，L1 是 512 KB；编译器默认开 multi-buffer（存算并行），同一块 tile 要留两份，可用容量按一半算。BLOCK 取大了，编译期就报 `ub overflow`，报错里会写需要多少 bit、可用多少 bit——这是最直接的一条线索。
+内存层级的差别决定 tile 怎么选。GPU 上 tile 大小按 shared memory 与寄存器预算；Ascend 上向量算子看 UB，矩阵乘看 L1 与 L0。UB（统一缓冲区）与 L1/L0 容量按具体 SKU 和 SDK 查询；指南中 192 KiB UB、512 KiB L1 可作 A2/A3 某路径算例，不当作所有 Ascend 的固定值。multi-buffer 是否启用、哪些活跃张量复制几份取决于编译配置和生命周期，不能将所有容量机械除以二。BLOCK 取大了，编译期就报 `ub overflow`，报错里会写需要多少 bit、可用多少 bit——这是最直接的一条线索。
 
-同步的差别不在 API 名字，在“谁负责插同步”。GPU 上跨线程的依赖由 `__syncthreads` 一类原语显式表达；Ascend 上搬运与计算分属不同的流水：MTE2（内存搬运引擎 2）把数据从全局内存搬到 UB，MTE3 把结果搬回去，Vector 与 Cube 各自计算，彼此靠事件同步。Triton-Ascend 的编译器会在 lowering 时插同步，用户通常不用手写 barrier；`tl.debug_barrier` 是块内屏障，不是跨核同步。跨核依赖要么避免，要么用支持的内存序与原子操作表达。当前文档里 `atomic_add` 不支持 int64 与 fp64，也不支持“多核累加后保存中间结果”的用法——一段在 GPU 上靠原子汇总的归约，搬到 Ascend 上要改写成单核汇总，或换一种归约结构。
+同步的差别不在 API 名字，在“谁负责插同步”。GPU 上跨线程的依赖由 `__syncthreads` 一类原语显式表达；Ascend 上搬运与计算分属不同的流水：MTE2（内存搬运引擎 2）把数据从全局内存搬到 UB，MTE3 把结果搬回去，Vector 与 Cube 各自计算，彼此靠事件同步。Triton-Ascend 的编译器会在 lowering 时插同步，用户通常不用手写 barrier；`tl.debug_barrier` 是块内屏障，不是跨核同步。跨核依赖要么避免，要么用支持的内存序与原子操作表达。原子 dtype、内存序与跨核中间结果可见性，按所选 Triton-Ascend tag 核验。遇到不支持的归约可用两阶段归约等结构，不把某版 API 限制写成硬件永久不支持。
 
-block 与核数的映射最容易照搬错。GPU 上 grid 里几千个 program 是常态，硬件会把它们铺到 SM 上；Ascend 的 AI Core 只有几十个，超出的 program 分多轮下发，每一轮都有核启动与初始化开销。Triton-Ascend 的建议是先把 grid 固定成物理核数，再在核内循环处理多个 tile：纯 Vector 算子按 Vector 核数分，含 `tl.dot` 的按 Cube 核数分。核数用 `triton.runtime.driver.active.utils.get_device_properties` 查 `num_vectorcore` 与 `num_aicore`，不要猜。二维 grid 在 NPU 上会被合并成一维，`(4, 5)` 与 `(20,)` 等价——写二维不会报错，但核怎么映射不由你控制。
+block 映射先看当前编译器：[官方迁移指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/en/migration_guide/migrate_from_gpu.md)说明，通过 IR 安全分析的独立逻辑 program 可自动折叠到物理核，超核数不代表多次 host launch。不满足映射条件或实测调度开销明显时，再试固定 1D grid 加核内循环。纯 Vector 和含 dot 的核数来源不同。核数用 `triton.runtime.driver.active.utils.get_device_properties` 查 `num_vectorcore` 与 `num_aicore`，不要猜。二维 grid 在 NPU 上会被合并成一维，`(4, 5)` 与 `(20,)` 等价——写二维不会报错，但核怎么映射不由你控制。
 
-`tl.dot` 的差别决定一个 kernel 能不能整体搬。GPU 上 dot 落到 Tensor Core，形状约束由 MMA 指令给；Ascend 上落到 Cube，A/B tile 要进 L0A/L0B，累加器在 L0C，M/N/K 的取法同时受 L0 容量与 UB 容量约束。当前 Triton-Ascend 的算子支持表里，dot 支持 fp16、bf16、fp32，int8 标不支持——第 22 章写的 INT8 dot 路径，搬到 Ascend 上不是改几行，而是这条 lowering 路径当前不存在。碰到这种情况，记录里要写清“哪一行、哪个 API、当前版本的什么限制”，不要写成“Ascend 不支持低精度计算”。
+`tl.dot` 的差别决定一个 kernel 能不能整体搬。GPU 上 dot 落到 Tensor Core，形状约束由 MMA 指令给；Ascend 上落到 Cube，A/B tile 要进 L0A/L0B，累加器在 L0C，M/N/K 的取法同时受 L0 容量与 UB 容量约束。先在所选 tag 查 dtype/累加器，再编译最小 dot 样例；若该版不支持 INT8 lowering，第 22 章路径就不能直接复用，但不能据此声称 Ascend 硬件不支持 INT8。碰到这种情况，记录里要写清“哪一行、哪个 API、当前版本的什么限制”，不要写成“Ascend 不支持低精度计算”。
 
-dtype 与对齐是两条慢路径。尾轴对齐要求纯 Vector 算子 32 字节，CV 融合（一个 kernel 里同时用 Cube 与 Vector 单元）算子 512 字节；不够的部分硬件自动补齐，结果不错，带宽多花。fp16 的 1024 列是 2048 字节，正好对齐；1000 列是 2000 字节，按 32 字节补齐到 2016 字节，每行多搬 16 字节，约 0.8%。对齐的账要按“每行多搬多少字节乘行数”算，形状越不规则，补齐的比例越高。另一种慢来自 dtype：int64 索引、fp64 计算在 Ascend 上支持有限，kernel 里用 int64 算偏移、用 fp64 累加，可能编译不过，也可能落到低效路径；能用 int32 的地方不要用 int64。
+dtype 与对齐是两条慢路径。尾轴对齐要求纯 Vector 算子 32 字节，CV 融合（一个 kernel 里同时用 Cube 与 Vector 单元）算子 512 字节；不对齐可能由编译器 padding、分段拷贝或标量化处理，也可能被拒绝，不能保证硬件自动兜底。fp16 的 1024 列是 2048 字节，正好对齐；1000 列是 2000 字节，若该路径按 32 字节 padding，则为 2016 字节、增加 0.8%；这是 padding 算例，实际 DRAM 搬运看 profiler。对齐的账要按“每行多搬多少字节乘行数”算，形状越不规则，补齐的比例越高。另一种慢来自 dtype：int64 索引、fp64 计算在 Ascend 上支持有限，kernel 里用 int64 算偏移、用 fp64 累加，可能编译不过，也可能落到低效路径；能用 int32 的地方不要用 int64。
 
-动态 shape 的差别在编译时机。GPU 上同一个 kernel 可以用运行时的 n 处理不同形状，autotune 按 key 选配置；Ascend 上 JIT 按 constexpr 特化，图编译按捕获时的形状编。LLM 推理的 batch 与序列长度每步都在变，图编译要么把形状 padding 成固定档位，要么反复重编。nano-vllm-ascend 的 MoE 与 VL 标“暂时不支持入图”，就是这条边界的一个例子：形状变化太大，进图的收益抵不过重编的成本。
+动态 shape 的差别在编译时机。GPU 上同一个 kernel 可以用运行时的 n 处理不同形状，autotune 按 key 选配置；Ascend 上 JIT 按 constexpr 特化，图编译按捕获时的形状编。动态形状可能使用捕获档位、缓存图、动态编译或 eager；形状变化不必然重编。对示例仓库的 MoE/VL 状态只记版本与限制，是否因重编变慢要用 trace 验证。
 
 循环里的记录只有四列：现象（报错原文）、定位（kernel 里的哪一行、哪个 API）、改法、重测结果。四列缺一列，这一行就不成立：没有报错原文，事后对不上号；没有行号与 API，改法无从谈起；没有重测结果，改法只是猜测。改完一个测一个，不要攒一堆改动再测——攒着测，失败时不知道是哪一个改动引起的。
 
@@ -937,28 +940,28 @@ dtype 与对齐是两条慢路径。尾轴对齐要求纯 Vector 算子 32 字�
 
 先分清三个东西。第 25 章第 4 节已经把关系画过：FlagGems 是算子库，FlagCX 是通信库，vllm-plugin-FL（把两者接进 vLLM 的插件）是把统一层接进引擎的那一环。这一节只讲 FlagGems 的机制。FlagGems 里的算子用 Triton 写，注册进 PyTorch 的 ATen 分发（PyTorch 的算子分发层），模型代码不用改就能用到；它不做编译器的活，编译发生在每个后端自己的 Triton 编译器里。
 
-一份源码怎么变成多家芯片上的实现？分两段。第一段是写：一个算子只有一份 Triton 源码，描述“算什么”，不写“在哪块芯片上怎么算”。第二段是编译：运行时按当前平台选后端，由该后端的 Triton 编译器把同一份源码 lowering 成目标芯片的二进制。源码一份，二进制多份；多出来的那些由编译器生成，不需要人维护。
+一份源码怎么变成多家芯片上的实现？分两段。第一段是写：复用通用 Triton 算子，并允许后端专用源码、layout 和调参，不是每个算子永远只有一份实现。第二段是编译：运行时按当前平台选后端，由该后端的 Triton 编译器把同一份源码 lowering 成目标芯片的二进制。通用源码可生成多个后端产物，但专用实现和编译器支持仍需维护与回归。
 
 第二段之后是分发。vllm-plugin-FL 的分发链是三级：先找 FlagGems 的统一实现，没有再找厂商实现，再没有回退到 PyTorch 参考实现，自动 fallback。启动时先识别芯片、选后端，三级都按这个后端查。
 
 文档列的平台是 12 家芯片：NVIDIA、Ascend、T-Head、天数智芯、沐曦、摩尔线程、清微智能、海光、曦望、燧原、昆仑芯、阿里巴巴 PPU，另外支持 ARM64 CPU 上的纯 CPU 推理。名单与数量以当前文档为准，平台增删比芯片型号变化快。
 
-人力账可以这样算：手写路线，12 家芯片乘 1 个算子等于 12 份要人维护的实现；统一路线，1 份源码在 12 个后端上各编译一次，仍然只有 1 份要人维护的源码。两边都叫“12 份实现”，性质不同：前者改一个 bug 要改 12 处，后者改源码一处、重新编译。这笔账省的是“每多一家芯片就多写一份代码”，不是把移植变成零成本——某个后端编不过、某个算子没有统一实现，仍然要人补。
+维护收益来自通用逻辑复用，不是严格的“12 份变 1 份”。通用修复可以共享，后端特化、dtype/shape 覆盖和编译回归仍要分别维护；实际代价取决于命中的源码与支持矩阵。
 
-FlagGems 能解决的是覆盖面与语义对齐：常见算子有一份多后端实现，注册进 ATen 之后 PyTorch 调用点不变，三级分发保证缺实现时还能跑。它不解决四件事：
+FlagGems 能解决的是覆盖面与语义对齐：常见算子有一份多后端实现，注册进 ATen 之后 PyTorch 调用点不变，三级分发仅在目标设备有可执行兜底时能继续，缺底层路径仍会报错。它不解决四件事：
 
 | 不解决 | 为什么 |
 |---|---|
 | 跨算子自动融合 | 它提供算子级的融合实现（silu_and_mul 本身就是一个），但模型里相邻的两个 PyTorch 调用不会因为它自动合成一个 kernel |
 | 调度 | 不管 batch 怎么组、stream 怎么排、核数怎么分，这些在引擎与运行时 |
 | 图优化 | 不做图捕获、图级融合、内存规划；它 eager 模式就绪，不依赖 `torch.compile` |
-| 单芯片峰值性能 | 一份写法要在 12 个后端跑对，取的是交集；要榨干单芯片，仍要原生算子或特化 |
+| 单芯片峰值性能 | 统一库也可包含后端特化，是否接近峰值需实测，不能由库名决定 |
 
 同一生态里还有 FlagTree：fork 自 Triton 的多后端编译器，每个后端一条受保护分支，Ascend 分支钉在 Triton 3.5（README 的分支表，2026-06-08 升级）。它是编译器，FlagGems 是算子库，两者不是一回事；它的版本也和 TritonAscendBench 用的 triton_ascend 3.2.0 不同，不能混用。
 
 把分发链放进一次前向：模型调到 SiluAndMul，插件先问 FlagGems 有没有这个算子的统一实现；有就走统一实现，没有找厂商实现，再没有回退 PyTorch 参考实现。整个过程模型代码不动。代价是回退不报错：走到第三级时结果仍然对，速度是参考实现的速度，只有分发日志或 profiler 能看出来。统一层承诺覆盖面，不承诺性能下限。
 
-对照第 2 节的手写迁移：统一路线省人力、牺牲特化；手写路线费人力、能榨单芯片性能。两条路不是替代关系：统一层决定移植的起点，手写移植决定天花板。一个算子该走哪条，看它是不是热点、目标芯片上有没有统一实现、维护人力有多少——这三个问题比“哪种技术更先进”有用。
+对照第 2 节的手写迁移：统一路线复用通用逻辑并允许后端特化；手写路线提供另一种显式控制，性能与维护代价都需实测。两条路不是替代关系：统一层决定移植的起点，手写移植决定天花板。一个算子该走哪条，看它是不是热点、目标芯片上有没有统一实现、维护人力有多少——这三个问题比“哪种技术更先进”有用。
 
 29.4 要手写的 SiluAndMul，FlagGems 里也有一个统一实现。同一个算子，一条路是直接用库里的，一条路是自己写一遍、看它怎么落到 Ascend 上；两条路不冲突：先看库里的实现怎么组织，再自己写，读与写互相印证。
 
@@ -969,7 +972,11 @@ FlagGems 能解决的是覆盖面与语义对齐：常见算子有一份多后�
 TritonAscendBench 的 USAGE 里给了 L2_04 的参考解法，核心是一个 2D grid 的逐元素 kernel：
 
 ```python
-# 摘自 TritonAscendBench 的 docs/USAGE.md；省略了 import torch / triton / triton.language as tl
+# 按 L2_04 契约组织的 2D 基线，未在 NPU 运行；不是原样源码摘录。
+import torch
+import torch_npu  # NPU 环境依赖，GPU 自查用第 24 章完整入口
+import triton
+import triton.language as tl
 @triton.jit
 def _silu_and_mul_kernel(x_ptr, out_ptr, hidden_dim, n_cols, BLOCK: tl.constexpr):
     row = tl.program_id(0)
@@ -985,9 +992,13 @@ def _silu_and_mul_kernel(x_ptr, out_ptr, hidden_dim, n_cols, BLOCK: tl.constexpr
 
 def npu_triton_impl(inputs: dict) -> dict:
     hs = inputs["hidden_states"]          # 形状 [M, 2D]
+    assert hs.ndim == 2 and hs.shape[1] % 2 == 0 and hs.is_contiguous()
+    assert hs.dtype in (torch.float16, torch.bfloat16)
     bs, n_cols = hs.shape
     hidden_dim = n_cols // 2
     out = torch.empty((bs, hidden_dim), dtype=hs.dtype, device=hs.device)
+    if bs == 0 or hidden_dim == 0:
+        return {"output": out}
     BLOCK = 128
     grid = (bs, triton.cdiv(hidden_dim, BLOCK))
     _silu_and_mul_kernel[grid](hs, out, hidden_dim, n_cols, BLOCK=BLOCK)
@@ -1000,21 +1011,79 @@ def npu_triton_impl(inputs: dict) -> dict:
 
 grid 的账跟着形状走。参考 kernel 取 BLOCK=128，`hidden_dim=1024` 时每行 8 个列块，M=512 时 grid 是 `512×8 = 4096` 个 program。GPU 上这个数不算大；Ascend 的 AI Core 是几十个，4096 个 program 要么被后端折叠到物理核，要么分多轮下发。想控制核映射，就把 grid 改成 1D、固定成核数，在核内循环遍历这 4096 个 tile。改完之后每个核处理约 `4096/核数` 个 tile——核数用 `get_device_properties` 查，不要按“910B 有多少个核”的传闻写死。
 
-BLOCK 取多大，由 UB 定。fp16 下 BLOCK 个元素是 `2×BLOCK` 字节，输入两半加输出是 3 份，fp32 中间量再占两份 `4×BLOCK`。BLOCK=4096 时粗算 56 KiB，双缓冲按两份算是 112 KiB，低于 Atlas A2/A3 的 192 KiB；BLOCK=8192 时同样算法是 224 KiB，超过 192 KiB，编译期可能直接报 `ub overflow`。这是上界估算，实际占用还要看编译器复用与对齐，但量级足够用来选 BLOCK：先按这个账选一个不溢出的值，再用 autotune 扫。
+BLOCK 取多大，由 UB 定。fp16 下 BLOCK 个元素是 `2×BLOCK` 字节，输入两半加输出是 3 份，fp32 中间量再占两份 `4×BLOCK`。BLOCK=4096 时粗算 56 KiB；若所列活量都双份，则为 112 KiB，在名义 UB=192 KiB 的算例下尚未超额，但不保证真实编译预算足够；BLOCK=8192 时同样假设是 224 KiB。这是“所列活量都双份”的粗算，不是实际 UB 上界或必然溢出的证明；先核对编译器预算、复用与 padding，再选候选。每个合法配置也要过正确性。
 
-对齐的账也要算。`hidden_dim=1024` 时，一行 1024 个 fp16 是 2048 字节，32 字节的整数倍；`hidden_dim=1000` 时是 2000 字节，按 32 字节补齐到 2016 字节，每行多搬 16 字节，约 0.8%。形状越不规则，补齐越多；mask 挡住的是越界读写，挡不住补齐的带宽。`other` 取 0 只是让无效位置的计算不产生脏值，这些位置不会写回。
+对齐的账也要算。`hidden_dim=1024` 时，一行 1024 个 fp16 是 2048 字节，32 字节的整数倍；`hidden_dim=1000` 时是 2000 字节，若该路径按 32 字节 padding，则为 2016 字节、增加 0.8%；这是 padding 算例，实际 DRAM 搬运看 profiler。形状越不规则，补齐越多；mask 挡住的是越界读写，挡不住补齐的带宽。`other` 取 0 只是让无效位置的计算不产生脏值，这些位置不会写回。
 
 TritonAscendBench 的评测设计、101 个任务的分档、五个命令与判分口径，第 28 章第 3 节已经讲过；这里只做 L2_04 这一段：`tab init-solution L2_04_silu_and_mul` 生成 `solution.py`，填好 `npu_triton_impl` 之后用 `tab run L2_04_silu_and_mul --solution .../solution.py` 判分。入口必须是真 Triton kernel（`@triton.jit`、`tl.load`/`tl.store`），纯 PyTorch 实现会被静态检查拒绝；正确性在 CPU 上对照 oracle 判，性能要 910B 实测；任务编号、命令与判分字段以仓库当前版本为准。
 
-按仓库当前状态，性能链路尚未端到端接通，所以这一节不报加速比，只报正确性与待补测的性能。正确性可以先在 CPU 上判，性能的数字留到有卡的那一天。
+引用的 benchmark 快照将性能链路标为 research preview，本章没有运行它；CPU/解释器结果不能替代 NPU 正确性。完整实验按四步执行，不把计划的改法填成完成记录：
+
+| 编号 | 操作 | 必留证据 | 当前状态 |
+|---|---|---|---|
+| B0 | 第 24 章完整入口做 GPU 边界自查 | 形状、dtype、种子、容限和原始日志 | CUDA 依赖缺失，待 GPU 验证 |
+| B1 | 锁定 NPU 版本，先运行本节 2D baseline | 编译日志、输出误差、设备 kernel 事件，确认未回退 | 待 NPU 验证 |
+| C1 | 只改 BLOCK，或只改 1D 核内循环，二选一 | diff/代码标识、相同输入与编译配置 | 仅实验设计，未运行 |
+| R1 | baseline/candidate 重复同一套测试和计时 | 正确性、路径、质量与性能 before/after，至少 3 轮 | 待 NPU 验证 |
+
+可先试 BLOCK=128→256；若试核映射，保持 BLOCK=128，只换以下完整候选结构。它仍未在本轮 NPU 编译或运行，字段与 API 按所选 tag 核对：
+
+```python
+import torch
+import torch_npu  # 目标 NPU 环境注册；缺失时不得回退冒充 NPU 验证
+import triton
+import triton.language as tl
+
+@triton.jit
+def _silu_and_mul_persistent_kernel(x_ptr, out_ptr, hidden_dim, n_cols,
+                                    total_tiles, tiles_per_row,
+                                    BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    n_programs = tl.num_programs(0)
+    for tile in range(pid, total_tiles, n_programs):
+        row = tile // tiles_per_row
+        col = (tile % tiles_per_row) * BLOCK + tl.arange(0, BLOCK)
+        mask = col < hidden_dim
+        x1 = tl.load(x_ptr + row * n_cols + col, mask=mask, other=0.0)
+        x2 = tl.load(x_ptr + row * n_cols + hidden_dim + col, mask=mask, other=0.0)
+        x1f = x1.to(tl.float32)
+        silu = (x1f * tl.sigmoid(x1f)).to(x2.dtype)
+        tl.store(out_ptr + row * hidden_dim + col, silu * x2, mask=mask)
+
+def npu_triton_impl_persistent(inputs: dict) -> dict:
+    hs = inputs["hidden_states"]
+    assert hs.ndim == 2 and hs.shape[1] % 2 == 0 and hs.is_contiguous()
+    assert hs.device.type == "npu", "NPU 未验证，不可用 CPU 结果替代"
+    m, n_cols = hs.shape
+    d = n_cols // 2
+    out = torch.empty((m, d), dtype=hs.dtype, device=hs.device)
+    if m == 0 or d == 0:
+        return {"output": out}
+    properties = triton.runtime.driver.active.utils.get_device_properties(hs.device.index or 0)
+    cores = properties.get("num_vectorcore")
+    if not isinstance(cores, int) or cores < 1:
+        raise RuntimeError("按当前后端核对 Vector 核查询接口，不猜核数")
+    tiles_per_row = triton.cdiv(d, 128)
+    total_tiles = m * tiles_per_row
+    _silu_and_mul_persistent_kernel[(min(cores, total_tiles),)](
+        hs, out, d, n_cols, total_tiles, tiles_per_row, BLOCK=128)
+    return {"output": out}
+
+# candidate 文件仍暴露契约的固定入口；否则 runner 可能继续调用旧 baseline。
+npu_triton_impl = npu_triton_impl_persistent
+```
+
+baseline 与 candidate 分别保存为两个解法文件，`tab run` 的 `--solution` 指向本次那一份；不要只新增一个函数名就宣称切换了实现。复用 L2_04 契约的 FP16/BF16 容限和公开/隐藏形状，加 D=1000/1023/1024、M=1、零值、±80 与空张量。两份实现均在同一 NPU 对 oracle/内置路径核对。性能链路未就绪时，可用该版本的 NPU Events 独立量两者，固定热身、缓存、分配口径并留每轮值；GPU 时间不是 NPU 性能分母。
+
+每次完整填写 `test_id / conditions_id / 基线 / 单点改动 / 正确性 / 路径 / 质量 / 性能 / 重测结果 / 状态`。无 NPU 时重测项写“待 NPU 验证”及触发条件，不填假误差、假耗时或假通过。
 
 无卡时跑到哪一步为止？`tab run --backend gpu` 做 CUDA 自查；默认后端（NPU）在没有 `torch_npu` 时放不了设备，结果标 `npu_antihack_unverified`，记录里原样保留。那一节解释过这个标记的含义，这里只把它当记录纪律：它不是通过，是“没验证过 NPU”；没有 NPU 时也不会静默回退到 GPU，所以标记可信。
 
-无卡时，本节要交的是 GPU 自查结果加一份逐行移植计划。计划按 kernel 的每一行写“可能有什么问题、准备怎么验证”，不写“这里一定有问题”或“这里肯定没问题”：
+有 CUDA、无 NPU 时交 GPU 自查日志与迁移计划；两类依赖都缺失时，只交源码/语法检查和计划，GPU 与 NPU 都标待验证。计划按 kernel 的每一行写“可能有什么问题、准备怎么验证”，不写“这里一定有问题”或“这里肯定没问题”：
 
 | kernel 里的位置 | 可能的问题 | 怎么验证 |
 |---|---|---|
-| 二维 grid `(bs, cdiv(D, BLOCK))` | 4096 个 program 在几十个核上分多轮，核映射不可控 | 改成 1D grid 加核内循环，有卡时对比两种写法的设备侧耗时 |
+| 二维 grid `(bs, cdiv(D, BLOCK))` | 先核对该版是否自动 block mapping，不按逻辑 program 数推断 host launch 次数 | 改成 1D grid 加核内循环，有卡时对比两种写法的设备侧耗时 |
 | `mask = col < hidden_dim` | D 不整除 BLOCK 时尾块越界或补齐 | 用 D=1000、1023、1024 三组形状对 oracle |
 | `x1.to(tl.float32)` 与 `tl.sigmoid` | sigmoid 的 lowering 与精度行为不一致 | 用 0、±1、±2 和 ±80 的输入对 oracle 的 `max_abs` |
 | `silu.to(x3.dtype)` 再乘 | cast 顺序或舍入与 oracle 不一致 | 对比“先 cast 再乘”与“fp32 直接乘”的 `max_abs`，确认前者在容限内 |
@@ -1031,12 +1100,12 @@ TritonAscendBench 的评测设计、101 个任务的分档、五个命令与判�
 | 检查项 | 通过标准 | 不通过时先看什么 |
 |---|---|---|
 | 语义等价 | 输入输出形状、dtype、cast 顺序与 oracle 一致；边界形状也一致 | 先看契约与 cast 位置，再看 mask |
-| 内存层级 | 单 tile 的 UB 占用（双缓冲按两份）不超上限；dot 的 tile 进得了 L1 与 L0 | 先看 BLOCK 与中间张量数量，再考虑关 multi-buffer |
+| 内存层级 | 按编译产物核验活量、padding 和实际 multi-buffer 份数，不超目标 UB 上限；dot 的 tile 进得了 L1 与 L0 | 先看 BLOCK 与中间张量数量，再考虑关 multi-buffer |
 | 同步 | 没有靠全局内存加原子做跨核汇总；块内 barrier 没被当成跨核同步 | 先看是否有多个核写同一地址，再看原子 dtype 是否支持 |
-| 对齐 | 尾轴按 32 字节（纯 Vector）或 512 字节（CV）对齐；补齐的带宽算过 | 先看 D 是否整除 BLOCK、尾块补了多少字节 |
+| 对齐 | 按所选版本/路径核验对齐与尾块策略，估算与实际搬运分开 | 先看 D 是否整除 BLOCK、尾块补了多少字节 |
 | 边界 | D 不整除 BLOCK、M=1、空张量、超大 N 都有对应测试 | 先看 mask、grid 上限与 `coreDim` |
 | 精度 | 容限类内 `max_abs` 达标；fp32 计算与累加；cast 顺序不变 | 先看 exp 与 sigmoid 的输入范围、cast 位置 |
-| 性能回归 | 同形状、同 dtype、同 warmup 对比基线；没有基线的写“待补测” | 先看 grid 是否按核数、BLOCK 是否吃满 UB、有没有标量访存 |
+| 性能回归 | 同形状、同 dtype、同 warmup 对比基线；没有基线的写“待补测” | 先看自动/手工核映射、UB 预算和标量化，再看同口径耗时 |
 
 七项里，语义与精度管结果对不对；内存、同步、对齐、边界管会不会编译失败、跑出越界或错值；性能回归管能不能交付。
 
@@ -1068,9 +1137,11 @@ tokenizer 也在清单里：同一个模型名不等于同一个 tokenizer，切
 
 样本量决定这张表能分辨多细的差异。1000 条样本里，NVIDIA 答对 850 条、Ascend 答对 842 条，准确率分别是 85.0% 与 84.2%，差 0.8 个百分点，折算成样本是 8 条；换成 100 条样本，1 条就是 1 个百分点，0.8 个百分点连 1 条都不到。这组数是算例，不是实测，用来看分辨率：同样叫 0.8 个百分点，在 1000 条的表里是 8 条样本，在 100 条的表里是不到 1 条。
 
-还可以再算一步。1000 条样本、准确率 85% 时，比例的标准误（standard error，样本比例偏离真值的典型幅度）约 `sqrt(0.85 × 0.15 / 1000) ≈ 0.011`，即 1.1 个百分点；保守地按独立样本估，差值的标准误约 `sqrt(2 × 0.85 × 0.15 / 1000) ≈ 1.6` 个百分点，95% 区间约 ±3.1 个百分点。0.8 个百分点的差距落在区间内，单看准确率不能判定哪边更好。样本越小，区间越宽：100 条样本时差值的标准误约 5.0 个百分点，95% 区间约 ±9.9 个百分点，0.8 个百分点在里面可以忽略。报告里写样本量，读表的人才能自己算这一步。
+同一组题是配对质量数据，不能把两平台当独立样本后直接宣布差异是噪声。按 sample_id 保存两边预测、参考答案和判分；统计“只 A 对”的 b 与“只 B 对”的 c，准确率差为 `(c-b)/n`。例如 n=1000、b=8、c=0，差 -0.8 pp，但配对精确 McNemar 双侧 p 值为 `2/2^8≈0.0078`，仅凭边际准确率不能决定显著性。accuracy/EM 可用配对检验，F1/NLL 可按题或文档配对 bootstrap，保留分层和抽样单位。
 
-困惑度的差也可以换算：两边的平均负对数似然（Negative Log-Likelihood，NLL，模型给正确答案的负对数概率的平均值，越小越好）差 0.01，PPL 是 NLL 的指数，e^0.01 ≈ 1.01005，两边 PPL 的比值约 1.01，差 1% 左右。1% 的 PPL 差和 0.8 个百分点的准确率差是同一个量级：能测出来，但解释它要去第 3 节做归因，本节只负责量。
+跑之前写定指标、样本集、最大允许退化 Δ、置信度、异常/截断处理及关键子集门槛。退化的单侧置信界低于预设上限才可判通过；区间跨门槛是证据不足，不将“不显著”解释为质量已通过。每次算子、量化或图模式 E5 都重跑正确性、同组质量、路径命中和性能，绑定新的 conditions_id。
+
+困惑度的差也可以换算：两边的平均负对数似然（Negative Log-Likelihood，NLL，模型给正确答案的负对数概率的平均值，越小越好）差 0.01，PPL 是 NLL 的指数，e^0.01 ≈ 1.01005，两边 PPL 的比值约 1.01，差 1% 左右。PPL 相对变化与 accuracy 的百分点是不同指标，不能直接比较量级；各自按预设门槛和配对数据判断。
 
 输出抽查是另一路证据：至少抽 5 条并排对照，看有没有系统性差异。5 条算不出 0.8 个百分点，它的用途是看「错的样子」——指标说差多少，样本说差在哪类题上。5 条里有 3 条是同一类问题（比如都需要多步推理），这个模式给归因指了一个方向；5 条错得各不相同，就什么也说明不了。5 条的用途是发现模式，不是证明差异：样本只有 5 条，任何比例都不足以单独下结论。抽查要分层：1000 条里 800 条是选择题、200 条是开放问答时，随机抽 5 条全是选择题的概率是 0.8^5 ≈ 0.328，开放问答可能一条都抽不到；按题型分层、每类至少抽几条，某类题的差异才有机会露面。抽法写进报告，别人按同一个抽法才能复现。
 
@@ -1090,27 +1161,29 @@ tokenizer 也在清单里：同一个模型名不等于同一个 tokenizer，切
 
 三个数可以互相换算。一个请求生成 L 个 token，总延迟约等于 TTFT + ITL × (L − 1)：第一个 token 花 TTFT，剩下 L − 1 个间隔每个花 ITL。单请求 token 速率是 L ÷ 总延迟；并发为 C、延迟不变时，吞吐约等于 C × L ÷ 总延迟。
 
-算例：TTFT = 100 毫秒、ITL = 20 毫秒、L = 101，总延迟 = 100 + 20 × 100 = 2100 毫秒 = 2.1 秒，单请求速率 = 101 ÷ 2.1 ≈ 48.1 token/秒，并发 8 时吞吐 ≈ 8 × 48.1 ≈ 384.8 token/秒。这组数是算例，不是实测；它给出一条无争用基准线：并发 8 的吞吐远低于 384.8，说明延迟已经变了，争用发生了。
+以下是恒定间隔、实际在途维持不变且无排队失败的稳态算例，不适用于脚本的整个有限窗口。算例：TTFT = 100 毫秒、ITL = 20 毫秒、L = 101，总延迟 = 100 + 20 × 100 = 2100 毫秒 = 2.1 秒，单请求速率 = 101 ÷ 2.1 ≈ 48.1 token/秒，并发 8 时吞吐 ≈ 8 × 48.1 ≈ 384.8 token/秒。这组数是算例，不是实测；它给出一条无争用基准线：真实吞吐低于这条线时，先核对实际在途、长度、失败与窗口，不能单凭吞吐差就归因于争用。
 
-再看延迟翻倍的情形：ITL 从 20 毫秒涨到 40 毫秒、TTFT 不变，总延迟 = 100 + 40 × 100 = 4100 毫秒 = 4.1 秒，单请求速率 ≈ 24.6 token/秒，并发 8 的吞吐 ≈ 8 × 24.6 ≈ 196.8 token/秒。并发涨 8 倍，吞吐只涨 196.8 ÷ 48.1 ≈ 4.1 倍，差的那部分就是争用的代价。
+再看延迟翻倍的情形：ITL 从 20 毫秒涨到 40 毫秒、TTFT 不变，总延迟 = 100 + 40 × 100 = 4100 毫秒 = 4.1 秒，单请求速率 ≈ 24.6 token/秒，并发 8 的吞吐 ≈ 8 × 24.6 ≈ 196.8 token/秒。并发涨 8 倍，吞吐只涨 196.8 ÷ 48.1 ≈ 4.1 倍，这里仅演示假设 ITL 变化造成的吞吐损失，不从实际吞吐差反推争用。
 
-测量条件先钉死：用第 4 章的 `scripts/bench_openai.py`，不在两边各写一套脚本；并发档位至少三级（1 / 8 / 32 是例子，按硬件容量选），每级请求数、prompt、max_tokens、temperature 两边相同；每档先预热（第一次跑混着编译与缓存预热的成本），再重复多轮；每一轮按第 11 章的口径报 p50 与 p95，需要看尾巴时加 p99，跨轮取中位数。20 个请求的 p95 基本由最慢的一两个请求决定，p99 基本就是最慢的那一个；样本量写进表里，别把 20 个请求的 p99 当成精确分位。实际生成长度按 `usage.completion_tokens` 记（读不到时脚本按字符数估算，JSON 里会标 `tokens_estimated`）：两边平均长度差得多，ITL 与吞吐的差异里就混进了长度差，先按长度归一或分长度段比较，再谈芯片。
+测量条件先钉死：用第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`，不在两边各写一套脚本；并发档位至少三级（1 / 8 / 32 是例子，按硬件容量选），每级请求数、prompt、max_tokens、temperature 两边相同；每档先预热（第一次跑混着编译与缓存预热的成本），再重复多轮；每一轮按第 11 章的口径报 p50 与 p95，需要看尾巴时加 p99，跨轮取中位数。20 个请求的 p95 基本由最慢的一两个请求决定，p99 基本就是最慢的那一个；样本量写进表里，别把 20 个请求的 p99 当成精确分位。实际生成长度按 `usage.completion_tokens` 记（读不到时脚本按字符数估算，JSON 里会标 `tokens_estimated`）：两边平均长度差得多，ITL 与吞吐的差异里就混进了长度差，先按长度归一或分长度段比较，再谈芯片。
 
 版本写全：硬件型号加显存、驱动与固件、Python / PyTorch / TorchNPU（PyTorch 的昇腾适配）、CANN、vLLM 与 vllm-ascend，或对应的芯片插件，每项带核实日期。版本锚点见第 27 章的安装链，本章不写死具体版本号——版本一换，数字就过期，报告按「某年某月某版本实测」记录。条件缺一项，别人复现出来的曲线就对不上，对不上又分不清是系统变了还是条件变了。
 
 表里加一列比值，统一写成 Ascend ÷ NVIDIA，并注明方向：TTFT 与 ITL 越大越慢，吞吐越大越快。比值要和绝对值一起读：TTFT 从 10 毫秒变 14 毫秒，比值 1.4，绝对差 4 毫秒，用户几乎感觉不到；从 100 毫秒变 140 毫秒，比值还是 1.4，绝对差 40 毫秒，交互体感已经不同。比值接近 1 也不等于两边一样：TTFT 比值 1.02、ITL 比值 1.30 的两边，首 token 差不多，decode 差一截，画像完全不同。
 
-三级并发看的是曲线形状：曲线越陡，扩展性越好；越早变平，瓶颈越早到。只看并发 1 的一个点不能下结论：单点量的是单请求延迟，调度、批处理与 KV 管理都没被量到；只看高并发吞吐、不看 TTFT，同样会漏掉交互体验。如果并发 32 的吞吐反而低于并发 8，说明进了过载区，TTFT 被排队撑大，吞吐不升反降；这一档记「过载」与原因，不拿它当性能结论——第 11 章讲过，饱和与抢占点上的延迟混进了排队与重算，不是服务的正常表现。跑不下的档位写「跑不下 + 原因」，不要硬跑，也不要悄悄降档再填表。
+三级并发同时看吞吐曲线、TTFT/ITL 和成功率；吞吐线更陡不代表在延迟预算内扩展更好。只看并发 1 的一个点不能下结论：单点量的是单请求延迟，调度、批处理与 KV 管理都没被量到；只看高并发吞吐、不看 TTFT，同样会漏掉交互体验。如果并发 32 的吞吐低于并发 8，先核对实际在途、输出长度、失败率、设备与客户端瓶颈；只有等待、抢占等证据也支持时，才归为过载。该档保留完整状态和可能原因，确认过载后作为边界证据，不与低并发服务时间混为一谈——第 11 章讲过，饱和与抢占点上的延迟混进了排队与重算，不是服务的正常表现。跑不下的档位写「跑不下 + 原因」，不要硬跑，也不要悄悄降档再填表。
 
-两边各跑一遍。示例命令如下，参数以当前版本为准；文件名带平台与实验编号，原始 JSON 留在报告附录：
+两边各跑一遍。示例命令如下，参数以当前版本为准；文件名带平台与实验编号，原始 JSON 留在附录。正式请求数远大于最大并发（例中 1024 对 32），20 请求只用于 C=1/4 的 mock 检查。固定 Sky prompt 不是 512 tokens，实际 token 数/来源随 tokenizer 写进记录。MMLU 命令只产生该任务指标，不产生 PPL 或自动得到“1000 题子集”；子集需保存 sample_id，PPL 另设可取 NLL 的评测：
 
 ```bash
-python3 scripts/bench_openai.py --base-url http://localhost:8000 \
-  --model <模型名> --max-tokens 128 --concurrency 1 8 32 \
-  --requests 100 --output A-E2.json
+MODEL=Qwen/Qwen3-0.6B  # 换成两边实际跑过的同一个模型
+python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
+  --model "$MODEL" --prompt 'Explain why the sky is blue.' \
+  --max-tokens 128 --concurrency 1 8 32 --requests 1024 \
+  --test-id A-E2-r1 --conditions-id A-fp16-v1 --output A-E2.json
 
 lm_eval --model local-completions \
-  --model_args base_url=http://localhost:8000/v1/completions,model=<模型名> \
+  --model_args "base_url=http://localhost:8000/v1/completions,model=$MODEL" \
   --tasks mmlu --num_fewshot 5 --output_path A-E3.json
 ```
 
@@ -1149,9 +1222,9 @@ lm_eval --model local-completions \
 
 回退的代价可以估：某算子占端到端时间 10%，回退后慢 5 倍，新时间 = 0.9 + 0.1 × 5 = 1.40 倍，整体慢 40%；占比 5%、慢 5 倍是 1.20 倍；占比 20%、慢 3 倍也是 1.40 倍。占比小的算子回退，端到端可能没感觉；占比大的回退一点，端到端掉一大截。同一笔账的另一面是第 24 章的 Amdahl 定律：占比 1% 的算子无限优化也只省 1%，占比 10% 的算子回退 5 倍却能让整体慢 40%。搬运量同理：7B 模型 FP16 权重 14 GB、INT8 权重 7 GB，decode 若受带宽限制，权重精度一变，ITL 就跟着变。边界是权重只是搬运的一部分，KV 缓存也要搬；权重省一半不等于总搬运省一半，更不等于 ITL 省一半，变多少要实测。
 
-**对照。** 一次只换一个变量：把可疑算子换成 PyTorch 参考实现、把量化换回 FP16、关掉前缀缓存或分块 prefill、把并发固定在同一档，看差异是否消失。差异消失，这个因素就被证实；差异还在，换下一个。候选多时用二分：8 个候选 8 → 4 → 2 → 1，三轮；16 个四轮；10 个 ceil(log2 10) = 4 轮，因为 2^3 = 8 不够、2^4 = 16 才够。每轮代价是一次重跑，候选集列得越准，轮数越少。
+**对照。** 一次只换一个变量：把可疑算子换成 PyTorch 参考实现、把量化换回 FP16、关掉前缀缓存或分块 prefill、把并发固定在同一档，看差异是否消失。差异稳定缩小才增加对该因素的支持；还需 A/B/A、重复运行及正确性/质量确认，不单次变化就宣布因果。候选多时用二分：8 个候选 8 → 4 → 2 → 1，三轮；16 个四轮；10 个 ceil(log2 10) = 4 轮，因为 2^3 = 8 不够、2^4 = 16 才够。每轮代价是一次重跑，候选集列得越准，轮数越少。
 
-两种失败模式先认出来。一是候选集漏了真凶：二分法只在候选集里找，真凶不在，几轮下来差异还在，谁也定位不到；候选集要从第 28 章的矩阵、第 1 节的抽查（哪类题错）与第 2 节的曲线形状（TTFT 先涨还是 ITL 先涨）三路拼出来。二是一次换多个变量：差异消失，不知道是谁的功劳；差异没消失，也不知道是谁的问题。验证顺序按成本与可能性排：占比大的先查、实现明显不同的先查、版本对不上的先对版本。
+两种失败模式先认出来。一是候选集漏了真凶：二分式定位只在单一原因、改动可独立隔离时可能按对数轮数收敛；因素交互或候选漏项时没有这个保证；候选集要从第 28 章的矩阵、第 1 节的抽查（哪类题错）与第 2 节的曲线形状（TTFT 先涨还是 ITL 先涨）三路拼出来。二是一次换多个变量：差异消失，不知道是谁的功劳；差异没消失，也不知道是谁的问题。验证顺序按成本与可能性排：占比大的先查、实现明显不同的先查、版本对不上的先对版本。
 
 **边界。** 一个解释只在特定模型、长度、版本与并发范围内成立。版本换了，结论过期；并发跨过拐点，机制可能从调度换成排队；上下文长度变了，KV 布局的影响可能放大。归因记录里写日期，日期标明结论的有效期；验证不了的写「待验证」，不要写成定论。「待验证」不是报告的污点，它标明了证据链断在哪、下一步补什么。
 
@@ -1177,11 +1250,11 @@ lm_eval --model local-completions \
 | 5 性能对比 | 第 2 节的表，三级并发 × TTFT / ITL / 吞吐 | 性能差异的证据 |
 | 6 差异归因 | 第 3 节的归因记录，验证不了的保持「待验证」 | 从数字到机制的桥 |
 | 7 算子覆盖矩阵摘要 | 第 28 章矩阵的 Top 10 状态（原生 / 插件 / 回退 / 待核实）与核实日期 | 定位回退与实现位置 |
-| 8 移植记录摘要 | 第 29 章记录的不兼容点：现象 + 定位 + 改法 + 重测结果 | 解释实现差异从哪来 |
+| 8 迁移与单点优化摘要 | 第 29 章正本与 E5：基线、单点改动、conditions_id、正确性/质量/路径/性能重测 | 计划与实测分开，四项过门槛才验收 |
 | 9 结论 | 有证据的结论（数据 + 归因）与待补测项（缺失 + 下一步） | 只写证据；计划线写清补测的触发条件 |
-| 10 保质期说明 | 会过期的结论与不会过期的方法论，分开列 | 报告的使用说明，第 5 节填 |
+| 10 历史适用与复核 | 旧条件下有效的证据、迁入新环境的复核项和日期 | 不删除历史数据，不外推旧成绩 |
 
-第 7、8 节是引用，不是重写：矩阵与记录的正本在第 28、29 章，报告里放摘要加指向；正本改了，摘要要跟着改。报告的读者不只有自己：三个月后的自己、组里同事、下一批做移植的人；写给接手的人，要把「为什么这么测」写进去，否则对方只会照抄命令，命令一出问题就不知道怎么调。报告头的结论保质期写「本报告基于某年某月某版本，过期需重测」——这一句告诉读者数字的有效期，也告诉复现的人该对齐哪套版本。模板有两处要补。模型与评测集一栏没有 tokenizer 与 prompt 模板的位置，填的时候补上，或者把 prompt 全文贴进命令一栏；报告头没有版本号一栏，补一行：初稿记 v0.1，补测一次升一版，并在报告头记一笔变更——改了什么、为什么改、哪天改的。没有版本号，两份报告摆在一起不知道哪份新；没有变更记录，新版的数字从哪来没人说得清。
+第 7、8 节是引用，不是重写：矩阵与记录的正本在第 28、29 章，报告里放摘要加指向；正本改了，摘要要跟着改。报告的读者不只有自己：三个月后的自己、组里同事、下一批做移植的人；写给接手的人，要把「为什么这么测」写进去，否则对方只会照抄命令，命令一出问题就不知道怎么调。报告头的结论保质期写「本报告基于某年某月某版本，过期需重测」——这一句告诉读者数字的有效期，也告诉复现的人该对齐哪套版本。模板已留 tokenizer、prompt/hash、sample_id/判分、预先质量门槛、报告修订和 conditions_id。第 30 章建立同一份 v0.1 初稿，第 31 章沿用它与原始记录补重复运行、证据等级和 E5 before/after，不另写一份平行报告。没有版本号，两份报告摆在一起不知道哪份新；没有变更记录，新版的数字从哪来没人说得清。
 
 版本写法是「某年某月某版本实测」：写具体版本号加核实日期，不写「最新版」——「最新」只是一个时间点，三个月后没人知道它指哪一天。核实日期写到天，版本号是静态的，核实日期说明这个号是亲手确认过的，不是从文档里抄的。本章不写死具体版本号，版本锚点见第 27 章；换版本就是换实验条件，数字要重测。
 
@@ -1191,7 +1264,7 @@ lm_eval --model local-completions \
 
 ### 小结：这份报告里哪些结论会随版本过期、哪些方法论不会
 
-一条结论只要带着具体版本号、具体数字或具体覆盖状态，就属于会过期的一类；只描述判据、步骤与记录格式的，不会过期。第二条规则：换一块芯片后，只需重填数字、步骤不动的，是方法论；必须重新测、重新归因才能得到的，是结论。第三条规则：报告里的每个数字必须能追到版本、日期、命令与原始结果；追不到的，不是结论。
+这里的“过期”指不能直接适用新条件，不是删除旧数据。一条结论带具体版本、数字或覆盖状态时，迁入新环境需要重新核验；只描述判据、步骤与记录格式的，不会过期。第二条规则：换一块芯片后，只需重填数字、步骤不动的，是方法论；必须重新测、重新归因才能得到的，是结论。第三条规则：报告里的每个数字必须能追到版本、日期、命令与原始结果；追不到的，不是结论。
 
 会过期的结论：
 
@@ -1200,7 +1273,7 @@ lm_eval --model local-completions \
 - 覆盖状态：原生实现、插件实现、回退、待核实，以及实现位置。今天的原生实现，下个版本可能换路径；今天查不到的算子，下个版本可能补了插件。
 - 环境与命令：版本清单、安装步骤、启动参数；换版本就要重跑，旧命令只对旧版本负责。
 
-保守的过期时间点是下一次版本发布：只要驱动、CANN、引擎或插件升级，数字就要重测；没重测之前，旧数字只在旧版本下成立。引用前先看报告头的日期与环境表，版本一变，旧数字作废，重测后升一版，不把新旧数字放进同一张表。
+环境变化是重新核验的触发点：只要驱动、CANN、引擎或插件升级，数字就要重测；没重测之前，旧数字只在旧版本下成立。引用前先看报告头的日期与环境表，旧数字仍对原条件有效，不外推为新环境结果；重测后增加条件/报告修订，不覆盖历史原始数据。新旧条件可并列，不冒充只改一个变量的比较。
 
 不会过期的方法论：
 
@@ -1219,13 +1292,13 @@ lm_eval --model local-completions \
 
 ## 其他芯片的切入点
 
-本模块以 Ascend 为主线，因为它的生态最成熟、资料最多。其他芯片的切入点供学完主线后扩展（状态以 [awesome-china-gpu](https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md) 的最新追踪为准，不要照抄这里的版本信息）：
+本模块选择 Ascend 作为贯穿样例，便于把 CANN、插件和算子实验连起来；这不是各厂商成熟度的排名。其他芯片的切入点供学完主线后扩展（状态以 [awesome-china-gpu](https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md) 的最新追踪为准，不要照抄这里的版本信息）：
 
 - **摩尔线程 MUSA**：vllm-musa 插件，另有 llama.cpp 官方支持
-- **海光 DCU**：DTK（基于 ROCm），vLLM 容器镜像，迁移成本相对低
+- **海光 DCU**：DTK 与对应 vLLM 镜像；按目标模型、精度与通信路径核验迁移差异
 - **昆仑芯 XPU**：vllm-kunlun 插件
 - **天数智芯 Iluvatar**：DeepSparkInference / vllm-iluvatar
-- **壁仞 MetaX**：vllm-metax 插件
+- **沐曦 MetaX**：vllm-metax 插件（[厂商名称](https://www.metax-tech.com/about.html)、[插件文档](https://vllm-metax.readthedocs.io/en/latest/)）
 - **多芯片统一接入**：[vllm-plugin-FL](https://docs.flagos.io/projects/vllm-plugin-FL/en/latest/overview/features.html)（FlagGems 统一算子库 + FlagCX 统一通信库）
 
 ## 本模块检查清单

@@ -1,22 +1,32 @@
 # M2 · 算子优化
 
-> 前置：第一部分（Roofline、profiling、压测脚本）与第二部分第 6–8 章（vLLM 服务已跑起来）。本部分的终点：自己写的 kernel 跑进推理引擎，端到端变快——“会写 kernel”只是起点。
+> 前置：第 1、3、6 章的 Roofline、profiling 与执行模型；第 19–23 章不要求先部署服务，第 24 章接入时再完成第 8 章。本部分的终点：确认自写 kernel 真正进入引擎，再用同条件的正确性、质量和性能记录决定保留或回滚；没变快也可以是有效结论。
 >
-> 代码示例分两种：能直接跑的（按官方教程与源码核对过写法）与示意性的（标“示意”，只讲结构、不保证编译通过）。示意代码不要当可运行代码。
+> 代码示例分为完整参考源码与示意片段。完整源码带入口、依赖和失败断言，但本轮没有 CUDA/PyTorch/Triton 实机环境，GPU 编译、数值和性能仍待验证；示意片段只讲结构，不替代完整入口。实验编号、原始记录和质量门槛统一按[跨章节实验约定](../../experiments.md)填写。
 >
-> 本部分的深度标准：优化做成阶梯，每一步先用 `ncu` 定位瓶颈，再用 Roofline 判断这一步卡在哪；正文数字是算例，实际收益以你在自己机器上的测量为准。6 章分工：第 19–21 章写 kernel，第 22–23 章读工业实现，第 24 章接回引擎。
+> 本部分的深度标准：优化做成阶梯，每一步先用 `ncu` 定位瓶颈，再用 Roofline 判断这一步卡在哪；正文数字是算例，实际收益以你在自己机器上的测量为准。6 章分工：第 19–22 章写和验证 kernel，第 23 章读工业实现，第 24 章接回引擎。
 
 ## 为什么单开一个模块
 
-M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。M2 的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用 M0 的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，**“接入引擎”这一步目前没有现成课程**，是本模块要补的关键一节。
+M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。M2 的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用 M0 的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，本模块复用官方教程和插件接口，将“接入引擎、证明命中、验证端到端收益”接成一条实验路径。
 
-## 第 19 章 · CUDA 优化阶梯：一个 GEMM，四次提速
+## 第 19 章 · GEMM 的四版实现：优化、计时与归因
 
-一个 4096×4096 的 FP32 矩阵乘法（GEMM，General Matrix Multiplication，通用矩阵乘法：C = A×B 的矩阵乘法）在 A100 上有一对相差很远的数。按 FP32 峰值 19.5 TFLOPS（每秒 19.5 万亿次浮点运算）算，137.4 GFLOP（十亿次浮点运算）只要 7 毫秒；按最朴素的写法，每个输出元素都把 A 的一行和 B 的一列从显存重新读一遍，549.8 GB 的搬运量在 2 TB/s 带宽下要 274 毫秒。39 倍的差距不在乘加次数上——无论怎么优化，137.4 GFLOP 都不会少——而在数据怎么搬、指令怎么发、延迟怎么藏。本章把同一个 GEMM 写四版：朴素版、shared memory 分块版、向量化访存版、占用率调优版。每版只比上一版多改一个变量；先用 ncu 读出瓶颈，再改，再测，最后把点标回 Roofline。
+一个 4096×4096 的 FP32 矩阵乘法（GEMM，General Matrix Multiplication，通用矩阵乘法：C = A×B 的矩阵乘法）在 A100 上有一对相差很远的数。按 FP32 峰值 19.5 TFLOPS（每秒 19.5 万亿次浮点运算）算，137.4 GFLOP（十亿次浮点运算）只要 7 毫秒；若把最朴素写法的每个逻辑读取都计成 HBM 访问，549.8 GB 在 2 TB/s 下对应 274 毫秒；真实的合并请求与缓存会改变实际字节，这不是朴素 kernel 的实测预测。39 倍的差距不在乘加次数上——无论怎么优化，137.4 GFLOP 都不会少——而在数据怎么搬、指令怎么发、延迟怎么藏。本章把同一个 GEMM 写四版：朴素版、shared memory 分块版、向量化访存版、占用率调优版。每版只比上一版多改一个变量；先用 ncu 读出瓶颈，再改，再测，最后把点标回 Roofline。
 
 **本章目标。** 写出四个版本的 GEMM，用 GPU 事件测出各自的耗时与实测算力，用 ncu 的 SM%、DRAM% 与占用率说明每一版卡在哪，把四个点标在同一张 Roofline 图上，并填出一张每一步都有依据的阶梯表；测不到的格子写“待补测”，不写推测值。
 
-数字分两类。按 A100 80GB 公开规格（FP32 19.5 TFLOPS、显存带宽约 2 TB/s）算出来的是预期值，正文标“算例”；你在自己机器上测出来的是实测，填进表里。换一张卡，预期值要重算——40GB A100 的带宽约 1.6 TB/s，H100 的算力与带宽又是另一组数——方法不变。本章 kernel 用 C++ 写法给出，用来说明结构与每一步改哪一行，没有在本书环境编译验证；启动配置与编译选项（例如 `-arch=sm_80`）依赖你的卡，标“示意”的片段只保留关键行。
+数字分两类。按 A100 80GB 公开规格（FP32 19.5 TFLOPS、显存带宽约 2 TB/s）算出来的是预期值，正文标“算例”；你在自己机器上测出来的是实测，填进表里。换一张卡，预期值要重算——40GB A100 的带宽约 1.6 TB/s，H100 的算力与带宽又是另一组数——方法不变。完整参考入口是 [gemm_bench.cu](examples/gemm_bench.cu)：四个 kernel（含 `gemm_tiled_2x2`）、显存分配、固定种子初始化、CPU 参考校验、错误检查和 CUDA Events 都在同一份源码中。它没有在本轮 CUDA 环境编译或运行；`sm_80` 是这里按 A100 取的目标，不能当作任意 GPU 的编译配置；换卡按真实 compute capability 修改。先运行小矩阵全量校验和非整除边界，再计时大矩阵：
+
+```bash
+# 以下在已具备 CUDA Toolkit 与 NVIDIA GPU 的机器执行，本轮未执行。
+nvcc -O3 -std=c++17 -arch=sm_80 docs/modules/M2-operators/examples/gemm_bench.cu -o /tmp/gemm_bench
+/tmp/gemm_bench --m 128 --n 128 --k 128 --check-only
+/tmp/gemm_bench --m 130 --n 127 --k 35 --check-only
+/tmp/gemm_bench --m 4096 --n 4096 --k 4096 --warmup 5 --repeat 20
+```
+
+日志记录设备、runtime、形状、种子、容限、校验范围和计时统计。小规模逐元素校验，大规模为边角与固定随机位置抽查，并扫描全部输出是否有限；`validation=sampled` 不等于全矩阵已验证。事件计时不包含分配、初始化和 CPU 校验，采用热缓存连续启动的均值。无 CUDA 时可运行仓库的标准库回归，检查护栏和源码契约，但不得据此填写 GPU 实测列。
 
 ### 第 1 节 · GPU 执行模型与第一个 kernel
 
@@ -71,7 +81,7 @@ __global__ void vec_add(const float* A, const float* B, float* C, int n) {
 
 怎么知道算对了？用 CPU 参考实现逐项对照：向量加法是一次 IEEE 加法，GPU 与 CPU 对同样的两个数做同一次加法，结果应当逐元素相等，差一个也不算通过。以后每个 kernel 都配一个这样的参考实现：GPU kernel 的错常是“算得很快，结果不对”，速度数字会骗人，逐项对照不会。参考实现用最直白的写法，不求快，只求对；19.3 改分块、19.4 改向量化之后，第一件事都是重新跑它。
 
-GEMM 的对照要松一档：CPU 参考实现与 GPU 的累加顺序、FMA（fused multiply-add，乘加融合：一次舍入完成 a×b+c）可能不同，K = 4096 的累加会出现末位差异。先在小尺寸（比如 512×512）上逐元素比，再在 4096 上抽几行几列比，阈值取相对误差 1e-4 量级，先抓漏算、错块这类结构错误；要求逐 bit 相等，只会把正确实现判错。
+GEMM 的对照要松一档：CPU 参考实现与 GPU 的累加顺序、FMA（fused multiply-add，乘加融合：一次舍入完成 a×b+c）可能不同，K = 4096 的累加会出现末位差异。先在小尺寸（比如 512×512）上逐元素比，再在 4096 上抽几行几列比，以完整入口的 `atol=1e-3, rtol=1e-4` 检查这组固定随机 FP32 输入，并记录阈值；近零输出不能只用相对误差。先抓漏算、错块这类结构错误；要求逐 bit 相等，只会把正确实现判错。
 
 做 GPU Puzzles 的 Puzzle 1（Map）、Puzzle 2（Zip）、Puzzle 3（Guards）：一个线程负责一个元素，线程数多于元素数时加边界判断，验收都是 `problem.check()`。这三题练的是本节的两件事：下标公式与边界判断。环境上，Numba 内置的 CUDA 目标已弃用，后续开发移到 NVIDIA 的 `numba-cuda` 包；以 GPU Puzzles 仓库自己锁定的 numba 版本与安装说明为准，不要自行升级——升级会把一个验证过的组合换成一个没人验证过的组合。
 
@@ -79,7 +89,7 @@ GEMM 的对照要松一档：CPU 参考实现与 GPU 的累加顺序、FMA（fus
 
 ### 第 2 节 · 搭测量台：计时、Roofline、第一次 ncu 读数
 
-优化之前先把尺子做好。没有尺子，“快了 3 倍”没法验证，也判断不了下一步该改哪里。尺子有三件：计时、上限、定位。计时用 GPU 事件，取 kernel 在 GPU 上真正跑的时间；上限用 Roofline 算，先写出这一版最多能有多快；定位用 ncu，读出瓶颈落在算力、带宽还是延迟上。这一章要量四个版本：朴素版、分块版、向量化版、占用率调优版。每次只改一个变量，让对应的那个数动：分块看 DRAM%，向量化看 load 指令数，占用率看活跃 warp 数。图 19-1 是这四级台阶的示意，柱高只表示方向，不是实测值。
+优化之前先把尺子做好。没有尺子，“快了 3 倍”没法验证，也判断不了下一步该改哪里。尺子有三件：计时、上限、定位。计时用 GPU 事件，取 kernel 在 GPU 上真正跑的时间；上限用 Roofline 算，先写出这一版最多能有多快；定位用 ncu，读出瓶颈落在算力、带宽还是延迟上。这一章要量四个版本：朴素版、分块版、向量化版、占用率调优版。每次只改一个优化因素，并检查它对应的证据：分块看请求与实际字节，向量化看生成的 load 指令，线程粗化看资源、就绪 warp 和耗时；百分比不必按预设方向变化。图 19-1 是这四级台阶的示意，柱高只表示方向，不是实测值。
 
 #### 待测对象：朴素版
 
@@ -95,7 +105,7 @@ __global__ void gemm_naive(const float* A, const float* B, float* C, int M, int 
     C[row * N + col] = acc;
 }
 
-// 启动：block = (16, 16)，grid = (N / 16, M / 16)
+// 启动：block = (16, 16)，grid = ((N + 15) / 16, (M + 15) / 16)
 ```
 
 读这段先看循环体：每个线程算一个输出，循环跑 K = 4096 次，每次两条 load、一次乘加。一个线程发 2 × 4096 = 8192 条 load；16,777,216 个线程合计 137,438,953,472 条，约 1374 亿条。每条 load 搬 4 字节，就是 549.8 GB——和 19.2 后面先算的那笔搬运量是同一笔账的两种写法。`acc` 在寄存器里累加，只有最后写回一次；朴素版做对的一件事是输出只写一次，重复的全是读。
@@ -134,49 +144,49 @@ float ms = ms_total / 20.f;
 
 M = N = K = 4096，FP32。计算量：2 × 4096³ = 137,438,953,472 FLOP ≈ 137.4 GFLOP。这个数不随优化改变，是全章的分母。
 
-搬运量（朴素版）：每个输出元素读 A 的一行 4096 个 float 和 B 的一列 4096 个 float，8192 × 4 B = 32 KB；16,777,216 个元素 × 32 KB = 549,755,813,888 B ≈ 549.8 GB。这份账按 global load 计，没有扣掉 L2 缓存命中：A 的同一行、B 的同一列会被重复读，其中一部分可能留在 L2（GPU 芯片上的二级缓存，容量比 shared memory 大、比显存小）里。L2 接住得越多，真正走 HBM 的字节越少，后面的预期值就越偏保守。
+搬运量（朴素版）：每个输出元素读 A 的一行 4096 个 float 和 B 的一列 4096 个 float，8192 × 4 B = 32 KB；16,777,216 个元素 × 32 KB = 549,755,813,888 B ≈ 549.8 GB。这份账是线程发出的逻辑读取字节和，不是 DRAM 计数；同一 warp 的重复地址合并、L1/L2 命中都可能减少实际搬运：A 的同一行、B 的同一列会被重复读，其中一部分可能留在 L2（GPU 芯片上的二级缓存，容量比 shared memory 大、比显存小）里。L2 接住得越多，真正走 HBM 的字节越少，后面的预期值就越偏保守。
 
 算术强度 = 137.4 GFLOP ÷ 549.8 GB = 0.25 FLOP/字节。每搬 1 字节只做 0.25 次浮点运算，落在带宽那一侧。
 
-A100 80GB 的公开规格：FP32 19.5 TFLOPS，HBM（High Bandwidth Memory，高带宽显存：GPU 的主存，A100 80GB 用 HBM2e）带宽约 2 TB/s。脊点 = 19,500 ÷ 2,000 = 9.75 FLOP/字节；0.25 远低于脊点，所以上界由带宽定：0.25 × 2,000 GB/s = 500 GFLOP/s（0.5 TFLOPS）。按这个速度，137.4 GFLOP 要 274 ms。这是算例，不是实测；实测比它慢是常态。
+A100 80GB 的公开规格：FP32 19.5 TFLOPS，HBM（High Bandwidth Memory，高带宽显存：GPU 的主存，A100 80GB 用 HBM2e）带宽约 2 TB/s。脊点 = 19,500 ÷ 2,000 = 9.75 FLOP/字节；0.25 远低于脊点，在“每个逻辑读取都穿过 HBM”的假设下，参考线是 0.25 × 2,000 GB/s = 500 GFLOP/s（0.5 TFLOPS），对应 274 ms。这是无缓存/合并复用的算例，不是朴素 kernel 的真实 Roofline 上界；正式标点用实际 DRAM 字节重算算术强度。
 
-实测与预期对不上时，先查三件事：计时有没有漏同步；编译器有没有把循环优化掉（结果没被使用）；L2 是否吃掉了重复读。第三条会让实测超过这个预期，说明真实 HBM 搬运量比 549.8 GB 小，有效算术强度比 0.25 高，不是测量错了。举个具体的对照：548 ms 对应 251 GFLOP/s，是 500 GFLOP/s 的一半，说明带宽只用了一半；100 ms 对应 1374 GFLOP/s，是预期的 2.7 倍，带宽给不出这个速度，要么计时错了，要么 L2 吃掉了大部分重复读。
+实测与预期对不上时，先查三件事：计时有没有漏同步；编译器有没有把循环优化掉（结果没被使用）；L2 是否吃掉了重复读。第三条会让实测超过这个预期，说明真实 HBM 搬运量比 549.8 GB 小，有效算术强度比 0.25 高，不是测量错了。举个具体的对照：548 ms 对应 251 GFLOP/s，但没有实际 DRAM 字节，不能据此声称带宽用了几成；100 ms 对应 1374 GFLOP/s，超过无复用参考线，先核对计时、合并请求与缓存命中，再用 DRAM 计数重算横轴。
 
 #### 定位：ncu 的两个数
 
-ncu 回答的是“这个 kernel 为什么慢”，不回答“哪个 kernel 慢”；后者是第 3 章 `torch.profiler` 的活。先看 SpeedOfLight 一节的 Compute (SM) 与 Memory 两个百分比：前者是 SM 吞吐占峰值的比例（下称 SM%）；后者取 L1、L2、DRAM 里最紧的一项。显存这一侧要单独确认，用 `dram__throughput` 取 DRAM%（显存带宽占峰值的比例）。三个指标一条命令就能取到：
+ncu 回答的是“这个 kernel 为什么慢”，不回答“哪个 kernel 慢”；后者是第 3 章 `torch.profiler` 的活。先看 SpeedOfLight 一节的 Compute (SM) 与 Memory 两个百分比：前者是多个 SM 子流水的吞吐汇总（下称 SM%，不是 FP32 算力利用率）；后者取 L1、L2、DRAM 里最紧的一项。显存这一侧要单独确认，用 `dram__throughput` 取 DRAM%（显存带宽占峰值的比例）。三个指标一条命令就能取到：
 
 ```bash
-ncu --section SpeedOfLight --section Occupancy --kernel-name regex:gemm ./gemm_bench
+ncu --section SpeedOfLight --section Occupancy --kernel-name regex:gemm /tmp/gemm_bench --m 4096 --n 4096 --k 4096 --version tiled
 
 ncu --metrics sm__throughput.avg.pct_of_peak_sustained_elapsed,\
 dram__throughput.avg.pct_of_peak_sustained_elapsed,\
 sm__warps_active.avg.pct_of_peak_sustained_active \
-    --kernel-name regex:gemm ./gemm_bench
+    --kernel-name regex:gemm /tmp/gemm_bench --m 4096 --n 4096 --k 4096 --version tiled
 ```
 
 三个区间对照着看：
 
-- SM% 高（>60）、DRAM% 低（<40）→ 计算受限：SM 一直在算，数据供得上。
-- SM% 低、DRAM% 高（>70）→ 带宽受限：数据通道满了，SM 在等数据。
-- 两个都低（<40）→ 延迟受限：SM 既没算也没搬，在等依赖、同步或驻留 warp 不够。
+- SM% 高、DRAM% 低：候选是计算或指令发射瓶颈，用 ComputeWorkloadAnalysis 确认 FP32、LSU 等哪条子流水紧。
+- DRAM% 高：候选是 HBM 带宽瓶颈，再核对读写字节和耗时。
+- 两个都低：检查网格覆盖、尾波、就绪 warp、依赖和同步，不直接判定为延迟受限。
 
-只看一个数会误判：DRAM% 高可能是带宽真跑满，也可能是 kernel 偶尔访存一次、每次都把带宽打满；SM% 低可能是等数据，也可能是 warp 不够。两个数拼在一起才有诊断价值。60、40、70 是经验分界，读数看的是哪边明显高、哪边明显低。
+这两个数只用于初筛，不能唯一定位原因。特别是 `sm__throughput` 会取子指标中的高项，LSU 忙也可能推高 SM%；诊断需同时看字节、缓存、SchedulerStats 的 Active/Eligible/Issued warps 和 stall 原因。指标后缀与含义按[Nsight Compute Profiling Guide](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#sections-and-rules)核对。
 
-朴素版的预期是 DRAM% 高、SM% 低。分块之后 DRAM% 应明显下降；没降说明分块没生效，先查 tile 索引、同步与 grid 覆盖，不要接着调别的旋钮。每次改动都要有它负责的那个数：分块负责 DRAM%，向量化负责 load 指令数（MemoryWorkloadAnalysis 里的 global load 指令与请求数），占用率负责 `sm__warps_active`。数没动，优化就没命中瓶颈。
+分块首先减少 global load 的重复请求，再同时比较 DRAM 读写字节、缓存命中和 Events 耗时。字节数与时间一起下降时，DRAM% 不降甚至升高也可能说明优化有效。向量化核对生成指令与请求；线程粗化核对资源、驻留和就绪 warp。计数与耗时共同支持，才判断优化是否命中瓶颈。
 
 ncu 的操作细节：
 
-- `--launch-skip 5 --launch-count 3` 跳过热身：模块加载、可能的 JIT（即时编译）编译、冷缓存、GPU 时钟爬升只污染前几次。
+- `--launch-skip 6 --launch-count 3` 可跳过完整 GEMM 入口的一次校验启动与 5 次热身（限定一个 `--version`）；计数随入口结构变化，不能机械沿用。
 - ncu 会读硬件计数器并重放 kernel，报告里的耗时不能当性能数字；性能数字用 Events 测，ncu 只用来定位（第 3 章讲过同一条口径）。
 - 如果你先用第 3 章的 `torch.profiler` 给四个版本排名，按 `Self CUDA` 排，不要按 `CUDA total`：后者把子算子的时间重复计进去。
 - ncu 需要访问 GPU 性能计数器的权限。Linux 上普通用户默认没有；容器与云主机常默认禁用（驱动参数限制或容器权限不足），典型报错是 `ERR_NVGPUCTRPERM`。解决要管理员在驱动层放开计数器访问，具体做法随驱动版本与发行版不同，按 Nsight Compute 文档的权限说明操作；容器里还要确认容器被授予了对应能力。跑不起来先查权限与容器配置，再查命令，最后才怀疑工具。
 
-每版的记录固定为五项：实测耗时、实测算力、占本行 Roofline 上界的比例、ncu 的 SM%/DRAM%、一句话瓶颈判断。五项齐了，才进入下一节。
+每版记录耗时、实测算力、实际字节/缓存、Roofline 横轴来源、SM%/DRAM% 和就绪/stall 证据，再写一句瓶颈判断。计时与 profiler 分开采；未知指标保留待补测，不据两个百分比强行归因。
 
 ### 第 3 节 · 第一步：Shared memory 分块
 
-19.2 的读数是 DRAM% 高、SM% 低。原因不在算，在重复读：A 的同一个元素被 N = 4096 个输出元素各读一次，B 的同一个元素被 M = 4096 个输出元素各读一次。一个元素只参与 4096 次乘加，却被从显存读了 4096 次；理想情况是读一次、在片上复用 4096 次。分块要追的就是这 4096 倍里的大部分。
+若 19.2 的实测显示访存或 load 发射紧张，先检查重复读：A 的同一个元素被 N = 4096 个输出元素各读一次，B 的同一个元素被 M = 4096 个输出元素各读一次。一个元素只参与 4096 次乘加，却被从显存读了 4096 次；理想情况是读一次、在片上复用 4096 次。分块要追的就是这 4096 倍里的大部分。
 
 把 A、B 各切 32×32 的小块（tile），搬进 shared memory，在片上算部分和。一个 tile 里的元素被同一 block 的 32 个输出元素复用，global memory 的读取次数除以 32：搬运量 = 2 × 4096² × (4096 ÷ 32) × 4 B = 17,179,869,184 B ≈ 17.18 GB，是 549.8 GB 的 1/32。计算量不变，仍是 137.4 GFLOP。
 
@@ -216,9 +226,9 @@ gemm_tiled<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
 
 搬运量降了，为什么快？shared memory 在片上：从 global memory 读一次要几百个周期，从 shared 读只要几十个。分块没有减少乘加，减少的是等数据的时间；算术强度从 0.25 涨到 8，涨的正是“每次搬运能供多少次乘加”这个比值。
 
-先算，再测。算术强度 = 137.4 GFLOP ÷ 17.18 GB ≈ 8 FLOP/字节，也等于 BLOCK ÷ 4 = 32 ÷ 4：一个 float 占 4 字节，BLOCK 个元素的复用摊到每个字节上，就是 BLOCK/4。上界 = min(8 × 2,000, 19,500) = 16,000 GFLOP/s = 16 TFLOPS，预期至少 137.4 ÷ 16,000 秒 = 8.59 ms，比朴素版的 274 ms 快 32 倍。分块版的算术强度 8 仍低于脊点 9.75，所以这一版还在带宽斜线上；要让 AI 越过脊点，BLOCK 至少 39，取 2 的幂就是 64——那是 19.5 的取舍。
+先算，再测。算术强度 = 137.4 GFLOP ÷ 17.18 GB ≈ 8 FLOP/字节，也等于 BLOCK ÷ 4 = 32 ÷ 4：一个 float 占 4 字节，BLOCK 个元素的复用摊到每个字节上，就是 BLOCK/4。在无缓存复用假设下，参考线 = min(8 × 2,000, 19,500) = 16 TFLOPS，对应 8.59 ms；274/8.59≈32 只是该假设的比值，不是四版实测提速。在这组无缓存复用假设下，算术强度 8 低于脊点 9.75，参考点在带宽斜线上；要让 AI 越过脊点，BLOCK 至少 39，取 2 的幂就是 64——那是 19.5 的取舍。
 
-这里写的“至少 8.59 ms”是按 global load 字节数算的预期：L2 若接住一部分重复读，真实 HBM 搬运量会更小，实测可能低于 8.59 ms。读到比 8.59 ms 还快的数，先确认计时与 L2 命中，再下结论。
+8.59 ms 是按逻辑 global load 字节数算的参考，不是有缓存 kernel 的时间下界：L2 若接住一部分重复读，真实 HBM 搬运量会更小，实测可能低于 8.59 ms。读到比 8.59 ms 还快的数，先确认计时与 L2 命中，再下结论。
 
 每个 block 用 8 KB shared（两块 32×32×4 B）。A100 每个 SM 有 164 KB shared，光按 shared 算能放 164 ÷ 8 = 20.5，向下取整 20 个 block。这只是 shared 一项的上限：这个 kernel 的 block 是 1024 个线程，A100 每 SM 最多 2048 个线程，线程数一项只允许 2 个 block；寄存器够不够还要看编译器给的数。20 个 block 在这里用不上，19.5 会按线程、寄存器与 shared 三项资源取最小，block 数还有一道单独的上限。
 
@@ -226,13 +236,13 @@ gemm_tiled<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
 
 shared memory 的访问顺序也有讲究：`As[ty][k]` 在一个 warp 内是同一个地址（这个 warp 的 ty 相同、tx 从 0 到 31），硬件一次广播满足；`Bs[k][tx]` 的地址随 tx 连续变化，32 个线程落在 32 个不同 bank 上。广播与并行都不冲突；把 B 的 tile 转置存放，就会撞 bank——19.4 用一个转置布局把冲突造出来，再用 padding 修掉。
 
-跑计时 + ncu，DRAM% 应明显下降、SM% 上升。把两个点标到同一张 Roofline 图上：朴素版在左下（AI 0.25、算力低于 500 GFLOP/s），分块版向右（AI 8）、向上（算力向 16 TFLOPS 靠近）。如果只向右不向上，说明搬运省了、执行没跟上，19.4 与 19.5 处理；如果 DRAM% 没降，先查分块是否真的生效。
+跑计时与 ncu，核对逻辑请求是否减少、实际 DRAM 字节和耗时怎样变化。0.25→8 是本节无缓存复用的算例横轴；正式 Roofline 用实测对应层级的字节。请求少了但耗时没改善时，再检查执行与同步；DRAM% 没降本身不是分块失效证据。
 
 ### 第 4 节 · 第二步：向量化访存与 bank conflict
 
-分块之后，瓶颈换了一个形态。搬运总量降到 17.18 GB，HBM 这条路不那么堵了；但每个线程每次还是只读 4 字节，数据总量小了，取数据的动作没少。看 ncu 的 MemoryWorkloadAnalysis：如果 global load 指令数与 L1 吞吐仍然很高，而 DRAM% 已经下来，问题就在指令数，不在带宽。
+分块改变逻辑请求与片上复用，但是否转移瓶颈要测。若 MemoryWorkloadAnalysis 显示 load 发射或 L1 路径仍紧张，而 DRAM 字节/耗时已改变，可将指令压力列为候选，再用生成指令、SchedulerStats 和同口径耗时验证，不从 DRAM% 直接下结论。
 
-SM 每个周期能发的指令数有限。一条 4 字节 load 和一条 16 字节 load 各占一个发射槽；同样搬 16 字节，标量要 4 条指令，`float4` 只要 1 条。指令数降到 1/4，省出来的是发射槽和等待次数：每条 load 发出后都要等数据回来，4 条是 4 次等待，1 条是 1 次。这个瓶颈在 DRAM% 上看不出来，要靠 MemoryWorkloadAnalysis 的指令与请求计数。
+SM 每个周期能发的指令数有限。一条 4 字节 load 和一条 16 字节 load 各占一个发射槽；同样搬 16 字节，标量要 4 条指令，`float4` 只要 1 条。指令数降到 1/4，省出来的是发射槽和等待次数：独立 load 的等待可以重叠，不能把四条指令的延迟机械相加；指令减少是否缩短等待要看生成指令和调度器证据。这个瓶颈在 DRAM% 上看不出来，要靠 MemoryWorkloadAnalysis 的指令与请求计数。
 
 先分清两件事。分块版的标量 load 已经是合并的：一个 warp 的 32 个线程读 32 个连续 float，正好 128 字节，硬件一次取回。向量化改的不是合并，是每条指令搬多少字节。合并解决“一次取多少连续字节”，向量化解决“一条指令取多少字节”；前者已经满足，后者还能改 4 倍。
 
@@ -282,7 +292,7 @@ global 一侧看合并与指令数，shared 一侧看 bank。两者都对的布�
 
 占用率是一个 SM 上同时驻留的 warp 数，占它最多能驻留的 warp 数的比例。warp 等访存时被挂起，调度器切到另一个就绪的 warp 继续发指令；驻留的 warp 越多，越容易找到能发的。占用率低不一定慢，但低到没有备选时，一个 warp 停，SM 就空着。
 
-ncu 的 Occupancy 一节给两个数：理论占用率（由寄存器、shared memory、block 大小算出的上限）与实测占用率（`sm__warps_active.avg.pct_of_peak_sustained_active`）。理论低，问题在资源用量；理论高、实测低，问题在延迟隐藏不足：等访存时没有别的 warp 可切，或者同步太频繁。先看理论，再看实测，两个数一减，问题定位在哪一层就清楚了。
+ncu 的 Occupancy 给理论资源上限与实测驻留比例（`sm__warps_active.avg.pct_of_peak_sustained_active`）。等待访存或 barrier 的 warp 仍然驻留，因此 occupancy 不是就绪度。理论高、实测低时先检查网格大小、尾波和负载不均衡；Eligible warps 少、issue 空槽多时才沿依赖与 stall 查延迟隐藏。
 
 以 19.3 的 kernel 为例算占用率的上限。block 1024 个线程（32 个 warp），每 block 8 KB shared。A100 每个 SM：
 
@@ -293,41 +303,41 @@ ncu 的 Occupancy 一节给两个数：理论占用率（由寄存器、shared m
 
 四项取最小是 2 个 block，也就是 64 个 warp，理论占用率 100%——前提是寄存器不超过 32 个/线程。shared 允许的 20 个 block 在这里完全用不上；把“164 ÷ 8 = 20 个 block”当成占用率上限，是这类 kernel 最常见的算错。最终占用率取线程、寄存器、shared、block 数四项限制里最小的那个，ncu 的 Occupancy 一节会直接给出是哪一项。
 
-1024 线程的 block 粒度太粗：寄存器超一点，整块从 2 个掉到 1 个，占用率从 100% 掉到 50%。常见改法是线程粗化：block 改成 16×16 = 256 个线程，每个线程算 2×2 = 4 个输出，tile 仍是 32×32、shared 仍是 8 KB。线程上限变成 2048 ÷ 256 = 8 个 block；寄存器若给 40 个/线程，65,536 ÷ (256 × 40) = 6.4，取 6 个 block（1536 个线程，75%）。`__launch_bounds__(256, 8)` 让编译器把寄存器压到 32 个以内，换 8 个 block（100%），代价可能是 spill。
+1024 线程的 block 粒度太粗：寄存器超一点，整块从 2 个掉到 1 个，占用率从 100% 掉到 50%。常见改法是线程粗化：block 改成 16×16 = 256 个线程，每个线程算 2×2 = 4 个输出，tile 仍是 32×32、shared 仍是 8 KB。线程上限变成 2048 ÷ 256 = 8 个 block；寄存器若给 40 个/线程，65,536 ÷ (256 × 40) = 6.4，取 6 个 block（1536 个线程，75%）。`__launch_bounds__(256, 8)` 可让编译器按至少 8 个 block 的目标调整寄存器上限，但不是实际驻留或加速的保证；需同时检查 shared、寄存器分配粒度和 spill。
 
 ```cpp
 // 示意：tile 仍是 32×32，block 改成 16×16，每个线程算 2×2 个输出
-// gemm_tiled_2x2 指线程粗化后的 kernel
+// gemm_tiled_2x2 的完整定义见本章入口 examples/gemm_bench.cu
 dim3 block(16, 16);          // 256 个线程
-dim3 grid(N / 32, M / 32);   // grid 不变
+dim3 grid((N + 31) / 32, (M + 31) / 32);   // tile 不变，尾块仍需覆盖
 
 int blocks = 0;
 cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, gemm_tiled_2x2, 256, 0);
 ```
 
-`__launch_bounds__` 是给编译器的承诺：这个 kernel 每个 block 最多 256 个线程、每个 SM 至少驻留 8 个 block。编译器据此把寄存器压到 32 个以内；压不下来就把变量 spill 到 local memory（物理位置在显存里，走 L1/L2），读一次要几十到几百个周期。占用率涨了、耗时也涨了，这次调整就是失败的，要改回去。调优的目标是耗时下降，占用率只是中间指标。
+`__launch_bounds__` 是给编译器的承诺：这个 kernel 每个 block 最多 256 个线程、以每 SM 驻留 8 个 block 作为寄存器预算目标，而非实际驻留保证。编译器据此调整寄存器预算，实际用量需读编译输出；过紧的预算可能使变量 spill 到 local memory（物理位置在显存里，走 L1/L2），读一次要几十到几百个周期。占用率涨了、耗时也涨了，这次调整就是失败的，要改回去。调优的目标是耗时下降，占用率只是中间指标。
 
 别为了占用率缩小 tile。算术强度 = BLOCK ÷ 4：BLOCK 从 32 缩到 16，AI 从 8 掉到 4，上界从 16 TFLOPS 掉到 8 TFLOPS，预期时间从 8.6 ms 涨到 17.2 ms；占用率涨了，上界掉了。BLOCK 加到 64，AI 到 16，越过脊点 9.75，上界变成算力平线 19.5 TFLOPS；但每 block shared 变成 64×64×4×2 = 32 KB，光 shared 一项只放 164 ÷ 32 = 5 个 block，每个线程要算的输出数也跟着涨，寄存器压力上升。哪一项先撞墙，用 occupancy API 与 ncu 看，不要按单项资源下结论。
 
-阶梯总表是本章的交付物。`算术强度`与`上界`按正文算例填好；`实测`各列留给你，没测就写“待补测”。不要把别人的数抄进来，也不要按公式反推耗时冒充实测。
+阶梯总表是本章的交付物。`逻辑算术强度`与`无复用参考线`按算例列出；实际 DRAM 横轴和 Roofline 需另测，`实测`各列留给你，没测就写“待补测”。不要把别人的数抄进来，也不要按公式反推耗时冒充实测。
 
-| 版本 | 算术强度 (FLOP/B) | Roofline 上界（算例） | 实测耗时 | 实测算力 | 占上界 | ncu SM% / DRAM% | 瓶颈判断 |
+| 版本 | 算术强度 (FLOP/B) | 无缓存复用参考线（算例） | 实测耗时 | 实测算力 | 占实测 Roofline（另测字节） | ncu SM% / DRAM% | 瓶颈判断 |
 |---|---|---|---|---|---|---|---|
 | 朴素版 | 0.25 | 500 GFLOP/s（274 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 | 分块版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 | 向量化版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 | 占用率调优版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 
-表怎么读。先看算术强度：只有分块改了它（0.25 → 8），向量化与占用率都没改——这两步不改变搬运量与计算量，算术强度自然还是 8。再看上界：每行的上界不同，占上界那一列要按本行的上界算，不能跨行比百分比；跨行比的是耗时与实测算力。ncu 两列是瓶颈判断的证据，判断与证据对不上，这一行就没写完。
+表怎么读。先看算术强度：只有分块改了它（0.25 → 8），向量化与占用率都没改——这两步不改变搬运量与计算量，算术强度自然还是 8。再看上界：表内参考线不能当成带缓存的实测 HBM 上界；“占实测 Roofline”要以本次实际字节/缓存条件另算。横向比较耗时与实测算力，瓶颈判断还需就绪/stall 证据，不能只靠两个百分比。
 
-哪一行的数没动，说明那一步没命中瓶颈。分块后 DRAM% 没降，先查 tile 索引、同步与 grid 覆盖；向量化后 load 指令数没降，先查 `float4` 是否真的生成（对齐、`reinterpret_cast`、K 的倍数）；调占用率后活跃 warp 没涨，先看是哪项资源卡住、有没有 spill。代码查过再继续加旋钮；顺序反了，后面的数会互相污染。
+请求、资源或耗时没有按预期变化时，用证据修正假设。分块查索引、实际字节与缓存；向量化查 `float4` 是否生成及尾块回退；粗化查寄存器、spill、就绪 warp 与耗时。活跃 warp 不涨或 DRAM% 不降，都不能单独否定优化。
 
 本章的检查清单，四条：
 
-1. 每个版本先与 CPU 参考实现对过，再计时；向量加法要求逐元素相等，GEMM 用相对误差 1e-4 量级。
+1. 每个版本先与 CPU 参考实现对过，再计时；向量加法要求逐元素相等，GEMM 按记录的绝对与相对容限检查，先小规模全量，再说明大规模抽查范围。
 2. 每次只改一个变量；改完回到 ncu，看这个变量负责的计数动了没有。
 3. 计时用 CUDA Events，`cudaEventSynchronize` 之后才读；ncu 的耗时不当性能数字。
-4. 表里没测的格子写“待补测”；四个版本各用一句话说清瓶颈，且这句话要有 ncu 读数撑着。
+4. 未测格子写“待补测”；实测判断需同时有字节/缓存、就绪或 stall 与耗时证据，允许负面结果。
 
 四个版本量的是三件不同的事：分块省重复搬运（549.8 GB → 17.18 GB），向量化省访存指令（load 指令降到 1/4），占用率省延迟暴露（让 SM 在等数据时有别的 warp 可发）。三者都不改 137.4 GFLOP 的计算量。Roofline 说每一版的上界在哪，ncu 说实测离上界差在哪个资源；把这两个数放进同一行，优化才不是碰运气。下一章用 Triton 重写同一套分块，看哪些旋钮被编译器接走、哪些还得自己管。
 
@@ -345,7 +355,7 @@ Triton 换掉的就是这一层：你写一个程序处理一整块数据，线�
 
 ### 第 1 节 · Triton 语法与 block 编程模型
 
-eager 模式的代价先算成一笔账。取 N = 10⁶ 个 fp32 元素，一个张量占 10⁶ × 4 字节 = 4 MB。写 `y = relu(x + 1)`：eager 模式先算加法，读 4 MB、写 4 MB；再算 relu，读 4 MB、写 4 MB，一共 16 MB。融合成一个 kernel 之后只读 4 MB、写 4 MB，一共 8 MB，访存减半。加法和 relu 各做 10⁶ 次，一次没少——省掉的是中间结果在显存上的一趟往返，外加一次 kernel 启动。8 MB 是下限，不含中间张量的分配与启动收尾的开销；真实差距只会比一倍大，不会更小。
+eager 模式的代价先算成一笔账。取 N = 10⁶ 个 fp32 元素，一个张量占 10⁶ × 4 字节 = 4 MB。写 `y = relu(x + 1)`：eager 模式先算加法，读 4 MB、写 4 MB；再算 relu，读 4 MB、写 4 MB，一共 16 MB。融合成一个 kernel 之后只读 4 MB、写 4 MB，一共 8 MB，访存减半。加法和 relu 各做 10⁶ 次，一次没少——省掉的是中间结果在显存上的一趟往返，外加一次 kernel 启动。8 MB 是逻辑读写下限，不保证耗时减半。缓存、编译融合、启动与寄存器压力都会改变收益，需与 eager 和引擎内的融合基线分别测量。
 
 Triton 的核心是按 block 编程：一个程序处理一整块数据，对应 CUDA 里的一个线程块（block）。`tl.program_id(0)` 告诉你现在是第几个程序，相当于 `blockIdx.x`；`tl.arange(0, BLOCK)` 生成一块连续下标，相当于把 `threadIdx` 变成向量。CUDA 里每个线程用 `blockIdx.x * blockDim.x + threadIdx.x` 算出一个标量下标；Triton 里 `pid * BLOCK + tl.arange(0, BLOCK)` 是一整块向量下标，这 BLOCK 个元素怎么分给 32 × num_warps 个线程，由编译器决定。
 
@@ -394,7 +404,7 @@ CUDA 与 Triton 的分工可以写成一张表，20.5 的取舍判断就是从�
 | 下标 | 标量 `blockIdx * blockDim + threadIdx` | 向量 `pid * BLOCK + tl.arange(0, BLOCK)` |
 | 线程与访存 | 自己组织、自己同步 | 编译器组织，编译器管搬运与向量化 |
 | 能调的旋钮 | 线程、shared memory、同步、流水线 | BLOCK、num_warps、num_stages、访存顺序 |
-| 够不着的 | —— | warp 级同步、shared memory 精确布局、异步流水线的分工 |
+| 更细的控制 | 可显式指定 | 本章使用标准 `triton.language`；可用布局/同步/流水线 API 取决于版本和后端，不是永久缺失 |
 
 旋钮只有两个是常调的：`BLOCK`（一个程序处理多少元素）与 `num_warps`（一个程序用多少个 warp，blockDim = 32 × num_warps）。BLOCK 越大，每程序要扛的寄存器越多，压不住就 spill 到 local memory（溢出量实际落在显存里），反而更慢——“BLOCK 越大越快”不成立，快慢要量。`@triton.jit` 的函数编译成机器码，Python 只在编译与启动时跑，kernel 执行时 Python 早就不在路径上，慢的从来不是“Python”这个标签。mask 防的也不只是越界崩溃：写坏邻居张量的尾巴不会立刻报错，只会在很久以后以另一个错误爆出来。
 
@@ -412,7 +422,7 @@ Triton Puzzles 用 Triton 的解释器跑，不需要 GPU：本地设 `TRITON_IN
 
 block 内的树可以拆开看。`tl.sum` 对 1024 个数求和是两两相加的树，每轮减半，log₂ 1024 = 10 轮收完。树怎么排是编译器定的，两个 kernel 的树不一样，FP32 的舍入就不一样——这一条在 20.3 的容限里兑现。
 
-矩阵乘题（Matrix Multiplication，11）用 `tl.dot(a, b)`，两个输入是二维或三维 block（三维时第一维是 batch），内维对齐；这道题用三个 program id 轴分别管 batch、行、列，K 方向以 B_MID 为块循环。`tl.dot` 最终落到 tensor core 的 MMA 指令，MMA 的最小分片是 16 行 × 8 列这个量级（Ampere 上 fp16 是 `m16n8k16`，fp32/TF32 是 `m16n8k8`），所以 tile 的 M、N、K 一般从 16 起；比这个尺寸小的 `tl.dot` 不会被降到 MMA，要么退回逐元素 FMA 的路径，要么在编译期报错，具体行为以当前版本为准。读入 tile 有两种写法：手动算指针加 mask（`a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak`），每一维的地址都算在明处；`tl.make_block_ptr` 把指针、形状、步长、边界打包，越界由它兜底，写得短。先把一种写通。
+矩阵乘题（Matrix Multiplication，11）用 `tl.dot(a, b)`，两个输入是二维或三维 block（三维时第一维是 batch），内维对齐；这道题用三个 program id 轴分别管 batch、行、列，K 方向以 B_MID 为块循环。`tl.dot` 最终落到 tensor core 的 MMA 指令，MMA 的最小分片是 16 行 × 8 列这个量级（Ampere 上 fp16 是 `m16n8k16`，fp32/TF32 是 `m16n8k8`），所以 tile 的 M、N、K 一般从 16 起；比这个尺寸小的 `tl.dot` 不会被降到 MMA，要么退回逐元素 FMA 的路径，要么在编译期报错，具体行为以当前版本为准。读入 tile 有两种写法：手动算指针加 mask（`a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak`），每一维的地址都算在明处；`tl.make_block_ptr` 打包形状与步长；load/store 仍需显式 `boundary_check`，读尾块还需合适的 `padding_option`，并非建指针就自动防越界。先把一种写通。
 
 1024 × 1024 的矩阵乘可以先手算一遍。取 BLOCK_M = BLOCK_N = BLOCK_K = 32：M、N 各切出 32 块，程序数是 32 × 32 = 1024 个；每个程序沿 K 走 32 步，每步从 A 读一块 32 × 32 × 4 字节 = 4096 字节、从 B 读同样一块，共 8 KB；每程序 32 × 8 KB = 256 KB，1024 个程序合计读约 268 MB。A 与 B 各约 4 MB，各被读了 32 遍——重复读的量由 tile 尺寸决定。算术强度 = 2 × 1024³ FLOP ÷ 268 MB ≈ 8 FLOP/字节，正好等于 BLOCK ÷ 4，与第 19 章分块 GEMM 的算式一致；BLOCK 从 32 提到 64，搬运量减半、算术强度翻到 16。
 
@@ -469,7 +479,8 @@ def softmax(x):
 ```python
 # 在 softmax() 里：n_rows、n_cols、BLOCK、y 都已经算好
 ms = triton.testing.do_bench(
-    lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK)
+    lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK),
+    return_mode="mean",
 )
 ms_median = triton.testing.do_bench(
     lambda: softmax_kernel[(n_rows,)](y, x, x.stride(0), y.stride(0), n_cols, BLOCK=BLOCK),
@@ -536,31 +547,30 @@ __global__ void add_kernel(const float* x, const float* y, float* out, int n) {
 
 翻译不出来的部分，正好是编译器替你决定、也替你锁住的部分：
 
-- shared memory 布局：你能说“这个 block 读哪块”，说不了“这块在 shared memory 里按什么 stride 摆、要不要 padding”。第 19 章用 padding 解 bank conflict，那一步在 Triton 里没有对应的旋钮。
-- warp 级同步与 warp 分工：`__syncwarp()`、`__shfl_sync()` 没有对应写法；归约内部用它们，但不暴露给你。FlashAttention 第 3 代那类“一部分 warp 搬、一部分 warp 算”的排布也没有对应写法（截至当前版本，以文档为准）。
-- 异步拷贝流水线：`cp.async`、TMA、多级 double buffer 由编译器排；`num_stages` 只给级数，哪一级搬哪块、什么时候发出去，不由你定。
-- 寄存器分配：只能通过 BLOCK 与 num_warps 间接影响，没有逐变量的控制。
+- 本章标准 `triton.language` 的布局和同步通常由编译器安排，不能把 CUDA 的逐线程控制原样照搬；需要更细控制时先查当前版本的 Gluon、inline assembly 与后端 API。
+- Triton 3.6.x 的官方 fused-attention 已有 tensor descriptor/TMA 与 `tl.range(..., warp_specialize=...)` 路径。warp specialization 的架构、循环和 dtype 限制需逐项核对；这不意味着所有 FA3 排布都自动可表达。
+- `num_stages` 影响流水线，实际缓冲和发射次序仍要看 lowering；寄存器可通过 block/warps 和部分版本的 `maxnreg` 等参数影响，但不是逐变量分配。
 
 编译产物可以拿来核对这张表。编译后的 kernel 对象带着 IR 与 PTX（`CompiledKernel.asm`，键名随版本变；也可以设 `TRITON_KERNEL_DUMP=1` 把中间产物写到磁盘，环境变量名以当前版本文档为准）。在 PTX 里搜 `ld.global`、`bar.sync`、`mma.sync`，表里的每一行都能落到一条指令上：`tl.load` 是带谓词的 `ld.global`，多 warp 时 `tl.sum` 会引入 block 内的同步（`bar.sync`），`tl.dot` 是 `mma.sync`（Hopper 上是 `wgmma`）。搜不到的行，要么表写错了，要么那一行被优化掉了。
 
 拿 20.3 的 softmax 做这个练习：逐行写它的 CUDA 对应，写不出来的行标出来。标出来的那些，就是 20.5 判断表里“回 CUDA”那一列。
 
-### 第 5 节 · Triton 什么时候够用，什么时候必须回 CUDA
+### 第 5 节 · 按版本与控制需求选择 Triton 或 CUDA
 
-判断标准只有一条，分两面说：优化能用 block 语言说清——“哪个程序读哪块、按什么顺序读”——就留在 Triton；必须说到“哪个 warp 干什么、哪个 bank、流水线的第几级”，就回 CUDA。道理不复杂：Triton 抽象掉的正是线程、warp、shared memory 的管理，而硬件细节的优化要调的恰恰是这些东西，抽象藏住了你需要控制的对象。
+先用 block 语言验证分块和融合，再检查当前 Triton 版本、API 层和目标后端能否表达需要的控制。只有所需布局、同步或流水线在该组合中不可表达、或实测不合算时，才移到 CUDA/CUTLASS；不要把某个教学版本的边界写成语言永久的能力上限。
 
 | 场景 | 选什么 | 原因 |
 |---|---|---|
 | 逐元素、归约、简单融合 | Triton | 优化的全部内容是访存模式，编译器接手了线程与向量化 |
-| 需要精确控制 shared memory 布局或 warp 级同步 | CUDA | 这两样在 Triton 的抽象层里没有对应写法 |
-| 要榨到接近硬件上限（FlashAttention 3 那个级别） | CUDA / CUTLASS | warp specialization 与异步流水线要逐级排布 |
+| 需要精确布局或同步 | 先查 Triton/Gluon 后端支持，再选 CUDA | 以实际控制面和编译产物为准 |
+| warp specialization、TMA、深流水 | Triton 或 CUDA/CUTLASS，按架构与版本选 | 官方支持与实测决定，不由语言标签决定 |
 | 快速验证一个融合想法 | Triton | 解释器无卡可跑，改一版只动 BLOCK 与 mask |
 
 把这套标准套到本章的三个 kernel 上。向量加法的全部内容是“10 个程序各读哪段、尾巴怎么挡”，矩阵乘是 tile 尺寸与 K 方向的步进，softmax 是“6 遍变 2 遍”——三个都能用 block 语言说完，所以这一章没有一道题必须回 CUDA。这不是 Triton 万能，是这三道题还没碰到边界。
 
-边界长什么样，可以对着表里的第 2、3 行看。shared memory 布局与 padding 是第 19 章解 bank conflict 的手段，Triton 里能说“这个 block 读哪块”，说不了“这块在 shared memory 里怎么摆”。warp 级同步与 warp specialization 是 FlashAttention 3 的工程核心，一部分 warp 专职搬运、一部分专职计算，流水线的第几级在干什么都要排好，这些在 Triton 里没有对应写法。异步拷贝的级数能通过 `num_stages` 给，但“谁搬、谁算、什么时候发”给不了。手写 CUDA 能调到最细；CUTLASS 把流水线与分块做成可复用的模板，站在模板上改比从零手写省事。
+边界按版本核对：[Triton `tl.range` 文档](https://triton-lang.org/main/python-api/generated/triton.language.range.html)列出自动 warp specialization 的限制；[3.6.x fused-attention 源码](https://github.com/triton-lang/triton/blob/release/3.6.x/python/tutorials/06-fused-attention.py)展示 descriptor 和流水路径。CUDA/CUTLASS 提供另一种显式控制方式，选择理由应是所需操作和实测，而不是“FA3 永远只能用 CUDA”。
 
-工作流是两条道接力，不是二选一。想法先在 Triton 里跑通：解释器无卡也能验正确性，访存图能看对，BLOCK 改一版只是改个数。profile 说瓶颈还在访存模式，就继续在 Triton 里调 BLOCK 与 num_warps；profile 说瓶颈已经下沉到硬件细节，再把验证过的 Triton 版当参照物搬到 CUDA——两个版本对同一组输入给出同样的数，移植引入的错就只剩性能问题。
+工作流是两条道接力，不是二选一。想法先在 Triton 里跑通：解释器无卡也能验正确性，访存图能看对，BLOCK 改一版只是改个数。profile 说瓶颈还在访存模式，就继续在 Triton 里调 BLOCK 与 num_warps；profile 说瓶颈已经下沉到硬件细节，再把验证过的 Triton 版当参照物搬到 CUDA——两个版本对同一组输入给出同样的数，这一步减少已知语义风险，但边界、dtype、同步和性能仍需分别回归。
 
 选错方向的代价可以提前算。简单的融合想法用 CUDA 起手，访存账不会因为换了语言而变（24 KB 对 8 KB 还是 3 倍），多花的是手写线程、shared memory 与同步的时间；需要 warp 级控制的 kernel 用 Triton 写到底，写到要调布局与流水线时才发现旋钮不在抽象层里，前面的代码要推倒。判断的价值在于把这次返工提前到动笔之前。
 
@@ -568,7 +578,7 @@ __global__ void add_kernel(const float* x, const float* y, float* out, int n) {
 
 - mask 在 load 与 store 两边都写，且用同一个条件；
 - BLOCK 是 2 的幂，且不超过 2²⁰；
-- 读进来要参与计算的 masked lane 必须给 `other`（softmax 用 −inf）；
+- masked lane 若会影响未被 mask 的归约/结果，必须给合适的 `other`（softmax 用 −inf）；
 - 计时写明是均值还是中位数，热身与重复的次数口径一起写；
 - fp32 的 `tl.dot` 写明 `input_precision` 是 TF32 还是 ieee；
 - BLOCK 与 num_warps 配对，算出每线程扛几个元素。
@@ -830,15 +840,15 @@ def fused_attention(q, k, v, causal=False):
 
 mask 的条件合成一个：`keep = mask_n[None, :]`，causal 打开时再与 `offs_m[:, None] >= offs_n[None, :]` 相与。`>=` 保留了对角线：第 m 行能看到第 m 个 key 本身，`n = m` 是合法位置；写成 `>` 会把对角线扔掉，整行少一个位置，分母和输出都错。两个条件合成一个 `tl.where`，比写两次少遍历一遍 qk。
 
-`m_block = tl.max(qk, axis=1)` 是块内每行的最大值；`m_new = tl.maximum(m_i, m_block)` 是更新后的运行最大值；`alpha = tl.exp(m_i − m_new)` 是 rescale 系数，指数输入 ≤ 0，所以 `0 < alpha ≤ 1`。`p = tl.exp(qk − m_new[:, None])` 是未归一化的块内概率，`m_new[:, None]` 把 `[BLOCK_M]` 广播成 `[BLOCK_M, 1]`。`l_i = l_i * alpha + tl.sum(p, axis=1)` 对应 21.1 节的 `l' = l·α + rowsum(P_block)`。
+`m_block = tl.max(qk, axis=1)` 是块内每行的最大值；`m_new = tl.maximum(m_i, m_block)` 是更新后的运行最大值；`alpha = tl.exp(m_i − m_new)` 是 rescale 系数，指数输入 ≤ 0，所以有限状态更新时 `0 ≤ alpha ≤ 1`（初始化和下溢可为 0）。`p = tl.exp(qk − m_new[:, None])` 是未归一化的块内概率，`m_new[:, None]` 把 `[BLOCK_M]` 广播成 `[BLOCK_M, 1]`。`l_i = l_i * alpha + tl.sum(p, axis=1)` 对应 21.1 节的 `l' = l·α + rowsum(P_block)`。
 
 `acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)` 是最容易写错的一行。`alpha` 必须同时乘在 `l_i` 和 `acc` 上：两者共享同一个基准，只换一个就把分子分母的比例改了。用 21.1 节的数：第一块 `Õ₁ = 23.678794`，第二块 `α = 0.135335`，`Õ_b = 51.036383`；正确更新是 `23.678794×0.135335 + 51.036383 = 54.240960`，`O = 54.240960/1.553002 = 34.926527`。如果 `acc` 漏乘 `alpha`，`Õ' = 23.678794 + 51.036383 = 74.715177`，`O = 48.110168`，与正确值差 13.18。这个差距远大于 FP16 舍入，验收时一眼就能看出来。
 
 `p.to(v.dtype)` 把 FP32 的 p 转成 FP16，因为 `tl.dot` 要求两个操作数同类型，FP16 输入才能走 tensor core。转换本身有舍入：FP16 的机器精度是 `2^-10 ≈ 9.77×10^-4`，单次舍入的相对误差约 `2^-11 ≈ 4.88×10^-4`。这是输出误差的主要来源之一。输出是 V 的加权平均，V 的元素量级为 O(1)，绝对误差在 10^-3 量级；再叠加参考实现与 kernel 的累加顺序差异，1e-2 的验收容限是合理的。把 p 留在 FP32 再 dot 并不划算：要么走 TF32（TensorFloat-32，19 位格式：8 位指数、10 位尾数；算力减半），要么走 IEEE FP32（慢一个数量级），两条路都比 FP16 的 P 差。
 
-`tl.dot` 的累加精度：FP16 输入默认以 FP32 累加，`out_dtype` 默认是 `tl.float32`；如果显式写 `out_dtype=tl.float16`，累加也降到 FP16，1024 项的累加误差会明显变大。输入是 FP32 时，A100 上的 `tl.dot` 默认走 TF32（10 位尾数），要全精度得传 `input_precision="ieee"`，吞吐会降。这个 kernel 的输入是 FP16，走的是 FP16×FP16→FP32 的路径。
+`tl.dot` 的累加精度：FP16 输入默认以 FP32 累加，`out_dtype` 默认是 `tl.float32`；`out_dtype` 控制结果/累加器类型，但具体 MMA 累加路径还需查后端 lowering；不要仅从输出类型推断每一步的硬件舍入。输入是 FP32 时，A100 上的 `tl.dot` 默认走 TF32（10 位尾数），要全精度得传 `input_precision="ieee"`，吞吐会降。这个 kernel 的输入是 FP16，走的是 FP16×FP16→FP32 的路径。
 
-`tl.exp` 在 Triton 里通常落到 libdevice 的 exp，精度高但比 `exp2` 慢。FA2 一类实现把 `sm_scale` 乘上 `log2(e) = 1.442695`，用 `tl.math.exp2` 做指数，把一次 exp 换成一次乘法和一次 exp2；NVIDIA GPU 上 exp2 有硬件近似指令，通常更快。换之前先用同一组输入比较最大误差；本章保留 `tl.exp`，因为读起来和公式一一对应。
+`tl.exp` 不是默认的高精度 libdevice exp：Triton 3.6.x 的 NVIDIA FP32 lowering 已是乘 `log2(e)` 后调用近似 ex2（[官方实现](https://github.com/triton-lang/triton/blob/release/3.6.x/third_party/nvidia/lib/TritonNVIDIAGPUToLLVM/ElementwiseOpToLLVM.cpp)）。需要 libdevice 时用该版本的 `tl.extra.libdevice.exp` 等显式 API。FA2 的 exp2 写法可合并缩放常数，但不保证单靠改函数名提速；换前后比较误差、生成指令和同口径耗时。这里保留 `tl.exp` 只为对应公式。
 
 循环结束，`l_i = tl.maximum(l_i, 1.0)` 处理整行没有合法 key 的情况。只要一行至少有一个合法 key，`p` 里最大的一项就是 `exp(0) = 1`，所以 `l_i ≥ 1`；把下界钳到 1 不会改变任何合法行的结果，只把空行的 0 变成 1，避免除零。它修不了 `m_new = −inf` 带来的 NaN：如果整行都被 mask，`alpha = exp(−inf − (−inf))` 在更新 l 之前就已经是 NaN。标准循环从 `start_n = 0` 开始，第一块一定含第 0 列，而 causal 条件下列 0 对任何行都合法，所以每一行的 `m_i` 在第一轮就会变成有限值；只有当你跳过整块、或者 N = 0 时，才需要额外保证每行至少处理一个合法块。
 
@@ -923,7 +933,7 @@ print(t_kernel, t_sdpa)
 
 `do_bench` 在每次计时前会用一个大缓冲区把 L2 清掉，所以它测到的是冷 L2 的数；如果你自己写循环且不清缓存，Q/K/V 可能留在 L2 里，数字会偏小。记录时写清口径。另一个细节：清缓存用写操作实现时，缓冲区留下的脏行可能在下一个 kernel 的计时窗口里写回；这个开销随 Triton 版本变化，微秒级 kernel 尤其要留意。
 
-计时对比要同进程、同形状、同 dtype。SDPA 背后可能选 flash、mem-efficient 或 math 后端，记录 `torch.__version__`、CUDA、Triton 版本和 GPU 型号；跨版本比较没有意义。N = 1024 时理论下界是 0.86 µs，比一次 kernel 启动和计时噪声还小；单 head 又只有 16 个 CTA（见 21.2 节），实测时间会明显高于下界。这不是实现失败的证据，先把这两笔账算进去再解读数字。
+计时对比要同进程、同形状、同 dtype。SDPA 背后可能选 flash、mem-efficient 或 math 后端，记录 `torch.__version__`、CUDA、Triton 版本和 GPU 型号；跨版本结果可作版本对照，但不能当作只改 kernel 的同条件优化证据。N = 1024 时理论下界是 0.86 µs，比一次 kernel 启动和计时噪声还小；单 head 又只有 16 个 CTA（见 21.2 节），实测时间会明显高于下界。这不是实现失败的证据，先把这两笔账算进去再解读数字。
 
 | 实现 | N | d | causal | 中位耗时 | 实测算力 | 占 312 TFLOPS | 备注 |
 |------|---|---|--------|----------|----------|----------------|------|
@@ -1037,7 +1047,7 @@ per-tensor 的 scale 是一个标量；per-channel 给每个输出列一个 scal
 
 scale 本身的访存很小：N=4096 时 per-channel 的 `s_b` 是 16 KB，M=1024 时 per-token 的 `s_a` 是 4 KB，相对 16.78 MB 的 int8 权重可以忽略。scale 的成本不在字节数，在它出现的位置：能提到循环外，它就是 epilogue 里的一次乘法；提不出去，它就在 K 循环里每块都要乘一次。
 
-dynamic 的代价则可以单独算。per-token 要在每次前向里现算每行的 amax：以 M=1024、K=4096 为例，读 fp16 激活 8.39 MB、写 int8 激活 4.19 MB，多出 12.58 MB 搬运；同一形状 FP16 matmul 的总搬运是 50.33 MB，量化准备占 25.0%。M=32 时同样是读 0.26 MB、写 0.13 MB，共 0.39 MB，只占总搬运 34.08 MB 的 1.2%。dynamic 的代价随 M 线性增长：decode 形状付得起，prefill 形状要先算这笔账。static 用校准集把 scale 离线定好，省掉这次 pass，代价是分布失配的风险；校准集怎么选、失配误差怎么量，在第 12 章。
+dynamic 的代价则可以单独算。per-token 要在每次前向里现算每行的 amax：以 M=1024、K=4096 为例，读 fp16 激活 8.39 MB、写 int8 激活 4.19 MB，多出 12.58 MB 搬运；同一形状 FP16 matmul 的总搬运是 50.33 MB，量化准备占 25.0%。M=32 时同样是读 0.26 MB、写 0.13 MB，共 0.39 MB，只占总搬运 34.08 MB 的 1.2%。dynamic 的代价随 M 线性增长：decode 形状付得起，prefill 形状要先算这笔账。static 可以省去运行时 amax 统计，但 FP16 激活转 INT8 的除法、舍入和写回仍需执行，除非已融合到上游；上面的字节账是理想准备路径，PyTorch 多算子实现可能有更多 pass。代价还包括分布失配风险；校准集怎么选、失配误差怎么量，在第 12 章。
 
 本节只讨论对称量化（zero point 固定为 0）；非对称量化多一个零点，scale 的代数不变，kernel 里多一次减法，后面两条路径的结构不变。
 
@@ -1058,21 +1068,33 @@ A（激活）与 B（权重）都以 int8 存：A 的形状 `[M, K]`，per-token
 
 ```python
 def quant_per_token(x):
-    # x: [M, K] fp16 -> int8 + scales [M]
-    amax = x.abs().amax(dim=1)
+    # x: [M, K] fp16/bf16/fp32 -> int8 + FP32 scales [M]
+    xf = x.float()
+    amax = xf.abs().amax(dim=1)
     scale = (amax / 127.0).clamp_min(1e-8)
-    q = torch.round(x / scale[:, None]).clamp(-127, 127).to(torch.int8)
+    q = torch.round(xf / scale[:, None]).clamp(-127, 127).to(torch.int8)
     return q, scale
 
 def quant_per_channel(w):
-    # w: [K, N] fp16 -> int8 + scales [N]
-    amax = w.abs().amax(dim=0)
+    # w: [K, N] fp16/bf16/fp32 -> int8 + FP32 scales [N]
+    wf = w.float()
+    amax = wf.abs().amax(dim=0)
     scale = (amax / 127.0).clamp_min(1e-8)
-    q = torch.round(w / scale[None, :]).clamp(-127, 127).to(torch.int8)
+    q = torch.round(wf / scale[None, :]).clamp(-127, 127).to(torch.int8)
     return q, scale
 ```
 
-`clamp_min(1e-8)` 是防除零的护栏，不是精度参数：某一行或某一列全为 0 时，`amax` 是 0，`scale` 会是 0，`x / scale` 得 inf 或 NaN；把下限钉在 1e-8 之后，全零行量化后仍是全零，反量化也是 0。除的是 127.0 而不是 128.0，对应上一节的对称约定：最大值落在 127 上。
+护栏必须在 FP32 生效：FP16 最小正次正规数约 5.96e-8，`1e-8` 在 FP16 中会舍入为 0；只补 `clamp_min` 仍防不住除零。上面的 `.float()` 保证统计、scale、除法和 round 都在 FP32，scale 也不能再转回 FP16。全零行/列输出为 0；极小输入需同时检查正且有限的 scale 和商。输入本身含 NaN/Inf 时先拒绝，不把它当量化舍入。完整入口 [quant_matmul.py](examples/quant_matmul.py)含 FP16/BF16/FP32 的零值与极小值检查、两个 kernel、host wrapper、边界校验和微基准；本轮 GPU 执行仍待验证。
+
+```python
+x_edge = torch.tensor([[0., 0.], [1e-7, -1e-7]], dtype=torch.float16)
+q_edge, s_edge = quant_per_token(x_edge)
+assert s_edge.dtype == torch.float32
+assert torch.isfinite(s_edge).all() and (s_edge > 0).all()
+assert torch.isfinite(x_edge.float() / s_edge[:, None]).all()
+assert (q_edge[0] == 0).all()
+# per-channel 用 x_edge.T 作相同检查。
+```
 
 INT8 matmul kernel（示意，按当前 Triton 版本调整，未在本书环境编译运行）：
 
@@ -1126,7 +1148,42 @@ def matmul_int8_kernel(a_ptr, b_ptr, c_ptr,
              mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
 
-这段 kernel 与第 20 章的 FP16 matmul 结构相同：分组映射、K 循环、`tl.dot` 累加、带 mask 写回。变的只有三处：输入是 int8，累加器是 `tl.int32`，epilogue 多了一行 `acc.to(tl.float32) * sa[:, None] * sb[None, :]`。第 20 章调通的 tile 逻辑与 mask 写法可以复用；这三处就是量化方案落地的全部内容。
+完整固定配置 host wrapper 如下，与上面的 kernel 签名一致；不依赖第 20 章未展示的 GEMM wrapper。
+
+```python
+def matmul_int8(a_q, b_q, scale_a, scale_b):
+    if a_q.ndim != 2 or b_q.ndim != 2 or a_q.shape[1] != b_q.shape[0]:
+        raise ValueError("expected A[M,K], B[K,N]")
+    if a_q.dtype != torch.int8 or b_q.dtype != torch.int8:
+        raise TypeError("W8A8 operands must be int8")
+    M, K = a_q.shape
+    N = b_q.shape[1]
+    if K > (2**31 - 1) // (128 * 128):
+        raise ValueError("K may overflow the int32 accumulator")
+    if scale_a.shape != (M,) or scale_b.shape != (N,):
+        raise ValueError("expected per-token scale_a[M], per-channel scale_b[N]")
+    if not a_q.is_cuda or any(t.device != a_q.device for t in (b_q, scale_a, scale_b)):
+        raise ValueError("all tensors must be on the same CUDA device")
+    if scale_a.dtype != torch.float32 or scale_b.dtype != torch.float32:
+        raise TypeError("keep quantization scales in FP32")
+    scale_a, scale_b = scale_a.contiguous(), scale_b.contiguous()
+    c = torch.empty((M, N), dtype=torch.float16, device=a_q.device)
+    if M == 0 or N == 0:
+        return c
+    if K == 0:
+        return c.zero_()
+    grid = (triton.cdiv(M, 64) * triton.cdiv(N, 64),)
+    matmul_int8_kernel[grid](
+        a_q, b_q, c, M, N, K,
+        a_q.stride(0), a_q.stride(1), b_q.stride(0), b_q.stride(1),
+        c.stride(0), c.stride(1), scale_a, scale_b,
+        BLOCK_M=64, BLOCK_N=64, BLOCK_K=32, GROUP_M=8,
+        num_warps=4, num_stages=3,
+    )
+    return c
+```
+
+这条路径沿用第 20 章的 tile/mask 思路，增加 INT8 输入、INT32 累加与 epilogue scale。完整入口会另行检验 scale 的有限性；wrapper 不在每次计时里加设备同步扫描。
 
 指针步进有一处容易写错：`b_ptrs += BLOCK_K * stride_bk`，`stride_bk` 是 B 在 K 方向的行步长（行主序下等于 N），不是 `stride_bn`。写成 `stride_bn` 时，如果 B 是连续的行主序 `[K, N]`，`stride_bn = 1`，指针每步只挪 BLOCK_K 个元素而不是 BLOCK_K 行；形状对得上，读进来的却是错位的数据，结果全错且不会报越界。A 的步进用 `stride_ak`，同理。
 
@@ -1136,7 +1193,7 @@ mask 要同时盖住 M/N 与 K 两个方向。M=32、`BLOCK_M=64` 时，tile 的
 
 `tl.dot` 的输入约束按当前 Triton 文档：两个操作数都是二维或三维、内维一致，元素类型支持 int8、float8_e5m2、fp16、bf16、fp32，累加器支持 fp16、fp32、int32；int8 输入的 `out_dtype` 显式写 `tl.int32`。文档没有把 M/N/K 的最小值写成硬性条款，实际能不能落到 tensor core 由后端决定：Ampere 的 INT8 MMA 指令形状是 m16n8k32（PTX 的 `mma.sync.aligned.m16n8k32` 一族），所以 M/N 取 16 的倍数、K 取 32 的倍数最稳，`BLOCK_M=64, BLOCK_N=64, BLOCK_K=32` 就是照这条约束取的。换卡、换 Triton 版本时，先看编译输出有没有落到 tensor core，再看计时；具体形状与对齐要求以你装的版本为准。
 
-正确性用相对误差比。量化误差按比例走，固定绝对容限没有意义；下面的检查把分母下限钉在 1，避免参考值接近 0 时相对误差爆炸：
+先分开两种误差：kernel 正确性对同一份 INT8 输入及 scale 的参考输出作绝对+相对容限检查；量化误差再与原 FP16 输入结果比较。均值会隐藏错块，分母钳到 1 的值也不是严格相对误差，不能单独当通过标准：
 
 ```python
 torch.manual_seed(0)
@@ -1145,13 +1202,16 @@ b = torch.randn(256, 128, dtype=torch.float16, device='cuda')
 a_q, sa = quant_per_token(a)
 b_q, sb = quant_per_channel(b)
 c = matmul_int8(a_q, b_q, sa, sb)
-ref = a @ b
-rel_err = ((c.float() - ref.float()).abs()
-           / ref.float().abs().clamp_min(1)).mean()
-print('mean relative error:', rel_err.item())
+int_ref = a_q.cpu().to(torch.int64) @ b_q.cpu().to(torch.int64)
+ref_same_quant = (int_ref.float() * sa.cpu()[:, None] * sb.cpu()[None, :]).half()
+torch.testing.assert_close(c.cpu(), ref_same_quant, atol=1e-3, rtol=1e-3)
+ref_original = (a.cpu().double() @ b.cpu().double()).half()
+error = (c.cpu().float() - ref_original.float()).abs()
+print('quantization max abs:', error.max().item())
+print('mean scaled error:', (error / ref_original.float().abs().clamp_min(1)).mean().item())
 ```
 
-预期平均相对误差在 1% 量级（算例，不是实测）；大一个数量级时，先查 scale 的粒度是否弄反（per-token 与 per-channel），再查累加器是不是 int32。输出是 fp16，本身也带一次舍入；要单独看量化误差，把输出留成 fp32 再比。
+这组随机输入的量化误差量级只是待测预期，不是任意模型的 1% 通行证。完整入口检查零值、M/N/K 非整除及同量化参考；任务质量仍须复用第 12 章的评测，并在第 24/30/31 章的每次优化后重跑。输出 FP16 的舍入也应列入误差来源。
 
 epilogue 的代价可以逐项算。每个输出元素做 4 次操作：int32→fp32、乘 `sa`、乘 `sb`、fp32→fp16。M=32、N=4096 时输出 131,072 个元素，4 次操作共 524,288 次；总 FLOPs 是 `2×32×4096×4096 = 1,073,741,824`，占比 0.049%。M=1024 时输出 4,194,304 个元素，操作数 16,777,216 次；总 FLOPs 34,359,738,368，占比还是 0.049%。两个形状同占比不是巧合：比例是 `4MN / (2MNK) = 2/K`，K=4096 时就是 0.049%；K 缩到 256，比例升到 0.78%。
 
@@ -1214,6 +1274,37 @@ def matmul_fused_dequant_kernel(a_ptr, b_ptr, c_ptr,
              mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
 
+固定配置的完整 wrapper（完整入口同时提供两步 dequant 基线）：
+
+```python
+def matmul_fused_dequant(a, b_q, scale_b):
+    if a.ndim != 2 or b_q.ndim != 2 or a.shape[1] != b_q.shape[0]:
+        raise ValueError("expected A[M,K], B[K,N]")
+    if a.dtype != torch.float16 or b_q.dtype != torch.int8 or scale_b.dtype != torch.float32:
+        raise TypeError("expected FP16 activation, INT8 weight and FP32 scale")
+    M, K = a.shape
+    N = b_q.shape[1]
+    if scale_b.shape != (N,):
+        raise ValueError("expected per-channel scale_b[N]")
+    if not a.is_cuda or any(t.device != a.device for t in (b_q, scale_b)):
+        raise ValueError("all tensors must be on the same CUDA device")
+    scale_b = scale_b.contiguous()
+    c = torch.empty((M, N), dtype=torch.float16, device=a.device)
+    if M == 0 or N == 0:
+        return c
+    if K == 0:
+        return c.zero_()
+    grid = (triton.cdiv(M, 64) * triton.cdiv(N, 64),)
+    matmul_fused_dequant_kernel[grid](
+        a, b_q, c, M, N, K,
+        a.stride(0), a.stride(1), b_q.stride(0), b_q.stride(1),
+        c.stride(0), c.stride(1), scale_b,
+        BLOCK_M=64, BLOCK_N=64, BLOCK_K=32, GROUP_M=8,
+        num_warps=4, num_stages=3,
+    )
+    return c
+```
+
 dequant 发生在循环里：`b_int8 = tl.load(...)` 读 int8 tile，下一行 `b = (b_int8.to(tl.float32) * sb[None, :]).to(tl.float16)` 在寄存器里展开成 fp16，紧接着被 `tl.dot` 消费。`b` 没有 HBM 地址，没有 `tl.store` 写它，也没有下一个 kernel 读它；它的生命周期只有一次循环迭代。22.2 的 epilogue 乘 scale 是同一个手法：中间结果留在寄存器里，不落 HBM。
 
 先转 fp32 再转 fp16，是因为 int8 的整数值乘 fp32 scale 的乘积由 fp32 兜底；直接在 fp16 里乘，乘积先舍入到 fp16 再进 tensor core，等于多丢一轮精度。最后的 `.to(tl.float16)` 是喂给 fp16 tensor core 的输入要求。顺序是 fp32 里算准、fp16 里算快。
@@ -1237,7 +1328,7 @@ dequant 的 ALU 代价要另算。每个权重元素做 3 次操作：int8→fp3
 22.2 与 22.3 的 kernel 都写死了 `BLOCK_M=64, BLOCK_N=64, BLOCK_K=32`。这组值在 M=32 和 M=1024 上不可能同时最优：decode 形状程序块少，tile 开大只会让更多 SM 空转；prefill 形状程序块多，tile 开大才能提高复用、摊薄 dequant。把配置交给 `triton.autotune` 扫一遍，按形状各选一组。
 
 ```python
-@triton.autotune(
+autotune_int8 = triton.autotune(
     configs=[
         triton.Config({'BLOCK_M': 64,  'BLOCK_N': 64,  'BLOCK_K': 32,
                        'GROUP_M': 8}, num_warps=4, num_stages=3),
@@ -1250,14 +1341,13 @@ dequant 的 ALU 代价要另算。每个权重元素做 3 次操作：int8→fp3
     ],
     key=['M', 'N', 'K'],
 )
-@triton.jit
-def matmul_int8_kernel(...):
-    ...
+# 包装 22.2 已定义的完整 JIT kernel，不用省略号替换它的函数体。
+matmul_int8_kernel = autotune_int8(matmul_int8_kernel)
 ```
 
 `key=['M','N','K']` 的意思是：这三个运行时参数一变，autotune 就重新扫配置；`BLOCK_*`、`GROUP_M`、`num_warps`、`num_stages` 是被扫的变量，不放进 key。M=32 与 M=1024 会被当成两个 key 各扫一遍；如果 kernel 还有别的会改变最优配置的运行时参数（比如 per-group 的 group size），也要放进 key，否则会拿错缓存。调优成本是“配置数 × key 数”次编译加计时：4 组配置 × 2 档形状 = 8 次；配置翻倍，成本翻倍。第一次调用时 autotune 把每组都跑一遍并缓存结果，之后的调用直接取缓存。
 
-启动时 grid 要按当前配置算，BLOCK_* 不再从调用处传：
+添加 autotune 后，需同时把上面的固定配置 wrapper 改成下面的启动形式；不要一边由 Config 提供 BLOCK_*、一边又从 wrapper 传同名参数。grid 按当前配置算：
 
 ```python
 grid = lambda META: (
@@ -1268,7 +1358,7 @@ matmul_int8_kernel[grid](a_q, b_q, c, M, N, K,
     c.stride(0), c.stride(1), scale_a.float(), scale_b.float())
 ```
 
-计时用 `triton.testing.do_bench`。它的 `warmup=25, rep=100` 是毫秒预算，不是迭代次数：先估一次单次耗时，再按预算换算 warmup 与重复次数；返回值默认是每次运行的均值，单位毫秒。它在每次计时前清 L2，所以量到的是“每次调用从冷 L2 开始”的时间，调用内部的复用仍然发生。自动调参要在正式计时前完成：do_bench 会先调用一次被测函数估时，autotune 的编译与扫配置就发生在那一次；不要把首次调用算进正式计时。
+计时用 `triton.testing.do_bench`。完整入口使用 `return_mode="median"`；Triton 3.6.x 默认是 mean，所以所有对比显式指定统计量。`warmup=25, rep=100` 是毫秒预算，不是迭代次数：先估一次单次耗时，再按预算换算 warmup 与重复次数；返回值默认是每次运行的均值，单位毫秒。它在每次计时前清 L2，所以量到的是“每次调用从冷 L2 开始”的时间，调用内部的复用仍然发生。自动调参要在正式计时前完成：do_bench 会先调用一次被测函数估时，autotune 的编译与扫配置就发生在那一次；不要把首次调用算进正式计时。
 
 ```python
 ms = triton.testing.do_bench(
@@ -1320,11 +1410,11 @@ M=1024 的三个点（682.7、1170.3、1024.0）都在脊点右边，计算受�
 
 权重占搬运的比例决定量化能省多少：M=32 时 FP16 总搬运 34.08 MB 里权重 33.55 MB，占 98.5%，INT8 把总搬运压到 17.17 MB（0.504 倍）；M=1024 时权重占 66.7%，INT8 总搬运 29.36 MB（0.583 倍）；方阵时权重占 33.3%，INT8 总搬运 67.11 MB（0.667 倍）。权重占比从 98.5% 降到 66.7% 再到 33.3%，量化的省法从“几乎减半”退到“省三分之一”。量化最划算的形状是权重占主导的形状，decode 就是这样的形状——不是因为它小，是因为它的搬运里权重占九成八。
 
-代价是精度。22.2 的相对误差是本章唯一能量化精度的口径：预期在 1% 量级，不是实测；完整的质量表在第 12 章，本章不重复。把误差与提速比并排放：
+代价是精度。22.2 分别记录 kernel 对同量化参考的误差和量化对原输入的误差；任务级质量复用第 12 章，不重造一套指标。先通过正确性，再把质量与提速比并排放：
 
 | 指标 | 来源 | 状态 |
 |---|---|---|
-| 相对误差（INT8 路径） | 22.2 的检查代码 | 预期 1% 量级，待补测 |
+| kernel / 量化误差（INT8） | 22.2 与完整入口的两种参考 | 分别验收，GPU 待补测 |
 | 相对误差（fused 路径） | 只量化权重，预期小于 INT8 | 待补测 |
 | 提速比（M=32 / M=1024） | 22.4 的配置-耗时表 | 待补测 |
 | 峰值算力 | A100 公开规格，稠密 | 312 TFLOPS / 624 TOPS |
@@ -1379,7 +1469,7 @@ FA3 的结果同样按口径记：H100 SXM5 上，FP16 前向相对 FA2 快 1.5�
 
 表里的数字全部来自论文摘要、正文或结论，没有独立复现，行与行之间不能直接比：FA1 的 3× 是端到端训练对 PyTorch，FA2 的 2× 是注意力算子对 FA1，FA3 的 1.5–2.0× 是 H100 上对 FA2。同一代内部，摘要的概括值、正文的区间、端到端与算子级也各不相同。读论文数字先找三样东西：和谁比、在什么模型和序列长度上、量的是端到端还是单个算子。
 
-三代改动一层比一层靠近硬件：FA1 改访存模式（算法层），FA2 改 block 与 warp 的工作划分（执行层），FA3 改流水线与指令的用法（硬件层）。不变的是三件事：不物化 S/P、分块 online softmax、结果精确。判断一篇新实现改的是哪一层，比背下它的加速比更有用。
+三代改动一层比一层靠近硬件：FA1 改访存模式（算法层），FA2 改 block 与 warp 的工作划分（执行层），FA3 改流水线与指令的用法（硬件层）。共同核心是不物化 S/P 与分块 online softmax；数学精确不等于浮点逐 bit 一致，FA3 FP8 路径的额外量化误差还需另测。判断一篇新实现改的是哪一层，比背下它的加速比更有用。
 
 ### 第 2 节 · 读 flash-attn 源码：主循环长什么样
 
@@ -1536,15 +1626,15 @@ using CutlassGemm = cutlass::gemm::device::Gemm<
 |---|---|---|---|
 | 可维护性 | 一个文件几十到几百行，改 tile 就是改一个 `BLOCK_M`，autotune 扫参数 | 模板层层嵌套，dispatch 按 head 维/架构/causal 展开，改一处要确认影响哪个实例 | Triton 的抽象层级高，代码短；CUTLASS 把控制权交给用户，代码长 |
 | 可移植性 | 编译到 PTX，同一份代码可跑 NVIDIA 与部分 AMD 后端；换架构主要靠编译器 | 绑定 CUDA 与具体架构，SM80、SM90 等不同架构世代的 atom 与流水线不同；换芯片要重写 | Triton 的移植成本低，但性能依赖后端成熟度；CUTLASS 的移植是重写 |
-| 性能上限 | 能表达分块、cp.async、软件流水；TMA、warp specialization、cluster 的支持随版本推进，能写到什么程度以当前版本文档为准 | 能直接用手写 warp 分工、TMA、cluster、WGMMA 与 FP8 atom | FA3 从 35% 到 75% 的差距，靠的正是 Triton 当前表达不了的那部分控制 |
+| 性能上限 | 能表达分块、cp.async、软件流水；TMA、warp specialization、cluster 的支持随版本推进，能写到什么程度以当前版本文档为准 | 能直接用手写 warp 分工、TMA、cluster、WGMMA 与 FP8 atom | 论文比较 FA2/FA3 的工程排布，不是 Triton/CUDA 的同条件语言对照；控制面按版本核对 |
 | 调试成本 | 报错在 Python/Triton 层，可用 `tl.device_print`、解释器模式、autotune 日志 | 编译期模板报错长，编译慢，运行时要用 ncu、SASS 和 barrier 级日志 | Triton 定位快；CUTLASS 定位慢，但一旦跑对，行为更可预测 |
 
-四个维度不能压成一个“谁更快”。Triton 的代码量优势来自抽象：分块、流水线、内存层级由编译器管，代价是编译器不暴露的控制它也写不出来。CUTLASS 把这些控制暴露出来，代码量和调试成本随之上升。性能上限的差距有明确证据：FA2 在 H100 上 35%、FA3 到 75%，中间靠的是 warp specialization、TMA、GEMM-softmax 交错与 FP8 布局这些在写作时仍主要靠 CUDA/CUTLASS 表达的手段；Triton 对这些能力的支持在版本间变化，以当前文档为准。可移植性的方向相反：Triton 一份代码能编译到不同后端，CUTLASS 的每个架构 atom 都要单独适配；第四部分换到 Ascend 时，两条路都要重做一遍，Triton 侧至少有 TritonAscend 这类后端承接，CUTLASS 侧则是重写。
+四个维度不能压成一个“谁更快”。Triton 的代码量优势来自抽象：分块、流水线、内存层级由编译器管，代价是编译器不暴露的控制它也写不出来。CUTLASS 把这些控制暴露出来，代码量和调试成本随之上升。FA2 在 H100 上 35%、FA3 到 75% 是论文中的实现演进，不能当作 Triton 与 CUDA 的语言性能差距。Triton 3.6.x 已有 TMA/warp-specialization 路径，是否覆盖目标调度仍要核对版本、架构和编译产物，再实测同形状实现。可移植性的方向相反：Triton 一份代码能编译到不同后端，CUTLASS 的每个架构 atom 都要单独适配；第四部分换到 Ascend 时，两条路都要重做一遍，Triton 侧至少有 TritonAscend 这类后端承接，CUTLASS 侧则是重写。
 
 选择按瓶颈所在层级定，不按“库是不是更快”定：
 
 - 优化能说清“哪个 block 读哪块、哪个算子融进去”时，Triton 够用。第 21 章的 fused attention 就属于这一层：省掉 S、P 过 HBM 的往返，几十行能写出来，也能验证。
-- 优化必须说清“哪个 warp 搬数据、哪个 warp 算、流水第几级、cluster 怎么分”时，回 CUDA/CUTLASS。FA3 的三项技术都在这一层，Triton 没有对应表达。
+- 优化必须说清“哪个 warp 搬数据、哪个 warp 算、流水第几级、cluster 怎么分”时，回 CUDA/CUTLASS。这类控制面按第 20 章列出的版本/后端 API 核对，不能笼统写成 Triton 永远不支持。
 - 库已经比自写实现快，且没有特殊形状要适配时，直接用库。自己维护一份 FP8 attention 的成本是数周起步，还要跟硬件代际更新；库已经把这条路径封好。
 - 还有时间成本：Triton 改一版很快，适合验证想法；CUTLASS 改一个 tile 就要重编，适合想法已经验证、只剩最后一段性能要榨。第 24 章把自写 kernel 接进引擎，选的是 Triton 路径，原因也在这里：接入、验证、回滚的成本低。
 
@@ -1562,7 +1652,7 @@ using CutlassGemm = cutlass::gemm::device::Gemm<
 
 ### 第 1 节 · vLLM 的 CustomOp 机制：注册、分发、启用三件事，及它的边界
 
-注册、分发、启用是三件不同的事，发生在三个不同的时间点：注册在 import 时，启用在引擎启动读配置时，分发在每次前向时——准确说，分发方法在层对象构造时就被定下来，前向只是调用它。把三件混成一件，后面每一节的坑都在这里埋下。本节的事实都以写书时的 vLLM 主线为准（`vllm/model_executor/custom_op.py` 与 [CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)），**API 名称与签名以当前版本为准**：这套接口改过几轮，抄博客之前先打开自己装的那份源码对一遍。
+注册、分发、启用是三件不同的事，发生在三个不同的时间点：注册在入口函数被调用并 import 算子子模块时，启用在引擎启动读配置时，分发在每次前向时——准确说，分发方法在层对象构造时就被定下来，前向只是调用它。把三件混成一件，后面每一节的坑都在这里埋下。本节的事实都以写书时的 vLLM 主线为准（`vllm/model_executor/custom_op.py` 与 [CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)），**API 名称与签名以当前版本为准**：这套接口改过几轮，抄博客之前先打开自己装的那份源码对一遍。
 
 **注册**说的是名字怎么进表。`vllm/model_executor/custom_op.py` 里有两个文件级字典：`op_registry` 装树内算子（由 `CustomOp.register("名字")` 写入），`op_registry_oot` 装树外替换（由 `register_oot` 写入）。写插件用的是 `@SiluAndMul.register_oot`，不带参数时注册名就是被替换类的类名 `SiluAndMul`。这个名字不是随手取的：`CustomOp.__new__` 拿 `cls.__name__` 去 `op_registry_oot` 里查，命中才把实例换成你的类。所以注册名必须等于要替换的类的类名，写成 `silu_and_mul` 就查不到，替换静默失效。同一个名字在 `op_registry_oot` 里注册两次会断言失败（`Duplicate op name`）——这条防线在自测里很有用，见第 3 节。
 
@@ -1574,13 +1664,13 @@ using CutlassGemm = cutlass::gemm::device::Gemm<
 
 | 环节 | 发生时间 | 失效时的表现 | 怎么查 |
 |---|---|---|---|
-| 注册 | 插件包被 import 时 | 表里没有你的类，什么都不发生 | `op_registry_oot["SiluAndMul"]` 是不是你的类 |
+| 注册 | 入口调用并 import 子模块时 | 表里没有你的类，什么都不发生 | `op_registry_oot["SiluAndMul"]` 是不是你的类 |
 | 启用 | 引擎启动、层对象构造时 | 走 `forward_native`，数值对、速度慢 | 打印 `层实例.name` 与 `_forward_method.__name__` |
 | 分发 | 每次前向 | 方法选错（如只写了 `forward_oot`），抛错或走父类 | profiler 的 kernel 名单里有没有你的 kernel |
 
 **边界**划在“单 forward、无状态”上。激活算子输入进来、输出出去，没有跨层状态，没有 KV 布局，没有后端要选；attention 这三样都有，所以它有自己的后端机制和 KV 集成，CustomOp 接不上。选 SiluAndMul 做载体正是因为它在边界内：形状规整，语义只有一行，容易验证到底对不对。
 
-**插件怎么被加载**：vLLM 启动时按 `vllm.general_plugins` 这个 entry point 发现插件包，`load_general_plugins` 在进程内只加载一次（有防重复加载的 guard）。关键时序是：插件包被 import 时装饰器执行，替换进表；没被 import 就什么都不会发生。一个“写好了但没被加载”的插件，和一个不存在的插件，从模型输出上看没有任何区别。
+**插件怎么被加载**：vLLM 启动时按 `vllm.general_plugins` 这个 entry point 发现插件包，`load_general_plugins` 在进程内只加载一次（有防重复加载的 guard）。关键时序是：加载器调用 entry point 指向的 `register()`，它导入带装饰器的子模块，替换才进表；普通 `import my_plugin` 只定义入口函数。一个“写好了但没被加载”的插件，和一个不存在的插件，从模型输出上看没有任何区别。
 
 和 monkey patch 比，`register_oot` 走的是引擎自己的表：不改 `vllm.model_executor.layers.activation` 文件里的类属性，升级 vLLM 后不会因为函数签名变了而错得莫名其妙；它还保留了“按开关退回 `forward_native`”这条后备路径。monkey patch 更直接，对所有实例生效，也能改表里没有的算子，代价是绕过了引擎的启用与平台判断，出问题时没有任何一层会替你把关。和 `CustomOp.register` 比，区别是适用场景：`register` 是在树内**新增**一个算子名字，模型代码得调用它才有用；`register_oot` 是**替换**一个已有类名，调用点已经在模型代码里了，你只是换了实现。
 
@@ -1619,15 +1709,24 @@ def _silu_and_mul_kernel(x_ptr, y_ptr, x_row_stride, y_row_stride, d,
     tl.store(y_ptr + row * y_row_stride + cols, s * x2, mask=mask)
 
 def silu_and_mul_triton(x: torch.Tensor, BLOCK: int = 1024) -> torch.Tensor:
-    if x.dim() != 2:
-        x = x.reshape(-1, x.shape[-1])
-    assert x.shape[-1] % 2 == 0 and x.is_contiguous()
-    m, n = x.shape
+    if x.ndim < 1 or x.shape[-1] % 2:
+        raise ValueError("last dimension must be even")
+    if not x.is_cuda or x.dtype not in (torch.float16, torch.bfloat16):
+        raise TypeError("expected CUDA FP16/BF16 input")
+    if not x.is_contiguous():
+        raise ValueError("contiguous input is required; do not hide a copy in the timing")
+    if BLOCK <= 0 or BLOCK & (BLOCK - 1) or BLOCK > 2**20:
+        raise ValueError("BLOCK must be a supported power of two")
+    output_shape = x.shape[:-1] + (x.shape[-1] // 2,)
+    if x.numel() == 0:
+        return torch.empty(output_shape, dtype=x.dtype, device=x.device)
+    x_2d = x.reshape(-1, x.shape[-1])
+    m, n = x_2d.shape
     d = n // 2
     y = torch.empty((m, d), dtype=x.dtype, device=x.device)
     grid = (m, triton.cdiv(d, BLOCK))
-    _silu_and_mul_kernel[grid](x, y, x.stride(0), y.stride(0), d, BLOCK=BLOCK)
-    return y
+    _silu_and_mul_kernel[grid](x_2d, y, x_2d.stride(0), y.stride(0), d, BLOCK=BLOCK)
+    return y.reshape(output_shape)
 ```
 
 逐行看地址算术，这是最容易写错的地方。`x1` 在 `row * 2d + col`，`x2` 在 `row * 2d + d + col`，输出在 `row * d + col`；行跨度是整行 `2d`，写成 `row * d` 读到的就是错行的数。`mask = col < d` 配 `other=0.0`：被 mask 的位置读进来是 0，`silu(0) = 0`，store 时又被同一个 mask 拦住，既不越界读也不越界写。grid 是二维的（行 × 列块），每个程序负责一行里的一块列。
@@ -1644,10 +1743,10 @@ x = torch.randn(128, 256, dtype=torch.float16, device="cuda")
 y = silu_and_mul_triton(x)
 ref = SiluAndMul.forward_native(x)          # 当前版本里它是 staticmethod，可直接调
 print("max abs err:", (y.float() - ref.float()).abs().max().item())
-print("allclose:", torch.allclose(y, ref, atol=1e-2, rtol=1e-2))
+torch.testing.assert_close(y, ref, atol=1e-2, rtol=1e-2)
 ```
 
-误差不该是 0：求值顺序不同、fp16 舍入路径不同，全等本来就不该出现。要看的是量级：和 fp16 舍入同量级就是对齐了，和输出值本身同量级就是写法错了。三个典型错误各有特征：两半切反，误差立刻变大；行跨度写成 `row * d`，读错行，误差立刻变大；cast 顺序颠倒（拿 fp32 的 SiLU 结果直接乘 fp16 的另一半），误差变大但不一定一眼看得出来——所以逐行核对地址算术这一步不能省。
+误差可能为 0，也可能有末位差异；不能把全等或非全等本身当成通过依据。要看的是量级：和 fp16 舍入同量级就是对齐了，和输出值本身同量级就是写法错了。三个典型错误各有特征：两半切反，误差立刻变大；行跨度写成 `row * d`，读错行，误差立刻变大；cast 顺序颠倒（拿 fp32 的 SiLU 结果直接乘 fp16 的另一半），误差变大但不一定一眼看得出来——所以逐行核对地址算术这一步不能省。
 
 微基准要测三个基线，缺一个结论就会错：
 
@@ -1662,7 +1761,7 @@ def cpp_fused(t):                  # 引擎默认实现；签名以当前版本�
 
 x = torch.randn(4096, 2 * 11008, dtype=torch.float16, device="cuda")
 for name, fn in (("eager", eager), ("vllm-cpp", cpp_fused), ("triton", silu_and_mul_triton)):
-    ms = triton.testing.do_bench(lambda: fn(x))   # 默认返回中位数，以当前 Triton 版本为准
+    ms = triton.testing.do_bench(lambda: fn(x), return_mode="median")  # 3.6.x 默认 mean，这里显式选 median
     print(name, f"{ms:.4f} ms")
 ```
 
@@ -1702,23 +1801,34 @@ def register() -> None:
     from . import silu_and_mul_plugin  # noqa: F401  import 时装饰器执行，替换即完成
 ```
 
-入口点的值是可调用对象还是包路径、函数签名要不要参数，**以当前版本的 `vllm/plugins/__init__.py` 为准**。写完 `pip install -e .` 装上，再看 vLLM 启动日志里有没有出现你的插件；entry point 写错，插件根本不会被加载，vLLM 不会去扫描你的代码。
+入口点的值是可调用对象还是包路径、函数签名要不要参数，**以当前版本的 `vllm/plugins/__init__.py` 为准**。完整示例包在 [silu_plugin](examples/silu_plugin/pyproject.toml)，含打包元数据、入口、子类及 [kernel.py](examples/silu_plugin/my_plugin/kernel.py)。在已有兼容的 CUDA/PyTorch/Triton/vLLM 环境中执行以下命令（本轮未安装或启动引擎）：
 
-验证分两层，先便宜后贵。第一层在裸 Python 进程里查表，不需要 GPU、不需要起引擎：
+```bash
+python3 -m pip install --no-deps --no-build-isolation -e docs/modules/M2-operators/examples/silu_plugin
+python3 -m my_plugin.kernel --check-only
+python3 -m my_plugin.kernel --tokens 128 --hidden 11008 --block 1024
+```
+
+standalone 入口覆盖 FP16、硬件支持时的 BF16、尾块、前置多维形状和空张量，并用同一个入口测 eager/C++/Triton。注册检查如下；随后启动引擎才检查启用和分发。再看 vLLM 启动日志里有没有出现你的插件；entry point 写错，插件根本不会被加载，vLLM 不会去扫描你的代码。
+
+验证分两层，先便宜后贵。第一层在已安装兼容 vLLM/Triton 依赖的裸 Python 进程里查表，不启动 GPU kernel，也不构造引擎层实例：
 
 ```python
-import my_plugin                                   # 触发 import，装饰器执行
+import my_plugin                                   # 这里只定义 register，不触发子模块导入
+my_plugin.register()                               # 显式导入子模块，执行注册装饰器
 from vllm.model_executor.custom_op import op_registry_oot
-from vllm.model_executor.layers.activation import SiluAndMul
 
 assert op_registry_oot.get("SiluAndMul") is my_plugin.silu_and_mul_plugin.TritonSiluAndMul
-print(SiluAndMul().name)                           # 启用开关要用的名字，别凭记忆填
+print(op_registry_oot["SiluAndMul"].__name__)         # 只查表，不构造需要引擎配置的层实例
 ```
 
 第二层在引擎进程里查分发。构造 `SiluAndMul()` 时 `__new__` 会按类名替换，`__init__` 里的 `dispatch_forward` 会定下 `_forward_method`；两个都能直接读：
 
 ```python
-op = SiluAndMul()
+from vllm.model_executor.layers.activation import SiluAndMul
+from my_plugin.silu_and_mul_plugin import TritonSiluAndMul
+
+op = SiluAndMul()  # 在引擎进程、全局配置已初始化后执行
 assert type(op) is TritonSiluAndMul, type(op)
 print(op._forward_method.__name__)   # 期望 "forward_cuda"；若是 native 或编译包装，说明没启用
 ```
@@ -1737,14 +1847,24 @@ print(op._forward_method.__name__)   # 期望 "forward_cuda"；若是 native 或
 |---|---|---|
 | 模型与权重 | 同一个 checkpoint、同一份量化配置 | 权重变了，算子占比和总时间一起变 |
 | 引擎与 CUDA / Triton 版本 | 同一个镜像、同一条启动命令 | 版本升级带来别的优化，功劳算不清 |
-| 输入与输出长度 | 第 4 章的 `scripts/bench_openai.py`，固定 prompt、固定 `--max-tokens` | 输出变长，ITL 与吞吐一起动 |
+| 输入与输出长度 | 第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`，固定 prompt、固定 `--max-tokens` | 输出变长，ITL 与吞吐一起动 |
 | 并发与每档请求数 | 同一个并发档位、同一请求数 | 并发一改，TTFT 与吞吐同时变，分不清是谁的功劳 |
 | 采样参数 | `temperature = 0`、固定 `seed`、固定 `top_p` | 采样一变，输出长度分布变，ITL 跟着变 |
 | 预热 | 先跑若干请求把 Triton 的编译与 autotune 热掉，再开始计时 | 首次调用的 JIT 编译会算进 TTFT |
 
-流程按 A/B/A 走：基线（不装插件）→ 接入（装插件 + `--compilation_config.custom_ops '["+名字"]'`）→ 再跑一次基线。第三次的作用是看漂移：如果两次基线的差和 A/B 的差同量级，说明这台机器上的差异小于噪声，不能下结论。每一档并发至少重复三次，先看同一配置内 run-to-run 的离散度，再看 A/B 的差。
+流程按 A/B/A 走：基线（不加载该插件）→ 接入（加载插件并启用实际的 op.name）→ 再跑基线。完整包的入口名是 `my_plugin`，正常版本下子类 name 是 `SiluAndMul`；在引擎进程核对后再采用以下启动形式：
 
-profiler 单独跑一遍，不要和计时混在一起：挂上 profiler 会改变时间。用 vLLM 的 profiler 或 torch profiler 抓一次前向，在 kernel 名单里找 `_silu_and_mul_kernel`，同时看它的调用次数对不对得上（每层 MLP 一次 × 层数 × 步数）。名单里有、次数对，才算“Triton kernel 真的跑了”；只有 TTFT 变好、名单里没有你的 kernel，那个变化不是你的。
+```bash
+# A：关闭示例插件加载；同一环境/模型参数，其余不变。
+VLLM_PLUGINS='' vllm serve Qwen/Qwen3-0.6B --dtype float16 --max-num-seqs 8
+# B：停止 A 后启动；若本机还有必要的其他插件，A/B 都保留它们，仅切换 my_plugin。
+VLLM_PLUGINS=my_plugin vllm serve Qwen/Qwen3-0.6B --dtype float16 --max-num-seqs 8 \
+  --compilation_config.custom_ops '["+SiluAndMul"]'
+```
+
+不要把 `-SiluAndMul` 当成树内 C++ 基线：关闭 custom op 可能选择 native 路径，改变了基线。第三次的作用是看漂移：如果两次基线的差和 A/B 的差同量级，说明这台机器上的差异小于噪声，不能下结论。每一档并发至少重复三次，先看同一配置内 run-to-run 的离散度，再看 A/B 的差。
+
+profiler 单独跑一遍，不要和计时混在一起：挂上 profiler 会改变时间。用 vLLM 的 profiler 或 torch profiler 抓一次前向，在 kernel 名单里找 `_silu_and_mul_kernel`，同时看它的调用次数对不对得上（每层 MLP 一次 × 层数 × 步数）。名单里有、次数与模型执行路径对得上，才算替换命中；随后重跑同一组质量评测，确认优化后的权重/图/算子配置仍过预先门槛。只有性能变化没有路径和质量证据，不能验收为优化有效。
 
 预期要先摆出来，再测。Amdahl 定律：总提速 `= 1 / ((1 − p) + p / s)`，`p` 是这个算子占端到端时间的份额，`s` 是它自身的提速倍数。`p = 1%` 时，哪怕 `s` 无穷大，总提速也只有 `1 / 0.99 ≈ 1.0101`，省 1%；`s = 2` 时是 `1 / (0.99 + 0.005) ≈ 1.0050`，省 0.5%。`p = 5%` 的上限是 `1 / 0.95 ≈ 1.0526`，`p = 10%` 是 `1 / 0.9 ≈ 1.1111`。天花板是份额，不是 kernel 的质量。
 
@@ -1779,14 +1899,14 @@ profiler 单独跑一遍，不要和计时混在一起：挂上 profiler 会改�
 - **基线本来就是融合实现**：树内的 `torch.ops._C.silu_and_mul` 访存已经是 `6MD`，Triton 版省不出遍数，只能争常数项；微基准显示 Triton 慢 10%，端到端因此更慢。结论是这条替换在当前版本上不划算，不是“Triton 不行”。
 - **没生效**：profiler 名单里没有 `_silu_and_mul_kernel`，`_forward_method` 是 `forward_native`，原因是启用的名字写成了树内注册名而不是替换后的 `name`。补测办法是改名字后重跑，并把两次的打印都留在报告里。
 
-写不出的归因不要编。“不知道”加一条补测计划，比一个编出来的解释有用；报告的价值在于每个说法都有对应的证据位置，而不在于结论好看。第三部分到这里结束：五章的东西合起来证明的是一件事——你会写 kernel、验证它、测出它快在哪、再把它接进引擎。第 29 章会把这个 SiluAndMul 原样搬到 Ascend 上，第 2 节的写法、第 3 节的注册、第 4 节的控制变量，到那边会再用一遍。
+写不出的归因不要编。“不知道”加一条补测计划，比一个编出来的解释有用；报告的价值在于每个说法都有对应的证据位置，而不在于结论好看。第三部分到这里结束：六章的实验合起来要验证的是一件事——你会写 kernel、验证它、测出它快在哪、再把它接进引擎。第 29 章复用这个 SiluAndMul 制定 Ascend 迁移实验；没有 NPU 时只交检查计划，不能宣称已经移植成功。
 
 **延伸**：[vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)、[`vllm/model_executor/custom_op.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/custom_op.py)（注册表与分发逻辑）、[`vllm/model_executor/layers/activation.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/activation.py)（`SiluAndMul` 与树内 Triton 激活 kernel）、[Triton `do_bench` 文档](https://triton-lang.org/main/python-api/generated/triton.testing.do_bench.html)、[Amdahl 定律原文](https://dl.acm.org/doi/10.1145/1465482.1465560)（Amdahl，1967）。
 
 ## 本模块检查清单
 
 - [ ] 有一张 GEMM 优化阶梯总表：四个版本各自的算术强度、实测耗时、实测算力、ncu 读数与瓶颈判断
-- [ ] 能用 ncu 的两个数（SM% / DRAM%）判断一个 kernel 是计算受限、访存受限还是延迟受限
+- [ ] 用 SM% / DRAM% 初筛，并以字节、缓存、就绪 warp/stall 和耗时证据完成归因
 - [ ] 能手推 online softmax 的 rescale 公式，并按 SRAM 容量算出自己 GPU 的分块参数
 - [ ] 写出过 fused attention 与 fused dequant matmul，数值都对齐过
 - [ ] 改过一个 CUTLASS GEMM 的 tile 配置并测出了变化

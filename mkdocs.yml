@@ -12,7 +12,7 @@
 #
 # 推送到 main 后，.github/workflows/pages.yml 会自动构建并发布到 GitHub Pages。
 site_name: 边做边学 LLM 推理服务
-site_description: 一本写给工程师的 LLM 推理基础设施书：5 部分、31 章，从 Roofline 到跨芯片对比。
+site_description: 面向工程师的 LLM 推理学习路线：性能度量、框架调优、算子优化与昇腾适配，以可复现报告为目标。
 site_url: https://tdccccc.github.io/time-to-first-token/
 repo_url: https://github.com/tdccccc/time-to-first-token
 repo_name: tdccccc/time-to-first-token
@@ -87,6 +87,7 @@ markdown_extensions:
 
 nav:
   - 前言: index.md
+  - 快速上手: docs/quickstart.md
   - 全书目录: docs/catalog.md
 
   - 第一部分 基础与度量:
@@ -99,36 +100,36 @@ nav:
 
   - 第二部分 推理框架:
       - 本部分导览: docs/parts/part-2.md
-      - 第 6 章 心智模型: docs/chapters/chapter-06.md
+      - 第 6 章 推理瓶颈判断：计算、带宽与启动开销: docs/chapters/chapter-06.md
       - 第 7 章 模型架构: docs/chapters/chapter-07.md
       - 第 8 章 vLLM：先部署，再读内部实现: docs/chapters/chapter-08.md
-      - 第 9 章 度量基础设施: docs/chapters/chapter-09.md
-      - 第 10 章 SGLang 与批处理内部: docs/chapters/chapter-10.md
-      - 第 11 章 压测到 1000 并发: docs/chapters/chapter-11.md
+      - 第 9 章 推理服务监控：Prometheus 与 Grafana: docs/chapters/chapter-09.md
+      - 第 10 章 SGLang、RadixAttention 与批处理内部: docs/chapters/chapter-10.md
+      - 第 11 章 容量评估：并发曲线、SLO 与抢占边界: docs/chapters/chapter-11.md
       - 第 12 章 量化取舍: docs/chapters/chapter-12.md
       - 第 13 章 投机解码与 KV 淘汰: docs/chapters/chapter-13.md
       - 第 14 章 解耦式服务与 Kubernetes: docs/chapters/chapter-14.md
       - 第 15 章 大规模集群 PD 优化: docs/chapters/chapter-15.md
       - 第 16 章 单位经济学与路由器: docs/chapters/chapter-16.md
-      - 第 17 章 发表与阅读习惯: docs/chapters/chapter-17.md
-      - 第 18 章 TensorRT-LLM：编译式推理引擎: docs/chapters/chapter-18.md
+      - 第 17 章 发表，然后养成阅读习惯: docs/chapters/chapter-17.md
+      - 第 18 章 TensorRT-LLM：执行后端与三引擎对比: docs/chapters/chapter-18.md
 
   - 第三部分 算子优化:
       - 本部分导览: docs/parts/part-3.md
-      - 第 19 章 CUDA 优化阶梯: docs/chapters/chapter-19.md
-      - 第 20 章 Triton 入门: docs/chapters/chapter-20.md
-      - 第 21 章 Fused Attention 深讲: docs/chapters/chapter-21.md
-      - 第 22 章 量化 Matmul 深讲: docs/chapters/chapter-22.md
-      - 第 23 章 FlashAttention 与 CUTLASS: docs/chapters/chapter-23.md
-      - 第 24 章 接入推理引擎: docs/chapters/chapter-24.md
+      - 第 19 章 GEMM 的四版实现：优化、计时与归因: docs/chapters/chapter-19.md
+      - 第 20 章 Triton 入门：用 Python 写 kernel: docs/chapters/chapter-20.md
+      - 第 21 章 Fused Attention 深讲：先推导，再写 kernel: docs/chapters/chapter-21.md
+      - 第 22 章 量化 Matmul 深讲：量化方案本身: docs/chapters/chapter-22.md
+      - 第 23 章 FlashAttention 2/3 与 CUTLASS：读工业级实现: docs/chapters/chapter-23.md
+      - 第 24 章 收口：把自写 kernel 接入推理引擎: docs/chapters/chapter-24.md
 
   - 第四部分 国产芯片适配:
       - 本部分导览: docs/parts/part-4.md
-      - 第 25 章 芯片与软件栈地图: docs/chapters/chapter-25.md
-      - 第 26 章 CANN 与 AscendC: docs/chapters/chapter-26.md
-      - 第 27 章 Ascend 跑通与插件: docs/chapters/chapter-27.md
+      - 第 25 章 芯片与软件栈地图：先画地图，再谈适配: docs/chapters/chapter-25.md
+      - 第 26 章 CANN 与 AscendC 深讲：算子从定义到编译到调用: docs/chapters/chapter-26.md
+      - 第 27 章 同一模型在 Ascend 上跑通 + vllm-ascend 插件架构: docs/chapters/chapter-27.md
       - 第 28 章 算子覆盖分析: docs/chapters/chapter-28.md
-      - 第 29 章 移植案例: docs/chapters/chapter-29.md
+      - 第 29 章 迁移前检查与实验设计：从 Triton 到 Ascend: docs/chapters/chapter-29.md
       - 第 30 章 精度回归与调优报告: docs/chapters/chapter-30.md
 
   - 第五部分 综合项目:
@@ -138,6 +139,8 @@ nav:
   - 附录:
       - 阅读进度: docs/progress.md
       - 全书结构: docs/MODULES.md
+      - 统一实验约定: docs/experiments.md
+      - 术语表: docs/glossary.md
       - 发表 benchmark 之前: docs/backmatter/benchmark.md
       - 决策点: docs/backmatter/decisions.md
       - 参考资料: docs/backmatter/references.md
