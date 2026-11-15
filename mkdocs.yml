@@ -1,4 +1,4 @@
-# 学习计划的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
+# 书籍站点的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
 # 书籍式结构：5 部分 / 31 章；左侧可折叠目录，右侧本页笔记。
 #
 # Markdown 仍是唯一事实来源：改内容请改 md，推送后 Actions 自动重新生成上线。

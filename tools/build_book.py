@@ -259,6 +259,8 @@ MODULE_WEEKS = {"m1": M1_WEEK_TO_CH, "m2": M2_WEEK_TO_CH, "m3": M3_WEEK_TO_CH, "
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)(\))")
+CONFLICT_RE = re.compile(r"^(?:<{7}|>{7})(?:\s|$)")
+CHAPTER_HEADING_RE = re.compile(r"^#{1,6}\s+第\s*(\d+)\s*章")
 
 
 @dataclass
@@ -1271,9 +1273,38 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     write(f"docs/chapters/{chapter.slug}.md", text)
 
 
+def validate_source_blocks(sources: dict[str, Source], blocks: dict[str, list[list[str]]]) -> None:
+    """Fail the build on merge debris or a chapter split that silently shifts."""
+    expected: dict[str, list[int]] = {}
+    for num, _part, _title, module, _index, _optional in CHAPTERS:
+        expected.setdefault(module, []).append(num)
+    for module, src in sources.items():
+        for lineno, line in enumerate(src.lines, 1):
+            if CONFLICT_RE.match(line):
+                raise SystemExit(f"{src.path}:{lineno}: unresolved merge conflict marker: {line!r}")
+        want = expected[module]
+        got = blocks[module]
+        if len(got) != len(want):
+            raise SystemExit(
+                f"{src.path}: found {len(got)} chapter blocks, expected {len(want)} "
+                f"(chapters {want[0]}–{want[-1]}); check for duplicate or missing chapter headings"
+            )
+        if module == "m4":
+            continue
+        for block, num in zip(got, want):
+            match = CHAPTER_HEADING_RE.match(block[0]) if block else None
+            found = int(match.group(1)) if match else None
+            if found != num:
+                raise SystemExit(
+                    f"{src.path}: block for chapter {num} starts with chapter {found}: "
+                    f"{(block[0] if block else '')!r}"
+                )
+
+
 def build_sources_and_chapters() -> dict[str, Source]:
     sources = {m: load_source(m) for m in ("m0", "m1", "m2", "m3", "m4")}
     blocks: dict[str, list[list[str]]] = {m: source_chapter_blocks(s) for m, s in sources.items()}
+    validate_source_blocks(sources, blocks)
     for num, part_num, title, module, index, optional in CHAPTERS:
         if index >= len(blocks[module]):
             raise SystemExit(f"missing source block: {module} #{index} (ch {num})")

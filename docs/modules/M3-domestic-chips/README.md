@@ -850,11 +850,7 @@ C_time 有一个盲区：回退到 CPU 的算子没有设备时间，按设备�
 **延伸**：[vLLM Ascend 仓库](https://github.com/vllm-project/vllm-ascend)
 **延伸**：[CANN 文档](https://www.hiascend.com/document)
 
-<<<<<<< HEAD
 ## 第 29 章 · 移植案例：把 Triton kernel 搬到 Ascend
-=======
-## 第 29 章 · 移植案例：把 M2 的 Triton kernel 一步一步搬到 Ascend
->>>>>>> ch28
 
 把一个在 GPU 上跑通的 Triton kernel 搬到 Ascend，最先遇到的往往不是“算子不存在”。更常见的是三种症状：编译过了，结果和参考实现对不上；结果对了，速度慢一个数量级；或者一启动就卡在图编译上。它们指向同一类原因——代码里有一批“默认这里是 CUDA”的假设，换了硬件之后假设不再成立，但代码不会主动报错。
 
