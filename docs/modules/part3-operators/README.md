@@ -252,6 +252,8 @@ gemm_tiled<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
 
 8.59 ms 是按逻辑 global load 字节数算的参考，不是有缓存 kernel 的时间下界：L2 若接住一部分重复读，真实 HBM 搬运量会更小，实测可能低于 8.59 ms。读到比 8.59 ms 还快的数，先确认计时与 L2 命中，再下结论。
 
+换到 A40（公开规格/算例：FP32 37.4 TFLOPS、带宽 696 GB/s），FP32 脊点 = 37.4×10¹² ÷ 696×10⁹ ≈ 53.7 FLOP/B，A100 的对照是 19.5×10¹² ÷ 2×10¹² = 9.75。仍按无缓存复用假设、AI = 8：参考线 = min(8 × 696, 37,400) = 5,568 GFLOP/s ≈ 5.57 TFLOPS，137.4 GFLOP ÷ 5.57 TFLOPS ≈ 24.7 ms（A100 是 16 TFLOPS / 8.59 ms）。要让 AI 越过 A40 的 FP32 脊点 53.7，BLOCK 至少 53.7 × 4 ≈ 214.8，取 2 的幂是 256（A100 是 39 → 64）。这些是 A40 公开规格下的参考线；四版 kernel 的实测阶梯要按 A40 重测，不能把 A100 的 7 ms / 8.59 ms 或提速倍数直接乘过来。
+
 每个 block 用 8 KB shared（两块 32×32×4 B）。A100 每个 SM 有 164 KB shared，光按 shared 算能放 164 ÷ 8 = 20.5，向下取整 20 个 block。这只是 shared 一项的上限：这个 kernel 的 block 是 1024 个线程，A100 每 SM 最多 2048 个线程，线程数一项只允许 2 个 block；寄存器够不够还要看编译器给的数。20 个 block 在这里用不上，19.5 会按线程、寄存器与 shared 三项资源取最小，block 数还有一道单独的上限。
 
 换到 A40，这几项都要按公开规格重算：A40 每 SM 100 KiB shared、单 block 最多 99 KiB、1536 线程/SM、84 SM、6 MiB L2。单看 shared，100 ÷ 8 = 12.5，向下取整 12 个 block；但 1024 线程的 block 在 1536 线程/SM 下只允许 1 个，理论占用率是 32/48 ≈ 67%，不再是 A100 的两个 block、100%。164 KiB/2048 线程/108 SM/40 MiB 是 A100 的规格，不能直接照搬（公开规格/算例）。
@@ -351,6 +353,8 @@ cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, gemm_tiled_2x2, 256, 0);
 | 分块版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 | 向量化版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
 | 占用率调优版 | 8 | 16 TFLOPS（8.6 ms） | 待补测 | 待补测 | 待补测 | 待补测 / 待补测 | 待补测 |
+
+表中 A100 的耗时与提速是 A100 算例；A40 的参考线是 5.57 TFLOPS / 24.7 ms（公开规格/算例），四版实测待补。
 
 表怎么读。先看算术强度：只有分块改了它（0.25 → 8），向量化与占用率都没改——这两步不改变搬运量与计算量，算术强度自然还是 8。再看上界：表内参考线不能当成带缓存的实测 HBM 上界；“占实测 Roofline”要以本次实际字节/缓存条件另算。横向比较耗时与实测算力，瓶颈判断还需就绪/stall 证据，不能只靠两个百分比。
 
@@ -615,7 +619,9 @@ __global__ void add_kernel(const float* x, const float* y, float* out, int n) {
 
 一个 1024 token 的序列，attention 的分数矩阵是 1024×1024。把它算出来、写回显存、再读回来做 softmax，S 和 P 两个中间矩阵各占 2 MiB，一写一读就是 8 MiB 的搬运；而 Q、K、V、O 四个张量加起来只有 512 KiB。A100 的 HBM 带宽是 2 TB/s，8 MiB 对应 4.19 µs，加 512 KiB 的 0.26 µs，共约 4.46 µs——朴素实现的瓶颈不在乘加，在中间矩阵的往返。FlashAttention 的做法是让 S 和 P 永远不落 HBM：Q、K、V 分块读进 SRAM（静态随机存取存储器：GPU 每个 SM 上的一块高速存储，CUDA 里以 shared memory 的形式使用），softmax 与加权求和在片上完成，只把最终输出写回。这要求先回答两个问题：softmax 的整行最大值与分母，分块之后怎么精确算出来；每 SM 只有 164 KB 的 SRAM，块最大能开到多少。这两个问题答完，kernel 才有得写；写完还要用正确性、计时与 Roofline 三项验收。
 
-**本章目标。** 手推 online softmax 的更新式并说明它与整行 softmax 精确相等；按 A100 的 164 KB shared memory 算出 block 上限与寄存器压力；写出单 head、单序列的 Triton fused attention（causal 可选），并用 SDPA 对照、`do_bench` 计时和 Roofline 定位验收。
+设备口径上，A40 的 shared/L2/SM 与 A100 不同：正文的 A100 数字保留为对照，A40 实测按每 SM 100 KiB shared、单 block 99 KiB、6 MiB L2、84 SM 重算（公开规格/算例）。
+
+**本章目标。** 手推 online softmax 的更新式并说明它与整行 softmax 精确相等；按 A40 公开规格的 100 KiB shared/SM、99 KiB 单 block 上限算出 block 上限与寄存器压力（A100 的 164 KiB 保留为对照；按 99 KiB 重算的 block 上限见 21.2 的 shared 表，128×128 双缓冲 112 KiB 在 A40 上开不了）；写出单 head、单序列的 Triton fused attention（causal 可选），并用 SDPA 对照、`do_bench` 计时和 Roofline 定位验收。
 
 ### 第 1 节 · Online softmax 的数学推导
 
@@ -997,6 +1003,10 @@ Roofline 逐项算：
 两个比值要分开说。搬运量：朴素版总共 8,912,896 B，是 fused 版 524,288 B 的 17 倍；其中 S、P 的额外 8 MiB 正好是 fused 基础搬运量的 16 倍。时间下界：4.46 µs ÷ 0.86 µs = 5.2 倍，不是 17 倍。原因是两侧的瓶颈不同：朴素版的时间由 8.5 MiB 的搬运决定，fused 版由 0.268 GFLOP 的计算决定；搬运量涨了 17 倍，时间只涨 5.2 倍。
 
 算术强度随 N 变：AI = N/2。N = 256 时 128，低于脊点 156，同一 kernel 在短序列上转成带宽受限；N = 512 时 256，超过脊点；N = 2048 时 1024；N = 4096 时 2048。脊点对应的序列长度是 N = 312。「fused attention 是计算受限」这句话只在 N 大于 312 时成立，N = 1024 的测试点只是其中一个点。
+
+把同一组 Roofline 账换到 A40（公开规格/算例）：FP16 峰值 74.8 TFLOPS、带宽 696 GB/s，脊点 74.8×10¹² ÷ 696×10⁹ ≈ 107 FLOP/B；A100 的对照仍是 312 TFLOPS / 约 2 TB/s / 156。上表的「占 312 TFLOPS」列与 0.86 µs 是 A100 口径，A40 上要把分母换成 74.8 TFLOPS。同一个 N=1024、单 head、d=64 的算例，FLOPs = 4N²d = 0.268 GFLOP：计算下界 0.268×10⁹ ÷ 74.8×10¹² ≈ 3.58 µs（A100 0.86 µs）；fused 的 512 KiB 搬运下界 524,288 ÷ 696×10⁹ ≈ 0.75 µs（A100 0.26 µs）；朴素版 8.5 MiB 搬运下界 8,912,896 ÷ 696×10⁹ ≈ 12.8 µs（A100 4.46 µs）；朴素/fused 的时间比约 12.8 ÷ 3.58 ≈ 3.57（A100 5.2）。
+
+脊点交叉也不同：沿用 AI = N/2，A40 的 107 对应 N ≈ 214（A100 的 156 对应 N = 312）。N=256 时 AI=128：A40 已越过 107，算计算受限；A100 仍低于 156，算带宽受限。这是 A40 与 A100 在短序列判断上的关键差异。这些是理想下界与算例，不是实测；A40 的 6 MiB L2 比 A100 的 40 MiB 小得多，多 head、多序列并发时 K/V 的复用假设更弱，HBM 流量更早向 4.25 MiB 那一端移动。
 
 512 KiB 是 HBM 口径，前提是 K/V 在 L2 里被后续 Q block 复用。单 head、N = 1024、Br = 64 时，每个 Q block 都要扫一遍全部 K/V，16 个 block 合计发出约 16×256 KiB = 4 MiB 的 K/V load 请求；K+V 本身只有 256 KiB，A100 的 40 MB L2 放得下，所以 HBM 流量可以接近 512 KiB。如果 L2 放不下、或者被别的数据挤掉，HBM 流量会接近 4.25 MiB（4 MiB K/V + 256 KiB Q/O），AI 掉到约 60，落到脊点以下。这个边界决定了 512 KiB 的账在什么条件下成立。
 
