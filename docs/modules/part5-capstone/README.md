@@ -1,4 +1,4 @@
-# M4 · 综合项目：跨芯片推理优化报告
+# 第 5 部分 · 综合项目：跨芯片推理优化报告
 
 **本章目标。** 复用第 30 章同一份报告初稿和原始记录，补齐条件编号、证据等级、重复运行和优化后验收，形成可复现、能明确指出缺口的跨芯片报告。
 
@@ -107,7 +107,7 @@
 **命令形式。** 在目标环境执行，不是算例数字的来源；两边用同一输入和评测，文件与条件编号分别登记。固定 Sky prompt 不是 512 tokens。MMLU 命令不自动生成“1000 题子集”或 PPL：子集保存样本 ID，NLL/PPL 另行评测，API 参数按安装版本核验。
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
   --model meta-llama/Llama-3.1-8B-Instruct --prompt 'Explain why the sky is blue.' \
   --max-tokens 128 --concurrency 1 8 32 --requests 1024 \
   --test-id A-E2-r1 --conditions-id A-fp16-v1 --output A-E2.json
@@ -157,7 +157,7 @@ lm_eval --model local-completions \
 
 相关材料：
 
-- [第四部分 · 同一份跨芯片报告模板](../M3-domestic-chips/cross-chip-report-template.md)
-- [第一部分 · 基线报告模板](../M0-foundations/baseline-report-template.md)
-- [第一部分 · 压测脚本](../M0-foundations/scripts/bench_openai.py)
+- [第四部分 · 同一份跨芯片报告模板](../part4-domestic-chips/cross-chip-report-template.md)
+- [第一部分 · 基线报告模板](../part1-foundations/baseline-report-template.md)
+- [第一部分 · 压测脚本](../part1-foundations/scripts/bench_openai.py)
 - [全书结构](../../MODULES.md)

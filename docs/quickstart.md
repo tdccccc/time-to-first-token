@@ -11,16 +11,16 @@
 
 ```bash
 python3 --version
-python3 docs/modules/M0-foundations/scripts/bench_openai.py --help
-python3 docs/modules/M0-foundations/scripts/mock_sse.py --help
+python3 docs/modules/part1-foundations/scripts/bench_openai.py --help
+python3 docs/modules/part1-foundations/scripts/mock_sse.py --help
 ```
 
-完整源码：[压测客户端](modules/M0-foundations/scripts/bench_openai.py) · [mock SSE 服务](modules/M0-foundations/scripts/mock_sse.py)。
+完整源码：[压测客户端](modules/part1-foundations/scripts/bench_openai.py) · [mock SSE 服务](modules/part1-foundations/scripts/mock_sse.py)。
 
 ### 2. 在终端 A 启动 mock
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/mock_sse.py --port 8400
+python3 docs/modules/part1-foundations/scripts/mock_sse.py --port 8400
 ```
 
 mock 监听本机回环地址，按固定节奏发送内容，并返回服务端 token 计数。它没有模型计算、KV 管理或 GPU 调度，不能用于比较芯片性能。
@@ -38,14 +38,14 @@ print(json.dumps({
     "model": "mock",
     "python": sys.version,
     "system": platform.platform(),
-    "client": "docs/modules/M0-foundations/scripts/bench_openai.py",
-    "server": "docs/modules/M0-foundations/scripts/mock_sse.py",
-    "server_command": "python3 docs/modules/M0-foundations/scripts/mock_sse.py --port 8400",
+    "client": "docs/modules/part1-foundations/scripts/bench_openai.py",
+    "server": "docs/modules/part1-foundations/scripts/mock_sse.py",
+    "server_command": "python3 docs/modules/part1-foundations/scripts/mock_sse.py --port 8400",
     "note": "Only the measurement workflow is under test; no model or device benchmark."
 }, ensure_ascii=False, indent=2))
 PY
 
-python3 docs/modules/M0-foundations/scripts/bench_openai.py \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py \
   --base-url http://127.0.0.1:8400 --model mock \
   --max-tokens 16 --concurrency 1 4 --requests 20 \
   --test-id cpu-mock-r1 --conditions-id cpu-mock-env1 \
@@ -77,17 +77,20 @@ python3 docs/modules/M0-foundations/scripts/bench_openai.py \
 
 `nvidia-smi` 中的 CUDA 字段表示驱动支持的 CUDA 上限，**不是**已安装 Toolkit 或 PyTorch 构建版本。分别核对 `nvcc --version`（若安装 Toolkit）、PyTorch 运行时及引擎环境。
 
-7–8B 的 16 位权重通常约 14–17 GB，还需要 KV、工作区与图捕获空间。24GB 可作为短上下文起点，不保证所有模型、版本和并发组合都能运行。
+本书默认使用 **A40 48GB + Qwen3.5-9B**：LM 权重 18.39 GB（17.13 GiB），另有 KV 与约 49 MiB/请求的固定状态；32K 作为基线上下文。若只有 24GB 卡，改用 **Qwen3.5-4B**：LM 权重 8.65 GB（8.06 GiB），适合 8K/16K 短上下文。权重之外还需要 KV、工作区与图捕获空间，不保证所有模型、版本和并发组合都能运行。
 
 ### 2. 起一个短上下文、低并发的服务
 
-下面使用无需先接受 gated 模型许可的 Qwen2.5-7B-Instruct 作为参考；硬件、模型与量化支持以目标版本文档为准。本轮不把这条配方标为实机验证。
+下面使用 Qwen3.5-4B 作为 24GB 友好的参考；硬件、模型与量化支持以目标版本文档为准。本轮不把这条配方标为实机验证。
 
 ```bash
-vllm serve Qwen/Qwen2.5-7B-Instruct \
-  --dtype half --max-model-len 4096 --max-num-seqs 16 \
+vllm serve Qwen/Qwen3.5-4B \
+  --language-model-only --dtype bfloat16 \
+  --max-model-len 8192 --max-num-seqs 16 \
   --gpu-memory-utilization 0.9 --host 127.0.0.1 --port 8000
 ```
+
+A40 48GB 把模型换成 Qwen3.5-9B、`--max-model-len` 改为 32768，命令形状不变。
 
 先保存完整命令、模型 revision、实际版本与 KV 池日志。命令在服务机上执行；远程客户端使用 SSH 隧道等受控入口，不要直接暴露未鉴权的服务。
 
@@ -98,7 +101,7 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
 ```bash
 curl -N http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"Qwen/Qwen2.5-7B-Instruct","messages":[{"role":"user","content":"Explain why the sky is blue in one short paragraph."}],"max_tokens":16,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}'
+  -d '{"model":"Qwen/Qwen3.5-4B","messages":[{"role":"user","content":"Explain why the sky is blue in one short paragraph."}],"max_tokens":16,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}'
 ```
 
 确认内容块、结束状态与 usage 均正常，而不是仅看到进程启动或 HTTP 200。若发生 OOM、401/403、端口拒绝或字段不支持，先修环境和接口，不继续跑容量扫描。
@@ -108,10 +111,10 @@ curl -N http://127.0.0.1:8000/v1/chat/completions \
 把路径 A 的条件表升级为真实环境记录，改写 `platform/model/conditions_id`，补上设备、权重 revision、服务命令和缓存设置。再运行：
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/bench_openai.py \
-  --base-url http://127.0.0.1:8000 --model Qwen/Qwen2.5-7B-Instruct \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py \
+  --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.5-4B \
   --max-tokens 128 --concurrency 1 8 16 --requests 128 \
-  --test-id gpu-baseline-r1 --conditions-id qwen25-env1 \
+  --test-id gpu-baseline-r1 --conditions-id qwen35-env1 \
   --output results-gpu-baseline-r1.json
 ```
 

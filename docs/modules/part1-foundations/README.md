@@ -1,4 +1,4 @@
-# M0 · 基础与度量
+# 第 1 部分 · 基础与度量
 
 第二部分假定读者已经会“看”系统：知道什么受显存带宽限制、什么受计算限制，知道 TTFT、token 间延迟、吞吐各自在量什么，并有一套能复现的压测方法。本部分把这五项前置能力补齐，共 5 章。
 
@@ -36,43 +36,43 @@ Roofline 模型就是把这类判断变成算术。它用两个量描述一个 k
 
 ### 例子：7B 模型解码的一次时间账
 
-取 A100 80GB 的公开规格做算例：FP16 稠密算力约 312 TFLOPS，HBM 带宽约 2 TB/s。这是公开规格、用于示例，不是实测；不同卡的数字不同，判断方法不变。
+取 A40 48GB 的公开规格做主算例：FP16 稠密算力约 74.8 TFLOPS，GDDR6 带宽约 696 GB/s，脊点约 107 FLOP/字节。A100 80GB 作为对照：FP16 稠密约 312 TFLOPS、HBM 约 2 TB/s、脊点 156 FLOP/字节。这是公开规格、用于示例，不是实测；不同卡的数字不同，判断方法不变。
 
 **decode，batch=1。** 每生成一个 token：
 
 - 权重搬运：约 70 亿参数 × 2 字节/参数 ≈ 14 GB。
 - 计算量：每个参数一次乘加，一次乘加算 2 FLOP，约 2 × 70 亿 ≈ 14 GFLOP。
 - 算术强度：14 GFLOP ÷ 14 GB ≈ 1 FLOP/字节。
-- A100 脊点：312 TFLOPS ÷ 2 TB/s = 156 FLOP/字节。
-- 计算时间：14 GFLOP ÷ 312 TFLOPS ≈ 0.045 ms。
-- 搬运时间：14 GB ÷ 2 TB/s ≈ 7 ms。
+- A40 脊点：74.8 TFLOPS ÷ 696 GB/s ≈ 107 FLOP/字节（A100 80GB 对照为 312 TFLOPS ÷ 2 TB/s = 156）。
+- 计算时间：14 GFLOP ÷ 74.8 TFLOPS ≈ 0.187 ms。
+- 搬运时间：14 GB ÷ 696 GB/s ≈ 20.1 ms。
 
-搬运时间是计算时间的约 156 倍，decode 落在带宽受限一侧。**只算权重搬运、且一步只生成一个 token** 时，单请求吞吐上限约 1 ÷ 0.007 s ≈ 143 token/s；这个上限不含 KV 读取、调度、kernel 启动与采样，真实服务只会更低。如果测出超过 143 token/s 的单请求吞吐，先检查测量口径（batch 是否真的为 1、是不是一步吐了多个 token、token 数怎么数）。把算力翻倍，0.045 ms 只变成 0.022 ms，总时间仍由 7 ms 的搬运决定：算力不是没用，是当前瓶颈不在它那里。
+搬运时间是计算时间的约 107 倍，decode 落在带宽受限一侧。**只算权重搬运、且一步只生成一个 token** 时，单请求吞吐上限约 1 ÷ 0.0201 s ≈ 50 token/s；这个上限不含 KV 读取、调度、kernel 启动与采样，真实服务只会更低。如果测出超过 50 token/s 的单请求吞吐，先检查测量口径（batch 是否真的为 1、是不是一步吐了多个 token、token 数怎么数）。把算力翻倍，0.187 ms 只变成 0.094 ms，总时间仍由 20.1 ms 的搬运决定：算力不是没用，是当前瓶颈不在它那里。
 
 ### 用 batch 与 prefill 看 Roofline 上的位置变化
 
 **增大 batch。** batch=8 时，一次 decode 步骤仍只读一遍 14 GB 权重，但计算量变成 8 × 14 = 112 GFLOP：
 
 - 算术强度：112 GFLOP ÷ 14 GB = 8 FLOP/字节。
-- 计算时间：112 GFLOP ÷ 312 TFLOPS ≈ 0.36 ms。
-- 搬运时间：仍约 7 ms。
+- 计算时间：112 GFLOP ÷ 74.8 TFLOPS ≈ 1.50 ms。
+- 搬运时间：仍约 20.1 ms。
 
-总吞吐约 8 ÷ 0.007 s ≈ 1143 token/s（只算权重，不含 KV），是 batch=1 的 8 倍；但每个请求仍约每 7 ms 得到一个 token，单请求的 token 间隔没有缩短。batch 提高的是权重复用次数，不是单个请求能用的带宽。
+总吞吐约 8 ÷ 0.0201 s ≈ 398 token/s（只算权重，不含 KV），是 batch=1 的 8 倍；但每个请求仍约每 20.1 ms 得到一个 token，单请求的 token 间隔没有缩短。batch 提高的是权重复用次数，不是单个请求能用的带宽。
 
-那 batch 要多大才会翻到计算受限？只算权重时，令 B × 14 GFLOP / 312 TFLOPS = 7 ms，得 B ≈ 156。batch=156 时计算时间追上搬运时间；更大以后，计算才成为主要成本。这个数是模型和硬件共同决定的，不是通用常数。
+那 batch 要多大才会翻到计算受限？只算权重时，令 B × 14 GFLOP / 74.8 TFLOPS = 20.1 ms，得 B ≈ 107。batch 约 107 时计算时间追上搬运时间；更大以后，计算才成为主要成本。这个数是模型和硬件共同决定的，不是通用常数。
 
 **prefill。** 它一次处理整段 prompt，权重仍只读一遍，但计算量随输入长度 N 线性增长。矩阵乘部分约为 2 × N × 70 亿 FLOPs：
 
 | 输入长度 N | 权重计算量 | 注意力部分（估算） | 总计算量（估算） | 算术强度（约） | 判断 |
 |---:|---:|---:|---:|---:|---|
-| 128 | 1.79 TFLOP | 0.004 TFLOP | 1.80 TFLOP | 128 FLOP/字节 | 略低于脊点，带宽受限 |
+| 128 | 1.79 TFLOP | 0.004 TFLOP | 1.80 TFLOP | 128.6 FLOP/字节 | 刚过脊点，计算受限（A100 上为带宽受限） |
 | 512 | 7.17 TFLOP | 0.069 TFLOP | 7.24 TFLOP | 517 FLOP/字节 | 计算受限 |
 | 1024 | 14.34 TFLOP | 0.27 TFLOP | 14.61 TFLOP | 1044 FLOP/字节 | 计算受限 |
 | 4096 | 57.34 TFLOP | 4.40 TFLOP | 61.74 TFLOP | 4410 FLOP/字节 | 计算受限 |
 
 表里的“注意力部分”按 2 × N² × 4096 × 32 估算：32 层、hidden 4096，只计 QK^T 一项，PV、softmax、mask 未计，所以它只表示 N² 的量级，不是完整 attention 的实测 FLOPs。总计算量是权重项加这一项；算术强度用总计算量除以 14 GB 权重搬运量，未计激活与 KV 写入。
 
-令权重计算时间追上权重搬运时间：2N × 7e9 / 312e12 = 14e9 / 2e12，解得 N ≈ 156。短 prompt 的 prefill 仍可能受带宽限制，长 prompt 更可能受计算限制；注意力项随 N² 增长，长上下文下会进一步推高计算占比。只算权重时，batch 阈值、prefill 交叉点和脊点都落在 156：每多一个 token，算术强度就加 1 FLOP/字节，加到脊点就翻到计算侧。
+令权重计算时间追上权重搬运时间：2N × 7e9 / 74.8e12 = 14e9 / 696e9，解得 N ≈ 107.5（A100 80GB 对照为 156）。N 小于约 107 的 prefill 仍受带宽限制，更长的 prompt 转为计算受限；注意力项随 N² 增长，长上下文下会进一步推高计算占比。只算权重时，batch 阈值、prefill 交叉点和脊点都落在约 107：每多一个 token，算术强度就加 1 FLOP/字节，加到脊点就翻到计算侧。
 
 **补上 KV 缓存。** 上面只算了权重，decode 还要读历史 token 的 K、V。以 Mistral-7B 为例：32 层、8 个 KV 头（GQA，grouped-query attention，分组查询注意力：多个 query 头共享一组 K/V 头）、头维 128、FP16，每 token 的 KV 为：
 
@@ -80,11 +80,31 @@ Roofline 模型就是把这类判断变成算术。它用两个量描述一个 k
 2（K 和 V）× 32 层 × 8 个 KV 头 × 128 维 × 2 字节 = 131072 字节 = 128 KiB
 ```
 
-上下文 1024 token、batch=1 时，KV 约 128 MiB，和 14 GB 权重相比很小；batch=8、上下文 1024 时，KV 约 1 GiB，decode 一步的搬运量从 14 GB 变成约 15.1 GB，时间约从 7.0 ms 变成 7.5 ms。上下文越长、batch 越大，KV 在搬运账里的占比越高。
+上下文 1024 token、batch=1 时，KV 约 128 MiB，和 14 GB 权重相比很小；batch=8、上下文 1024 时，KV 约 1 GiB，decode 一步的搬运量从 14 GB 变成约 15.1 GB，时间约从 20.1 ms 变成 21.7 ms。上下文越长、batch 越大，KV 在搬运账里的占比越高。
 
 如果是 MHA（multi-head attention，多头注意力：每个 query 头各存一份 K/V），同一模型的 KV 会是 GQA 的 4 倍。所以看到一个模型的 KV 数字，先确认注意力结构与头数，不能只拿参数量套。
 
-把 KV 计入搬运量，上面只算权重的上限会下降：batch=8、上下文 1024 时，吞吐上限约 1061 token/s，而不是 1143 token/s。本章的 1143 是只算权重的口径；比较不同来源的数字，先对齐这一点。
+把 KV 计入搬运量，上面只算权重的上限会下降：batch=8、上下文 1024 时，吞吐上限约 369 token/s，而不是约 398 token/s。本章的约 398 是只算权重的口径；比较不同来源的数字，先对齐这一点。
+
+### 把这套账套到 Qwen3.5-9B
+
+上面的 7B 算例用 Llama-3.1-8B/Mistral-7B 的 GQA 几何讲最简版本；本书默认的运行模型是 Qwen3.5-9B。只加载语言模型时（vLLM 启动加 `--language-model-only`），16 位（BF16）权重为 18.394 GB（17.13 GiB）。下面的数字都是纸面算例和下界，不是实测。
+
+**decode。** 单请求一步仍只读一遍权重：18.394 GB ÷ 696 GB/s ≈ 26.4 ms/token，对应单请求吞吐上限约 38 token/s；计算下界为 18.394 GFLOP ÷ 74.8 TFLOPS ≈ 0.246 ms。算术强度约 18.394 GFLOP ÷ 18.394 GB = 1 FLOP/字节，和 7B 算例一样远在 A40 脊点 107 的左侧，decode 仍是带宽受限。
+
+**混合结构与状态。** Qwen3.5-9B 的 32 层由 8 层 full attention 和 24 层 Gated DeltaNet 组成。full attention 每 token 的 KV 为 2 × 8 层 × 4 个 KV 头 × 256 维 × 2 字节 = 32 KiB；24 层 Gated DeltaNet 另有每请求约 49 MiB 的固定递推状态（48 MiB FP32 状态加约 1.1–1.5 MiB 卷积槽位，合计约 49 MiB），不能由 block table 在请求间共享。把上下文加进去，单请求的状态账是：
+
+| 上下文 | KV（32 KiB/token） | 固定状态 | 合计 |
+|---:|---:|---:|---:|
+| 500 token | 16 MiB | 49 MiB | 约 65 MiB |
+| 8K | 256 MiB | 49 MiB | 约 305 MiB |
+| 32K | 1 GiB | 49 MiB | 约 1.05 GiB |
+
+短上下文由固定状态主导：500 token 的 KV 只有 16 MiB，49 MiB 的递推状态反而是大头；到 8K 以后 KV 才逐渐占主导。这部分固定状态随请求数线性增长，估并发时要逐条计入，不能当成可共享的 KV block。
+
+**prefill。** 只算权重项，512 token 约为 2 × 9.2e9 × 512 ≈ 9.42 TFLOP，除以 74.8 TFLOPS 约 126 ms；8K 约 150.7 TFLOP ÷ 74.8 TFLOPS ≈ 2.0 s。两者都远高于约 26.4 ms 的权重搬运下界，prefill 是计算受限；序列越长，注意力项还会继续抬高计算量。
+
+这些数字用来在启动服务前判断量级，不是实测；第 5 章给出 A40 + Qwen3.5-9B 的基线命令，第 8 章给出服务启动配置。实际值以启动日志的 KV cache size 和压测记录为准。
 
 ### 边界：Roofline 不负责预测什么
 
@@ -166,15 +186,15 @@ ITL 也要看分布。设 100 个间隔里 99 个是 25 ms、1 个是 300 ms，�
 |---|---|---|
 | 输入 / 输出长度 | 决定 prefill、decode 与 KV 缓存 | 输入 512，输出 128（实际 completion_tokens 的 p50/p95） |
 | 并发与到达方式 | 决定排队 | 有限请求上限 C=32、N=1024；观测实际在途，非恒定并发 |
-| 模型、引擎、版本 | 决定基线 | Llama-3.1-8B，vLLM 版本号 |
-| 硬件 | 决定上限 | A100 80GB |
+| 模型、引擎、版本 | 决定基线 | Qwen3.5-9B，vLLM 版本号 |
+| 硬件 | 决定上限 | A40 48GB |
 | 预热与窗口 | 排除冷启动 | 预热 10 个请求，计时 60 s |
 | 成功 / 失败 / 超时 | 决定分母 | 100 / 0 / 0 |
 | 分位数算法 | 决定 p99 | 线性插值 (n − 1) × q |
 
 ### 四个数一起读：一条并发扫描
 
-把四个数放进同一张表，才看得出系统在哪一档从“还有余量”翻到“开始排队”。下表是一组算例（A100、7B、输入 512、输出 128、每级 100 个请求），不是实测：
+把四个数放进同一张表，才看得出系统在哪一档从“还有余量”翻到“开始排队”。下表是一组算例（A40、Qwen3.5-9B、输入 512、输出 128、每级 100 个请求），不是实测：
 
 | 并发 | 吞吐（token/s） | TTFT p50 / p95（ms） | ITL p50 / p95（ms） | 排队深度 p95 | 成功 / 总数 |
 |---:|---:|---:|---:|---:|---:|
@@ -365,13 +385,13 @@ TTFT、成功总延迟和实际长度分布每个成功请求一个样本；ITL 
 下面从仓库根目录运行，无需 GPU、Docker 或额外依赖。终端一：
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/mock_sse.py --port 8400
+python3 docs/modules/part1-foundations/scripts/mock_sse.py --port 8400
 ```
 
 终端二，20 请求只用于 C=1/4 的 mock 冒烟：
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/bench_openai.py \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py \
   --base-url http://127.0.0.1:8400 --model mock --max-tokens 16 \
   --concurrency 1 4 --requests 20 \
   --test-id mock-E1-r1 --conditions-id mock-stdlib-v1 \
@@ -407,13 +427,15 @@ python3 -B -m unittest discover -s tests -p test_bench_openai.py -v
 正式扫描示例从仓库根目录运行，模型名换成服务实际注册值：
 
 ```bash
-MODEL_NAME="Qwen/Qwen2.5-7B-Instruct"
-python3 docs/modules/M0-foundations/scripts/bench_openai.py \
+MODEL_NAME="Qwen/Qwen3.5-9B"
+python3 docs/modules/part1-foundations/scripts/bench_openai.py \
   --base-url http://127.0.0.1:8000 --model "$MODEL_NAME" \
   --max-tokens 128 --concurrency 1 8 32 64 --requests 1024 \
-  --test-id nvidia-E2-r1 --conditions-id nvidia-env-v1 \
+  --test-id a40-E2-r1 --conditions-id a40-env-v1 \
   --output bench-baseline-r1.json
 ```
+
+默认配置是 A40 48GB + Qwen3.5-9B；24GB 卡在服务端把模型换成 `Qwen/Qwen3.5-4B`，启动参数加 `--max-model-len 8192`；上面的客户端命令只换 `--model`，命令形状不变。
 
 1024 使总请求数大于每个并发上限，减少过短批次的影响；它不是 p99 准确或稳态已建立的保证。1/8/32/64 是起始档位，不预设哪档饱和。依据第一次曲线加密拐点附近的档位，并用 r2、r3 重复，保存每次原始 JSON；更完整的到达率与容量评估见第 11 章。
 
@@ -463,7 +485,7 @@ python3 docs/modules/M0-foundations/scripts/bench_openai.py \
 
 **延伸**：[GuideLLM：在真实部署上评估 LLM](https://developers.redhat.com/articles/2025/06/20/guidellm-evaluate-llm-deployments-real-world-inference)、[GuideLLM 仓库](https://github.com/vllm-project/guidellm)、[vLLM `bench serve` 文档](https://docs.vllm.ai/en/latest/benchmarking/cli/)。
 
-## 本模块检查清单
+## 本部分检查清单
 
 - [ ] 手算过目标模型的 decode 算术强度，能说清为什么解码受带宽限制
 - [ ] 能区分 TTFT、ITL、吞吐、排队深度，并知道为什么报 p95/p99

@@ -1,12 +1,12 @@
-# M3 · 国产芯片适配
+# 第 4 部分 · 国产芯片适配
 
 > 前置：第一部分（度量、profiling、压测脚本）与第二部分（vLLM/SGLang 已跑通）。本部分的终点：同一模型、同一评测集，在 NVIDIA 与至少一种国产芯片上都跑通、压测，并写出一份可复现的对比报告。
 >
 > 范围：通用软件栈地图配 Ascend 主线，不代表九家芯片均已验证。支持、覆盖与性能结论绑定来源、版本和日期；历史实测对原条件仍有效，新环境需重新核验。记录与质量/性能验收统一按[跨章节实验约定](../../experiments.md)填写；无 NPU 时只做源码和计划检查，不标实机通过。
 
-## 为什么单开一个模块
+## 为什么单独成一部分
 
-已有厂商样例、框架插件与社区追踪表，本模块把它们连成“认设备 → 跑服务 → 查算子 → 单点实验 → 质量/性能验收”的路径。实机读者先完成第 27 章环境，再执行第 26 章算子实验；阅读顺序和操作顺序不必相同。
+已有厂商样例、框架插件与社区追踪表，本部分把它们连成“认设备 → 跑服务 → 查算子 → 单点实验 → 质量/性能验收”的路径。实机读者先完成第 27 章环境，再执行第 26 章算子实验；阅读顺序和操作顺序不必相同。
 
 ## 第 25 章 · 芯片与软件栈地图：先画地图，再谈适配
 
@@ -507,10 +507,10 @@ curl -sS -N http://localhost:8000/v1/completions \
 
 非流式 `time_total` 是总耗时，不是 TTFT。本书客户端以首个非空 `delta.content` chunk 到达近似 TTFT；ITL 记录内容 chunk 间隔，TPOT 另按首末内容跨度与实际 token 数计算。一个 chunk 可以包含多个 token，不能还原精确逐 token 时间。`curl -N` 只关闭 curl 自身缓冲，不能消除服务端、代理或网络缓冲；末尾 `[DONE]` 与 usage 不是内容，不计入 ITL。
 
-要数字，用第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`：它按流式 chat completions 计时，逐请求记 TTFT、总耗时、输出 token 数与 ITL。字段含义见第 5 章；命令里的参数按你的服务与模型改，只把 `--base-url` 指向 Ascend 服务。
+要数字，用第 4 章的 `docs/modules/part1-foundations/scripts/bench_openai.py`：它按流式 chat completions 计时，逐请求记 TTFT、总耗时、输出 token 数与 ITL。字段含义见第 5 章；命令里的参数按你的服务与模型改，只把 `--base-url` 指向 Ascend 服务。
 
 ```bash
-python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
   --model Qwen/Qwen3-0.6B --prompt 'Explain why the sky is blue.' \
   --max-tokens 32 --concurrency 1 --requests 1 --test-id ascend-smoke --conditions-id ascend-smoke-v1
 ```
@@ -1165,7 +1165,7 @@ tokenizer 也在清单里：同一个模型名不等于同一个 tokenizer，切
 
 再看延迟翻倍的情形：ITL 从 20 毫秒涨到 40 毫秒、TTFT 不变，总延迟 = 100 + 40 × 100 = 4100 毫秒 = 4.1 秒，单请求速率 ≈ 24.6 token/秒，并发 8 的吞吐 ≈ 8 × 24.6 ≈ 196.8 token/秒。并发涨 8 倍，吞吐只涨 196.8 ÷ 48.1 ≈ 4.1 倍，这里仅演示假设 ITL 变化造成的吞吐损失，不从实际吞吐差反推争用。
 
-测量条件先钉死：用第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`，不在两边各写一套脚本；并发档位至少三级（1 / 8 / 32 是例子，按硬件容量选），每级请求数、prompt、max_tokens、temperature 两边相同；每档先预热（第一次跑混着编译与缓存预热的成本），再重复多轮；每一轮按第 11 章的口径报 p50 与 p95，需要看尾巴时加 p99，跨轮取中位数。20 个请求的 p95 基本由最慢的一两个请求决定，p99 基本就是最慢的那一个；样本量写进表里，别把 20 个请求的 p99 当成精确分位。实际生成长度按 `usage.completion_tokens` 记（读不到时脚本按字符数估算，JSON 里会标 `tokens_estimated`）：两边平均长度差得多，ITL 与吞吐的差异里就混进了长度差，先按长度归一或分长度段比较，再谈芯片。
+测量条件先钉死：用第 4 章的 `docs/modules/part1-foundations/scripts/bench_openai.py`，不在两边各写一套脚本；并发档位至少三级（1 / 8 / 32 是例子，按硬件容量选），每级请求数、prompt、max_tokens、temperature 两边相同；每档先预热（第一次跑混着编译与缓存预热的成本），再重复多轮；每一轮按第 11 章的口径报 p50 与 p95，需要看尾巴时加 p99，跨轮取中位数。20 个请求的 p95 基本由最慢的一两个请求决定，p99 基本就是最慢的那一个；样本量写进表里，别把 20 个请求的 p99 当成精确分位。实际生成长度按 `usage.completion_tokens` 记（读不到时脚本按字符数估算，JSON 里会标 `tokens_estimated`）：两边平均长度差得多，ITL 与吞吐的差异里就混进了长度差，先按长度归一或分长度段比较，再谈芯片。
 
 版本写全：硬件型号加显存、驱动与固件、Python / PyTorch / TorchNPU（PyTorch 的昇腾适配）、CANN、vLLM 与 vllm-ascend，或对应的芯片插件，每项带核实日期。版本锚点见第 27 章的安装链，本章不写死具体版本号——版本一换，数字就过期，报告按「某年某月某版本实测」记录。条件缺一项，别人复现出来的曲线就对不上，对不上又分不清是系统变了还是条件变了。
 
@@ -1177,7 +1177,7 @@ tokenizer 也在清单里：同一个模型名不等于同一个 tokenizer，切
 
 ```bash
 MODEL=Qwen/Qwen3-0.6B  # 换成两边实际跑过的同一个模型
-python3 docs/modules/M0-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
+python3 docs/modules/part1-foundations/scripts/bench_openai.py --base-url http://localhost:8000 \
   --model "$MODEL" --prompt 'Explain why the sky is blue.' \
   --max-tokens 128 --concurrency 1 8 32 --requests 1024 \
   --test-id A-E2-r1 --conditions-id A-fp16-v1 --output A-E2.json
@@ -1292,7 +1292,7 @@ lm_eval --model local-completions \
 
 ## 其他芯片的切入点
 
-本模块选择 Ascend 作为贯穿样例，便于把 CANN、插件和算子实验连起来；这不是各厂商成熟度的排名。其他芯片的切入点供学完主线后扩展（状态以 [awesome-china-gpu](https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md) 的最新追踪为准，不要照抄这里的版本信息）：
+本部分选择 Ascend 作为贯穿样例，便于把 CANN、插件和算子实验连起来；这不是各厂商成熟度的排名。其他芯片的切入点供学完主线后扩展（状态以 [awesome-china-gpu](https://github.com/bytetora/awesome-china-gpu/blob/HEAD/README.md) 的最新追踪为准，不要照抄这里的版本信息）：
 
 - **摩尔线程 MUSA**：vllm-musa 插件，另有 llama.cpp 官方支持
 - **海光 DCU**：DTK 与对应 vLLM 镜像；按目标模型、精度与通信路径核验迁移差异
@@ -1301,7 +1301,7 @@ lm_eval --model local-completions \
 - **沐曦 MetaX**：vllm-metax 插件（[厂商名称](https://www.metax-tech.com/about.html)、[插件文档](https://vllm-metax.readthedocs.io/en/latest/)）
 - **多芯片统一接入**：[vllm-plugin-FL](https://docs.flagos.io/projects/vllm-plugin-FL/en/latest/overview/features.html)（FlagGems 统一算子库 + FlagCX 统一通信库）
 
-## 本模块检查清单
+## 本部分检查清单
 
 - [ ] 能画出国产芯片软件栈的分层图，并说清插件机制
 - [ ] 同一模型在 Ascend 上跑通过（或明确标注了待补测的原因）

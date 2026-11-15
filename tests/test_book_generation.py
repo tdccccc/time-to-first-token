@@ -76,7 +76,7 @@ class BookGenerationTests(unittest.TestCase):
         for number, title in expected.items():
             with self.subTest(chapter=number):
                 self.assertEqual(titles[number], title)
-                chapter = BOOK.Chapter(number, 1, title, "m0", 0)
+                chapter = BOOK.Chapter(number, 1, title, "part1", 0)
                 self.assertEqual(chapter.slug, f"chapter-{number:02d}")
 
 

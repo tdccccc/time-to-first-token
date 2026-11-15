@@ -1,4 +1,4 @@
-# M2 · 算子优化
+# 第 3 部分 · 算子优化
 
 > 前置：第 1、3、6 章的 Roofline、profiling 与执行模型；第 19–23 章不要求先部署服务，第 24 章接入时再完成第 8 章。本部分的终点：确认自写 kernel 真正进入引擎，再用同条件的正确性、质量和性能记录决定保留或回滚；没变快也可以是有效结论。
 >
@@ -6,9 +6,9 @@
 >
 > 本部分的深度标准：优化做成阶梯，每一步先用 `ncu` 定位瓶颈，再用 Roofline 判断这一步卡在哪；正文数字是算例，实际收益以你在自己机器上的测量为准。6 章分工：第 19–22 章写和验证 kernel，第 23 章读工业实现，第 24 章接回引擎。
 
-## 为什么单开一个模块
+## 为什么单独成一部分
 
-M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。M2 的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用 M0 的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，本模块复用官方教程和插件接口，将“接入引擎、证明命中、验证端到端收益”接成一条实验路径。
+第 2 部分让你会用引擎、会调参数，但引擎内部的 attention、matmul、量化 kernel 对你还是黑盒。第 3 部分的目标是打开这个盒子：先学会写 kernel，再把 kernel 接回引擎，最后用第 1 部分的压测脚本量出端到端的变化。现有的练习资源（GPU Puzzles、Triton Puzzles、LeetGPU）都在 kernel 层面收尾，本部分复用官方教程和插件接口，将“接入引擎、证明命中、验证端到端收益”接成一条实验路径。
 
 ## 第 19 章 · GEMM 的四版实现：优化、计时与归因
 
@@ -20,7 +20,7 @@ M1 让你会用引擎、会调参数，但引擎内部的 attention、matmul、�
 
 ```bash
 # 以下在已具备 CUDA Toolkit 与 NVIDIA GPU 的机器执行，本轮未执行。
-nvcc -O3 -std=c++17 -arch=sm_80 docs/modules/M2-operators/examples/gemm_bench.cu -o /tmp/gemm_bench
+nvcc -O3 -std=c++17 -arch=sm_80 docs/modules/part3-operators/examples/gemm_bench.cu -o /tmp/gemm_bench
 /tmp/gemm_bench --m 128 --n 128 --k 128 --check-only
 /tmp/gemm_bench --m 130 --n 127 --k 35 --check-only
 /tmp/gemm_bench --m 4096 --n 4096 --k 4096 --warmup 5 --repeat 20
@@ -1804,7 +1804,7 @@ def register() -> None:
 入口点的值是可调用对象还是包路径、函数签名要不要参数，**以当前版本的 `vllm/plugins/__init__.py` 为准**。完整示例包在 [silu_plugin](examples/silu_plugin/pyproject.toml)，含打包元数据、入口、子类及 [kernel.py](examples/silu_plugin/my_plugin/kernel.py)。在已有兼容的 CUDA/PyTorch/Triton/vLLM 环境中执行以下命令（本轮未安装或启动引擎）：
 
 ```bash
-python3 -m pip install --no-deps --no-build-isolation -e docs/modules/M2-operators/examples/silu_plugin
+python3 -m pip install --no-deps --no-build-isolation -e docs/modules/part3-operators/examples/silu_plugin
 python3 -m my_plugin.kernel --check-only
 python3 -m my_plugin.kernel --tokens 128 --hidden 11008 --block 1024
 ```
@@ -1847,7 +1847,7 @@ print(op._forward_method.__name__)   # 期望 "forward_cuda"；若是 native 或
 |---|---|---|
 | 模型与权重 | 同一个 checkpoint、同一份量化配置 | 权重变了，算子占比和总时间一起变 |
 | 引擎与 CUDA / Triton 版本 | 同一个镜像、同一条启动命令 | 版本升级带来别的优化，功劳算不清 |
-| 输入与输出长度 | 第 4 章的 `docs/modules/M0-foundations/scripts/bench_openai.py`，固定 prompt、固定 `--max-tokens` | 输出变长，ITL 与吞吐一起动 |
+| 输入与输出长度 | 第 4 章的 `docs/modules/part1-foundations/scripts/bench_openai.py`，固定 prompt、固定 `--max-tokens` | 输出变长，ITL 与吞吐一起动 |
 | 并发与每档请求数 | 同一个并发档位、同一请求数 | 并发一改，TTFT 与吞吐同时变，分不清是谁的功劳 |
 | 采样参数 | `temperature = 0`、固定 `seed`、固定 `top_p` | 采样一变，输出长度分布变，ITL 跟着变 |
 | 预热 | 先跑若干请求把 Triton 的编译与 autotune 热掉，再开始计时 | 首次调用的 JIT 编译会算进 TTFT |
@@ -1903,7 +1903,7 @@ profiler 单独跑一遍，不要和计时混在一起：挂上 profiler 会改�
 
 **延伸**：[vLLM CustomOp 设计文档](https://docs.vllm.ai/en/latest/design/custom_op/)、[`vllm/model_executor/custom_op.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/custom_op.py)（注册表与分发逻辑）、[`vllm/model_executor/layers/activation.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/activation.py)（`SiluAndMul` 与树内 Triton 激活 kernel）、[Triton `do_bench` 文档](https://triton-lang.org/main/python-api/generated/triton.testing.do_bench.html)、[Amdahl 定律原文](https://dl.acm.org/doi/10.1145/1465482.1465560)（Amdahl，1967）。
 
-## 本模块检查清单
+## 本部分检查清单
 
 - [ ] 有一张 GEMM 优化阶梯总表：四个版本各自的算术强度、实测耗时、实测算力、ncu 读数与瓶颈判断
 - [ ] 用 SM% / DRAM% 初筛，并以字节、缓存、就绪 warp/stall 和耗时证据完成归因

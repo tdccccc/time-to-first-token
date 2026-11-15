@@ -3,11 +3,11 @@
 
 The site is organised as 5 parts / 31 globally numbered chapters:
 
-  Part 1  (ch 1-5)   基础与度量      <- docs/modules/M0-foundations/README.md
+  Part 1  (ch 1-5)   基础与度量      <- docs/modules/part1-foundations/README.md
   Part 2  (ch 6-18)  推理框架        <- README.md
-  Part 3  (ch 19-24) 算子优化        <- docs/modules/M2-operators/README.md
-  Part 4  (ch 25-30) 国产芯片适配    <- docs/modules/M3-domestic-chips/README.md
-  Part 5  (ch 31)    综合项目        <- docs/modules/M4-capstone/README.md
+  Part 3  (ch 19-24) 算子优化        <- docs/modules/part3-operators/README.md
+  Part 4  (ch 25-30) 国产芯片适配    <- docs/modules/part4-domestic-chips/README.md
+  Part 5  (ch 31)    综合项目        <- docs/modules/part5-capstone/README.md
 
 Chapters are written to docs/chapters/, part pages to docs/parts/, back
 matter to docs/backmatter/. Old week/day/minute framing is rewritten to
@@ -69,37 +69,37 @@ PART_INTROS = {
 
 # (chapter number, part number, title, source module, source index, optional)
 CHAPTERS = [
-    (1, 1, "Roofline：先算，再优化", "m0", 0, False),
-    (2, 1, "推理度量：四个数，一个分布", "m0", 1, False),
-    (3, 1, "Profiling：看时间花在哪", "m0", 2, False),
-    (4, 1, "写压测脚本：bench_openai.py", "m0", 3, False),
-    (5, 1, "跑出第一份基线", "m0", 4, False),
-    (6, 2, "推理瓶颈判断：计算、带宽与启动开销", "m1", 0, False),
-    (7, 2, "模型架构", "m1", 1, False),
-    (8, 2, "vLLM：先部署，再读内部实现", "m1", 2, False),
-    (9, 2, "推理服务监控：Prometheus 与 Grafana", "m1", 3, False),
-    (10, 2, "SGLang、RadixAttention 与批处理内部", "m1", 4, False),
-    (11, 2, "容量评估：并发曲线、SLO 与抢占边界", "m1", 5, False),
-    (12, 2, "量化取舍", "m1", 6, False),
-    (13, 2, "投机解码与 KV 淘汰", "m1", 7, False),
-    (14, 2, "解耦式服务与 Kubernetes", "m1", 8, False),
-    (15, 2, "大规模集群 PD 优化", "m1", 9, True),
-    (16, 2, "单位经济学与路由器", "m1", 10, False),
-    (17, 2, "发表，然后养成阅读习惯", "m1", 11, False),
-    (18, 2, "TensorRT-LLM：执行后端与三引擎对比", "m1", 12, True),
-    (19, 3, "GEMM 的四版实现：优化、计时与归因", "m2", 0, False),
-    (20, 3, "Triton 入门：用 Python 写 kernel", "m2", 1, False),
-    (21, 3, "Fused Attention 深讲：先推导，再写 kernel", "m2", 2, False),
-    (22, 3, "量化 Matmul 深讲：量化方案本身", "m2", 3, False),
-    (23, 3, "FlashAttention 2/3 与 CUTLASS：读工业级实现", "m2", 4, False),
-    (24, 3, "收口：把自写 kernel 接入推理引擎", "m2", 5, False),
-    (25, 4, "芯片与软件栈地图：先画地图，再谈适配", "m3", 0, False),
-    (26, 4, "CANN 与 AscendC 深讲：算子从定义到编译到调用", "m3", 1, False),
-    (27, 4, "同一模型在 Ascend 上跑通 + vllm-ascend 插件架构", "m3", 2, False),
-    (28, 4, "算子覆盖分析", "m3", 3, False),
-    (29, 4, "迁移前检查与实验设计：从 Triton 到 Ascend", "m3", 4, False),
-    (30, 4, "精度回归与调优报告", "m3", 5, False),
-    (31, 5, "跨芯片推理优化报告", "m4", 0, False),
+    (1, 1, "Roofline：先算，再优化", "part1", 0, False),
+    (2, 1, "推理度量：四个数，一个分布", "part1", 1, False),
+    (3, 1, "Profiling：看时间花在哪", "part1", 2, False),
+    (4, 1, "写压测脚本：bench_openai.py", "part1", 3, False),
+    (5, 1, "跑出第一份基线", "part1", 4, False),
+    (6, 2, "推理瓶颈判断：计算、带宽与启动开销", "part2", 0, False),
+    (7, 2, "模型架构", "part2", 1, False),
+    (8, 2, "vLLM：先部署，再读内部实现", "part2", 2, False),
+    (9, 2, "推理服务监控：Prometheus 与 Grafana", "part2", 3, False),
+    (10, 2, "SGLang、RadixAttention 与批处理内部", "part2", 4, False),
+    (11, 2, "容量评估：并发曲线、SLO 与抢占边界", "part2", 5, False),
+    (12, 2, "量化取舍", "part2", 6, False),
+    (13, 2, "投机解码与 KV 淘汰", "part2", 7, False),
+    (14, 2, "解耦式服务与 Kubernetes", "part2", 8, False),
+    (15, 2, "大规模集群 PD 优化", "part2", 9, True),
+    (16, 2, "单位经济学与路由器", "part2", 10, False),
+    (17, 2, "发表，然后养成阅读习惯", "part2", 11, False),
+    (18, 2, "TensorRT-LLM：执行后端与三引擎对比", "part2", 12, True),
+    (19, 3, "GEMM 的四版实现：优化、计时与归因", "part3", 0, False),
+    (20, 3, "Triton 入门：用 Python 写 kernel", "part3", 1, False),
+    (21, 3, "Fused Attention 深讲：先推导，再写 kernel", "part3", 2, False),
+    (22, 3, "量化 Matmul 深讲：量化方案本身", "part3", 3, False),
+    (23, 3, "FlashAttention 2/3 与 CUTLASS：读工业级实现", "part3", 4, False),
+    (24, 3, "收口：把自写 kernel 接入推理引擎", "part3", 5, False),
+    (25, 4, "芯片与软件栈地图：先画地图，再谈适配", "part4", 0, False),
+    (26, 4, "CANN 与 AscendC 深讲：算子从定义到编译到调用", "part4", 1, False),
+    (27, 4, "同一模型在 Ascend 上跑通 + vllm-ascend 插件架构", "part4", 2, False),
+    (28, 4, "算子覆盖分析", "part4", 3, False),
+    (29, 4, "迁移前检查与实验设计：从 Triton 到 Ascend", "part4", 4, False),
+    (30, 4, "精度回归与调优报告", "part4", 5, False),
+    (31, 5, "跨芯片推理优化报告", "part5", 0, False),
 ]
 
 
@@ -289,13 +289,15 @@ CHAPTER_FIGURE_PLACEMENT = {
     28: (5, 6),   # 28.5 after the threshold paragraph
 }
 
-M1_WEEK_TO_CH = {
+# Legacy week-to-chapter maps for old drafts. Parts 1 and 5 originally reused
+# the part-2 map; keep that behavior when rewriting imported notes.
+PART2_WEEK_TO_CH = {
     "1": 6, "1续": 7, "2": 8, "3": 9, "4": 10, "5": 11, "6": 12,
     "7": 13, "8": 14, "8续": 15, "9": 16, "10": 17, "11": 18,
 }
-M2_WEEK_TO_CH = {str(i + 1): 19 + i for i in range(6)}
-M3_WEEK_TO_CH = {str(i + 1): 25 + i for i in range(6)}
-MODULE_WEEKS = {"m1": M1_WEEK_TO_CH, "m2": M2_WEEK_TO_CH, "m3": M3_WEEK_TO_CH, "m0": M1_WEEK_TO_CH, "m4": M1_WEEK_TO_CH}
+PART3_WEEK_TO_CH = {str(i + 1): 19 + i for i in range(6)}
+PART4_WEEK_TO_CH = {str(i + 1): 25 + i for i in range(6)}
+PART_WEEKS = {"part2": PART2_WEEK_TO_CH, "part3": PART3_WEEK_TO_CH, "part4": PART4_WEEK_TO_CH, "part1": PART2_WEEK_TO_CH, "part5": PART2_WEEK_TO_CH}
 
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -892,15 +894,15 @@ def validate_markdown(path: Path) -> list[str]:
 
 
 def map_week(text: str, module: str) -> str:
-    current = MODULE_WEEKS[module]
-    prefixes = {"m0": M1_WEEK_TO_CH, "m1": M1_WEEK_TO_CH, "m2": M2_WEEK_TO_CH, "m3": M3_WEEK_TO_CH, "m4": M1_WEEK_TO_CH}
+    current = PART_WEEKS[module]
+    prefixes = {"part1": PART2_WEEK_TO_CH, "part2": PART2_WEEK_TO_CH, "part3": PART3_WEEK_TO_CH, "part4": PART4_WEEK_TO_CH, "part5": PART2_WEEK_TO_CH}
 
     def repl(match: re.Match[str]) -> str:
         mod = match.group(1)
         n = match.group(2)
         cont = match.group(3) or ""
         key = n + ("续" if cont else "")
-        table = current if not mod else MODULE_WEEKS[{"0": "m0", "1": "m1", "2": "m2", "3": "m3"}[mod]]
+        table = current if not mod else PART_WEEKS[{"0": "part1", "1": "part2", "2": "part3", "3": "part4"}[mod]]
         num = table.get(key)
         return f"第 {num} 章" if num else match.group(0)
 
@@ -929,9 +931,10 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
     text = text.replace("本周", "本章").replace("下周", "下一章").replace("上周", "上一章")
     text = text.replace("每周", "每章").replace("这周", "本章")
     text = map_week(text, module)
-    # Module-prefixed week ranges and section references (e.g. M0 第 1 节).
+    # Legacy M-prefixed week ranges and section references (old drafts may
+    # still use "M0 第 1 节"); current sources use 第 N 部分.
     def module_range(match: re.Match[str]) -> str:
-        table = MODULE_WEEKS[{"0": "m0", "1": "m1", "2": "m2", "3": "m3"}[match.group(1)]]
+        table = PART_WEEKS[{"0": "part1", "1": "part2", "2": "part3", "3": "part4"}[match.group(1)]]
         a = table.get(match.group(2))
         b = table.get(match.group(3))
         return f"第 {a}–{b} 章" if a and b else match.group(0)
@@ -940,11 +943,13 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
     text = re.sub(r"M0\s*第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)} 章", text)
     # Chapter + section references, then bare section references.
     text = re.sub(r"第\s*(\d+)\s*章第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)}.{m.group(2)} 节", text)
-    if module == "m0":
+    if module == "part1":
         text = re.sub(r"第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)} 章", text)
     else:
         text = re.sub(r"第\s*(\d+)\s*节", lambda m: f"{chapter.num}.{m.group(1)}", text)
     # Module labels become parts.
+    # Legacy labels from imported drafts become part names; current sources
+    # already write 第 N 部分, so this is a no-op for them.
     text = text.replace("M0–M4", "第一部分到第五部分")
     text = re.sub(
         r"(?<![A-Za-z0-9])M([0-4])(?![A-Za-z0-9])",
@@ -953,7 +958,7 @@ def transform_text(text: str, module: str, chapter: Chapter) -> str:
         text,
     )
     text = text.replace("模块地图", "全书结构")
-    if module == "m4":
+    if module == "part5":
         text = text.replace("这个模块", "这个项目").replace("逐周教程", "正文教程")
     text = text.replace("本模块", "本部分").replace("该模块", "该部分")
     text = text.replace("这个模块", "这个部分")
@@ -1048,10 +1053,10 @@ def transform_title(title: str, module: str, chapter: Chapter) -> str:
 def map_repo_path(path: str) -> str:
     table = {
         "README.md": "docs/parts/part-2.md",
-        "docs/modules/M0-foundations/README.md": "docs/parts/part-1.md",
-        "docs/modules/M2-operators/README.md": "docs/parts/part-3.md",
-        "docs/modules/M3-domestic-chips/README.md": "docs/parts/part-4.md",
-        "docs/modules/M4-capstone/README.md": "docs/chapters/chapter-31.md",
+        "docs/modules/part1-foundations/README.md": "docs/parts/part-1.md",
+        "docs/modules/part3-operators/README.md": "docs/parts/part-3.md",
+        "docs/modules/part4-domestic-chips/README.md": "docs/parts/part-4.md",
+        "docs/modules/part5-capstone/README.md": "docs/chapters/chapter-31.md",
         "docs/MODULES.md": "docs/MODULES.md",
         "progress.md": "docs/progress.md",
         "tracker": "docs/progress.md",
@@ -1111,11 +1116,11 @@ class Source:
 
 def load_source(module: str) -> Source:
     path = {
-        "m0": SITE / "docs/modules/M0-foundations/README.md",
-        "m1": SITE / "README.md",
-        "m2": SITE / "docs/modules/M2-operators/README.md",
-        "m3": SITE / "docs/modules/M3-domestic-chips/README.md",
-        "m4": SITE / "docs/modules/M4-capstone/README.md",
+        "part1": SITE / "docs/modules/part1-foundations/README.md",
+        "part2": SITE / "README.md",
+        "part3": SITE / "docs/modules/part3-operators/README.md",
+        "part4": SITE / "docs/modules/part4-domestic-chips/README.md",
+        "part5": SITE / "docs/modules/part5-capstone/README.md",
     }[module]
     lines = read_lines(path)
     hs = scan(lines)
@@ -1125,11 +1130,11 @@ def load_source(module: str) -> Source:
 
 def source_chapter_blocks(src: Source) -> list[list[str]]:
     blocks: list[list[str]] = []
-    if src.module == "m0":
+    if src.module == "part1":
         picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)]
-    elif src.module == "m1":
+    elif src.module == "part2":
         picks = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
-    elif src.module in ("m2", "m3"):
+    elif src.module in ("part3", "part4"):
         picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
     else:
         chunks = [src.lines[src.h1.line:]]
@@ -1142,12 +1147,12 @@ def source_chapter_blocks(src: Source) -> list[list[str]]:
 
 
 def source_pre(src: Source) -> list[str]:
-    if src.module == "m4":
+    if src.module == "part5":
         return []
-    if src.module == "m0":
+    if src.module == "part1":
         first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title))
         return src.lines[src.h1.line + 1:first.line]
-    if src.module == "m1":
+    if src.module == "part2":
         first = next(h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
         return src.lines[src.h1.line + 1:first.line]
     first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
@@ -1155,11 +1160,11 @@ def source_pre(src: Source) -> list[str]:
 
 
 def source_post(src: Source) -> list[str]:
-    if src.module == "m4":
+    if src.module == "part5":
         return []
-    if src.module == "m0":
+    if src.module == "part1":
         last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)][-1]
-    elif src.module == "m1":
+    elif src.module == "part2":
         last = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
     else:
         last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
@@ -1188,15 +1193,15 @@ def transform_lines(lines: list[str], module: str, chapter: Chapter) -> list[str
 
 
 def chapter_is_section(h: Heading, module: str) -> bool:
-    if module == "m0":
+    if module == "part1":
         return h.level == 3
-    if module == "m1":
+    if module == "part2":
         return h.level == 4
-    if module == "m2":
+    if module == "part3":
         return h.level == 3 and re.match(r"第\s*\d+\s*节", h.title) is not None
-    if module == "m3":
+    if module == "part4":
         return h.level == 3
-    if module == "m4":
+    if module == "part5":
         return h.level == 2
     return False
 
@@ -1215,13 +1220,13 @@ def section_title(title: str, module: str, chapter: Chapter) -> str:
 
 
 def subhead_level(h: Heading, module: str) -> int:
-    if module == "m0":
+    if module == "part1":
         return 2 if h.level == 3 else 3
-    if module == "m1":
+    if module == "part2":
         return 3
-    if module in ("m2", "m3"):
+    if module in ("part3", "part4"):
         return 3 if h.level == 3 else 4
-    if module == "m4":
+    if module == "part5":
         return 3 if h.level == 3 else 4
     return h.level
 
@@ -1269,11 +1274,11 @@ def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
     first_section_line = sections[0].line if sections else len(body)
     intro = body[:first_section_line]
     source_dir = {
-        "m0": "docs/modules/M0-foundations",
-        "m1": ".",
-        "m2": "docs/modules/M2-operators",
-        "m3": "docs/modules/M3-domestic-chips",
-        "m4": "docs/modules/M4-capstone",
+        "part1": "docs/modules/part1-foundations",
+        "part2": ".",
+        "part3": "docs/modules/part3-operators",
+        "part4": "docs/modules/part4-domestic-chips",
+        "part5": "docs/modules/part5-capstone",
     }[module]
     summary = CHAPTER_SUMMARIES.get(chapter.num, "")
     out: list[str] = [
@@ -1363,7 +1368,7 @@ def validate_source_blocks(sources: dict[str, Source], blocks: dict[str, list[li
                 f"{src.path}: found {len(got)} chapter blocks, expected {len(want)} "
                 f"(chapters {want[0]}–{want[-1]}); check for duplicate or missing chapter headings"
             )
-        if module == "m4":
+        if module == "part5":
             continue
         for block, num in zip(got, want):
             match = CHAPTER_HEADING_RE.match(block[0]) if block else None
@@ -1376,7 +1381,7 @@ def validate_source_blocks(sources: dict[str, Source], blocks: dict[str, list[li
 
 
 def build_sources_and_chapters() -> dict[str, Source]:
-    sources = {m: load_source(m) for m in ("m0", "m1", "m2", "m3", "m4")}
+    sources = {m: load_source(m) for m in ("part1", "part2", "part3", "part4", "part5")}
     blocks: dict[str, list[list[str]]] = {m: source_chapter_blocks(s) for m, s in sources.items()}
     validate_source_blocks(sources, blocks)
     for num, part_num, title, module, index, optional in CHAPTERS:
@@ -1454,15 +1459,15 @@ def build_part_page(part: Part, sources: dict[str, Source]) -> None:
         ]
     out += ["</div>", ""]
 
-    post = strip_blank(source_post(sources["m0" if part.num == 1 else "m2" if part.num == 3 else "m3"])) if part.num in (1, 3, 4) else []
+    post = strip_blank(source_post(sources["part1" if part.num == 1 else "part3" if part.num == 3 else "part4"])) if part.num in (1, 3, 4) else []
     if post:
         post_text = "\n".join(post)
         post_text = post_text.replace("## 本模块检查清单", "## 本部分检查清单")
         if not re.search(r"^## ", post_text, re.MULTILINE):
             out += ["## 本部分检查清单", ""]
-        module = "m0" if part.num == 1 else "m2" if part.num == 3 else "m3"
+        module = "part1" if part.num == 1 else "part3" if part.num == 3 else "part4"
         ch = CH_BY_NUM[1 if part.num == 1 else 19 if part.num == 3 else 25]
-        post_text = rewrite_links(transform_text(post_text, module, ch), "docs/modules/M0-foundations" if part.num == 1 else "docs/modules/M2-operators" if part.num == 3 else "docs/modules/M3-domestic-chips", "docs/parts")
+        post_text = rewrite_links(transform_text(post_text, module, ch), "docs/modules/part1-foundations" if part.num == 1 else "docs/modules/part3-operators" if part.num == 3 else "docs/modules/part4-domestic-chips", "docs/parts")
         out.append(post_text)
         out.append("")
 
@@ -1492,9 +1497,9 @@ def render_appendix(src: Source, h2_title: str, filename: str, new_title: str | 
             hm = HEADING_RE.match(line)
             if hm:
                 level = max(1, len(hm.group(1)) - 1)
-                line = "#" * level + " " + transform_title(hm.group(2), "m1", CH_BY_NUM[6])
+                line = "#" * level + " " + transform_title(hm.group(2), "part2", CH_BY_NUM[6])
             else:
-                line = transform_text(line, "m1", CH_BY_NUM[6])
+                line = transform_text(line, "part2", CH_BY_NUM[6])
         out.append(line)
     text = rewrite_links("\n".join(out), ".", "docs/backmatter")
     write(f"docs/backmatter/{filename}", text)
@@ -1527,10 +1532,10 @@ Fork 本仓库，新建一个 issue，把根目录 [progress.md](https://github.
     for title in ("关于来源的说明", "参与贡献", "许可与出处"):
         idx = find_h2(src.lines, src.hs, title)
         block = take(src.lines, src.hs, idx)
-        col.append("## " + transform_title(title, "m1", CH_BY_NUM[6]))
+        col.append("## " + transform_title(title, "part2", CH_BY_NUM[6]))
         col.append("")
         for line in block[1:]:
-            col.append(transform_text(line, "m1", CH_BY_NUM[6]))
+            col.append(transform_text(line, "part2", CH_BY_NUM[6]))
         col.append("")
     write("docs/backmatter/colophon.md", rewrite_links("\n".join(col), ".", "docs/backmatter"))
     entries.append(("来源、贡献与许可", "colophon.md"))
@@ -1614,15 +1619,15 @@ def build_progress_page(parts: dict[int, Part]) -> None:
 def cleanup_sources() -> None:
     for rel in [
         "README.md",
-        "docs/modules/M0-foundations/README.md",
-        "docs/modules/M2-operators/README.md",
-        "docs/modules/M3-domestic-chips/README.md",
-        "docs/modules/M4-capstone/README.md",
+        "docs/modules/part1-foundations/README.md",
+        "docs/modules/part3-operators/README.md",
+        "docs/modules/part4-domestic-chips/README.md",
+        "docs/modules/part5-capstone/README.md",
     ]:
         p = SITE / rel
         if p.exists():
             p.unlink()
-    for rel in ["docs/modules/M2-operators", "docs/modules/M4-capstone"]:
+    for rel in ["docs/modules/part3-operators", "docs/modules/part5-capstone"]:
         p = SITE / rel
         if p.exists() and not any(p.iterdir()):
             p.rmdir()
@@ -1636,7 +1641,7 @@ def main() -> None:
         render_chapter(ch, ch.raw, ch.source)
     for part in PARTS.values():
         build_part_page(part, sources)
-    build_backmatter(sources["m1"])
+    build_backmatter(sources["part2"])
     build_catalog(PARTS)
     build_structure_page(PARTS)
     build_progress_page(PARTS)

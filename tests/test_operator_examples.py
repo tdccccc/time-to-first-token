@@ -16,11 +16,11 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-M2 = ROOT / "docs/modules/M2-operators/README.md"
-M3 = ROOT / "docs/modules/M3-domestic-chips/README.md"
-M4 = ROOT / "docs/modules/M4-capstone/README.md"
-TEMPLATE = ROOT / "docs/modules/M3-domestic-chips/cross-chip-report-template.md"
-EXAMPLES = ROOT / "docs/modules/M2-operators/examples"
+PART3 = ROOT / "docs/modules/part3-operators/README.md"
+PART4 = ROOT / "docs/modules/part4-domestic-chips/README.md"
+PART5 = ROOT / "docs/modules/part5-capstone/README.md"
+TEMPLATE = ROOT / "docs/modules/part4-domestic-chips/cross-chip-report-template.md"
+EXAMPLES = ROOT / "docs/modules/part3-operators/examples"
 
 
 def python_blocks(path):
@@ -29,7 +29,7 @@ def python_blocks(path):
 
 def functions_from_prose(names):
     nodes = []
-    for block in python_blocks(M2):
+    for block in python_blocks(PART3):
         if not any(f"def {name}(" in block for name in names):
             continue
         tree = ast.parse(block)
@@ -115,7 +115,7 @@ class TestNumericAndPluginContracts(unittest.TestCase):
     def test_quantization_zero_and_tiny_inputs(self):
         namespace = {"torch": SmallTorch}
         exec(compile(functions_from_prose({"quant_per_token", "quant_per_channel"}),
-                     str(M2), "exec"), namespace)
+                     str(PART3), "exec"), namespace)
         cases = (
             ("quant_per_token", [[0., 0.], [1e-7, -1e-7], [1., -1.]]),
             ("quant_per_channel", [[0., 1e-7, 1.], [0., -1e-7, -1.]]),
@@ -134,7 +134,7 @@ class TestNumericAndPluginContracts(unittest.TestCase):
                 self.assertTrue(any(value != 0 for value in tiny_values))
 
     def test_plugin_check_calls_registration(self):
-        blocks = python_blocks(M2)
+        blocks = python_blocks(PART3)
         init = next(block for block in blocks if "# my_plugin/__init__.py" in block)
         check = next(block for block in blocks if block.startswith("import my_plugin"))
         registry = {}
@@ -203,7 +203,7 @@ class TestCompleteExampleContracts(unittest.TestCase):
                 self.assertEqual(keyword_names, constexpr)
                 self.assertEqual(len(call.args) + len(constexpr), len(funcs[kernel].args.args))
                 self.assertIn("matmul_int8" if wrapper == "matmul_int8" else "matmul_fused_dequant",
-                              M2.read_text())
+                              PART3.read_text())
 
     def test_silu_wrapper_preserves_front_dimensions_and_empty_shapes(self):
         path = EXAMPLES / "silu_plugin/my_plugin/kernel.py"
@@ -278,7 +278,7 @@ class TestCompleteExampleContracts(unittest.TestCase):
 
     def test_prose_python_fences_parse_without_importing_accelerators(self):
         count = 0
-        for path in (M2, M3, M4):
+        for path in (PART3, PART4, PART5):
             for index, block in enumerate(python_blocks(path), 1):
                 with self.subTest(module=path.parent.name, block=index):
                     compile(ast.parse(block), f"{path}:python-block-{index}", "exec")
@@ -286,15 +286,15 @@ class TestCompleteExampleContracts(unittest.TestCase):
         self.assertGreater(count, 20)
 
     def test_chapter_ranges_and_new_titles(self):
-        self.assertEqual(re.findall(r"^## 第 (\d+) 章", M2.read_text(), re.M),
+        self.assertEqual(re.findall(r"^## 第 (\d+) 章", PART3.read_text(), re.M),
                          [str(n) for n in range(19, 25)])
-        self.assertEqual(re.findall(r"^## 第 (\d+) 章", M3.read_text(), re.M),
+        self.assertEqual(re.findall(r"^## 第 (\d+) 章", PART4.read_text(), re.M),
                          [str(n) for n in range(25, 31)])
-        self.assertIn("GEMM 的四版实现：优化、计时与归因", M2.read_text())
-        self.assertIn("迁移前检查与实验设计：从 Triton 到 Ascend", M3.read_text())
+        self.assertIn("GEMM 的四版实现：优化、计时与归因", PART3.read_text())
+        self.assertIn("迁移前检查与实验设计：从 Triton 到 Ascend", PART4.read_text())
 
     def test_capstone_illustration_is_consistently_grade_d(self):
-        text = M4.read_text()
+        text = PART5.read_text()
         illustration = text.split("## 一份算例报告", 1)[1].split("## 交付结构与验收门槛", 1)[0]
         self.assertNotRegex(illustration, re.compile(r"\|\s*[ABC]\s*\|\s*$", re.M))
         self.assertNotIn("假设单次运行", illustration)
@@ -304,7 +304,7 @@ class TestCompleteExampleContracts(unittest.TestCase):
         self.assertIn("同一份", text)
 
     def test_migration_candidate_keeps_fixed_contract_entry(self):
-        block = next(code for code in python_blocks(M3)
+        block = next(code for code in python_blocks(PART4)
                      if "def npu_triton_impl_persistent" in code)
         tree = ast.parse(block)
         self.assertTrue(any(isinstance(node, ast.Assign)
@@ -315,7 +315,7 @@ class TestCompleteExampleContracts(unittest.TestCase):
                             for node in tree.body))
 
     def test_paired_quality_and_post_optimization_gates(self):
-        for path in (M3, M4, TEMPLATE):
+        for path in (PART4, PART5, TEMPLATE):
             text = path.read_text()
             with self.subTest(module=path.parent.name):
                 for term in ("sample_id", "conditions_id", "正确性", "质量", "路径", "性能", "E5"):
@@ -323,13 +323,13 @@ class TestCompleteExampleContracts(unittest.TestCase):
                 self.assertIn("不显著", text)
                 self.assertIn("门槛", text)
                 self.assertIn("原始", text)
-        self.assertIn("McNemar", M3.read_text())
+        self.assertIn("McNemar", PART4.read_text())
         self.assertAlmostEqual(2 / (2**8), 0.0078125)
-        self.assertNotIn("生态最成熟", M3.read_text())
-        self.assertNotIn("壁仞 MetaX", M3.read_text())
-        self.assertNotIn("每一轮都有核启动与初始化开销", M3.read_text())
-        self.assertNotIn("旧数字作废", M3.read_text())
-        self.assertIn("待 NPU 验证", M3.read_text())
+        self.assertNotIn("生态最成熟", PART4.read_text())
+        self.assertNotIn("壁仞 MetaX", PART4.read_text())
+        self.assertNotIn("每一轮都有核启动与初始化开销", PART4.read_text())
+        self.assertNotIn("旧数字作废", PART4.read_text())
+        self.assertIn("待 NPU 验证", PART4.read_text())
 
 
 if __name__ == "__main__":

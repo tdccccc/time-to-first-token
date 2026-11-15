@@ -13,7 +13,7 @@ from unittest import mock
 import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "docs/modules/M0-foundations/scripts"
+SCRIPTS = ROOT / "docs/modules/part1-foundations/scripts"
 BENCH_PATH = SCRIPTS / "bench_openai.py"
 MOCK_PATH = SCRIPTS / "mock_sse.py"
 

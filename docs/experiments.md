@@ -2,7 +2,7 @@
 
 从第一份基线到跨芯片终稿，升级同一份实验记录。先写问题、条件与验收门槛，再跑实验；表格里的数字应能回到原始文件，而不是由结论反推。
 
-[快速上手](quickstart.md) · [基线报告模板](modules/M0-foundations/baseline-report-template.md) · [跨芯片报告模板](modules/M3-domestic-chips/cross-chip-report-template.md)
+[快速上手](quickstart.md) · [基线报告模板](modules/part1-foundations/baseline-report-template.md) · [跨芯片报告模板](modules/part4-domestic-chips/cross-chip-report-template.md)
 
 ## 1. 先区分被测对象与验证阶段
 
@@ -28,7 +28,7 @@ CPU mock 也可以有实际测量记录，但对象必须写 `cpu-mock`；它不
 | 原始结果 `raw_path` | `test_id`、条件编号、成功/失败/超时、token 来源、逐请求时间与长度、汇总及样本量 |
 | 对照记录 | 唯一改动、保持不变的条件、正确性与质量判据、前后测量、调用路径证据 |
 
-[压测客户端](modules/M0-foundations/scripts/bench_openai.py)使用 `--test-id`、`--conditions-id` 和 `--output` 把一次扫描关联到条件文件。保存生成的完整 JSON，不只截取终端表格。
+[压测客户端](modules/part1-foundations/scripts/bench_openai.py)使用 `--test-id`、`--conditions-id` 和 `--output` 把一次扫描关联到条件文件。保存生成的完整 JSON，不只截取终端表格。
 
 条件编号必须能找到真实条件文件；它不是写在命令里的装饰字符串。报告版本、原始数据文件名和环境锁定文件一起保存。
 
@@ -78,6 +78,31 @@ T_execute >= max(F / P_peak, D / BW_peak)
 硬件规格至少写明型号、精度、Tensor Core/普通计算、稠密/稀疏和带宽口径。例如 H100 SXM 的 FP16 Tensor Core 稠密峰值约 989.5 TFLOPS，约 494.5 是 TF32 稠密口径，不能互换；参见 [NVIDIA 规格](https://www.nvidia.com/en-us/data-center/h100/)与[架构表](https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/)。
 
 驱动、Toolkit 和框架运行时分别记录。容器并不锁住宿主驱动；`nvidia-smi` 的 CUDA 字段只是驱动支持上限。
+
+### 本书默认硬件与模型配置（A40 + Qwen3.5）
+
+本书以单卡 A40 48GB + Qwen3.5-9B 作为默认算例，Qwen3.5-4B 作为 24GB 卡的小配置；A100/H100 只作对照。下面的规格与容量都用于纸面推导，不是本机跑分。
+
+| 项 | A40 48GB（默认） | A100 80GB（对照） |
+|---|---|---|
+| 显存 | 48 GB | 80 GB |
+| 带宽 | 696 GB/s | 约 2 TB/s |
+| SM 数 | 84 | 108 |
+| FP16 Tensor 稠密 | 74.8 TFLOPS | 312 TFLOPS |
+| shared / SM | 100 KiB | 164 KiB |
+| L2 | 6 MiB | 40 MiB |
+| compute capability | 8.6 | 8.0 |
+| Roofline 脊点（FP16 稠密） | 约 107 FLOP/B | 约 156 FLOP/B |
+
+Qwen3.5-9B 的账本（估算）：LM 权重 18.39 GB（17.13 GiB）；每 token KV 32 KiB；每请求另有约 49 MiB 固定递推状态。8K 上下文约 305 MiB/请求，32K 约 1.05 GiB/请求。按 `gpu-memory-utilization 0.9` 的预算，A40 上 8K 约 70 条、32K 约 20 条（估算，仅算 KV 与固定状态，忽略 block 对齐、激活与前缀缓存）。
+
+Qwen3.5-4B 的账本（估算）：LM 权重 8.65 GB（8.06 GiB）；注意力几何相同，仍是 32 KiB/token 与约 49 MiB 固定状态。24GB 卡在 0.9 预算下 8K 约 33 条（估算）。
+
+双轨策略：Llama-3.1-8B 只保留为最简 GQA 教学算例；实际运行模型是 Qwen3.5-9B（A40 默认）与 Qwen3.5-4B（24GB 小配置）。A100/H100 的数字保留为对照，但多卡与 PD 章节不假设 A40 能复现这些配置。
+
+精度路线：FP8 W8A8 需要 compute capability ≥ 8.9；A40（8.6）与 A100（8.0）都只能走 FP8 W8A16（Marlin）、AWQ 或 GPTQ，不能写成“A40 原生 FP8 W8A8”。
+
+本节的容量数一律标“估算”，性能数一律标“下界/算例”，证据等级仍为 D。`gpu-memory-utilization 0.9` 只是基线预算；实际可用 KV 以启动日志里的 KV cache size 为准。
 
 ## 7. 每次优化重新过四道门 { #acceptance }
 

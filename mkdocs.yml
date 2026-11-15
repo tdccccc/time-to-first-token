@@ -146,6 +146,6 @@ nav:
       - 参考资料: docs/backmatter/references.md
       - 跟踪进度: docs/backmatter/tracking.md
       - 来源、贡献与许可: docs/backmatter/colophon.md
-      - 基线报告模板: docs/modules/M0-foundations/baseline-report-template.md
-      - 跨芯片对比报告模板: docs/modules/M3-domestic-chips/cross-chip-report-template.md
+      - 基线报告模板: docs/modules/part1-foundations/baseline-report-template.md
+      - 跨芯片对比报告模板: docs/modules/part4-domestic-chips/cross-chip-report-template.md
       - 上游英文原文: docs/original-README.md
