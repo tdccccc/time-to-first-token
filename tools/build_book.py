@@ -273,7 +273,7 @@ CHAPTER_FIGURE_PLACEMENT = {
     3: (2, 1),    # 3.2 CPU/GPU trace lanes
     7: (5, 1),    # 7.5 five-model ledger comparison
     6: (1, 1),    # 6.1 three bottleneck buckets
-    8: (1, 1),    # 8.1 PagedAttention block mapping
+    8: (6, 1),    # 8.6 PagedAttention block mapping
     10: (4, 1),   # 10.4 continuous batching
     11: (4, 1),   # 11.4 throughput knee
     12: (1, 1),   # 12.1 weight volume by precision
