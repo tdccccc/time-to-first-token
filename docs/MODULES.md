@@ -24,9 +24,9 @@
 
 - 第 6 章 推理瓶颈判断：计算、带宽与启动开销
 - 第 7 章 模型架构
-- 第 8 章 vLLM：先部署，再读内部实现
+- 第 8 章 vLLM：一条请求如何穿过引擎
 - 第 9 章 推理服务监控：Prometheus 与 Grafana
-- 第 10 章 SGLang、RadixAttention 与批处理内部
+- 第 10 章 SGLang：RadixAttention 与前缀复用
 - 第 11 章 容量评估：并发曲线、SLO 与抢占边界
 - 第 12 章 量化取舍
 - 第 13 章 投机解码与 KV 淘汰

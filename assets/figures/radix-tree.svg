@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 440" role="img" aria-label="基数树共享前缀示意：A、B、C 三个请求共享 [101,11]，A、B 再共享 [12]，分叉后的后缀各自独立">
+<style>
+text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+.title{font-size:25px;font-weight:700;fill:#1f2937}
+.sub{font-size:15px;fill:#64748b}
+.label{font-size:16px;font-weight:600;fill:#1f2937}
+.small{font-size:14px;fill:#64748b}
+.tiny{font-size:12px;fill:#64748b}
+.note{font-size:14px;fill:#334155}
+.tok{font-size:13px;font-weight:600;fill:#1f2937}
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+<rect width="900" height="440" fill="#fbfcfe"/>
+<text x="40" y="40" class="title">基数树：公共前缀只存一份</text>
+<text x="40" y="64" class="sub">节点 key 是 token 段，value 是物理槽位；只在分叉处建节点，分裂不复制 KV。</text>
+
+<!-- tree -->
+<rect x="120" y="92" width="90" height="38" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+<text x="165" y="116" class="small" text-anchor="middle">root</text>
+
+<rect x="95" y="160" width="140" height="54" rx="8" fill="#e0e7ff" stroke="#818cf8"/>
+<text x="165" y="184" class="label" text-anchor="middle">[101, 11]</text>
+<text x="165" y="203" class="tiny" text-anchor="middle">A/B/C 共享</text>
+
+<rect x="70" y="248" width="90" height="50" rx="8" fill="#dcfce7" stroke="#4ade80"/>
+<text x="115" y="270" class="label" text-anchor="middle">[12]</text>
+<text x="115" y="288" class="tiny" text-anchor="middle">A/B 共享</text>
+
+<rect x="270" y="248" width="90" height="50" rx="8" fill="#ffedd5" stroke="#fb923c"/>
+<text x="315" y="270" class="label" text-anchor="middle">[99]</text>
+<text x="315" y="288" class="tiny" text-anchor="middle">C 独有</text>
+
+<rect x="25" y="342" width="95" height="50" rx="8" fill="#ffedd5" stroke="#fb923c"/>
+<text x="72" y="364" class="label" text-anchor="middle">[21, 22]</text>
+<text x="72" y="382" class="tiny" text-anchor="middle">A 独有</text>
+
+<rect x="160" y="342" width="95" height="50" rx="8" fill="#ffedd5" stroke="#fb923c"/>
+<text x="207" y="364" class="label" text-anchor="middle">[31, 32]</text>
+<text x="207" y="382" class="tiny" text-anchor="middle">B 独有</text>
+
+<line x1="165" y1="130" x2="165" y2="158" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="140" y1="214" x2="115" y2="246" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="190" y1="214" x2="300" y2="246" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="100" y1="298" x2="72" y2="340" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line x1="130" y1="298" x2="207" y2="340" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+<!-- request sequences -->
+<rect x="500" y="92" width="360" height="300" rx="10" fill="#ffffff" stroke="#dbe3ef"/>
+<text x="520" y="120" class="label">三条请求的 token 序列</text>
+<text x="520" y="142" class="tiny">颜色相同的 token 指向同一份物理 KV</text>
+
+<text x="520" y="178" class="small">A</text>
+<rect x="548" y="162" width="46" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="571" y="180" class="tok" text-anchor="middle">101</text>
+<rect x="598" y="162" width="40" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="618" y="180" class="tok" text-anchor="middle">11</text>
+<rect x="642" y="162" width="36" height="26" rx="4" fill="#dcfce7" stroke="#4ade80"/><text x="660" y="180" class="tok" text-anchor="middle">12</text>
+<rect x="682" y="162" width="40" height="26" rx="4" fill="#ffedd5" stroke="#fb923c"/><text x="702" y="180" class="tok" text-anchor="middle">21</text>
+<rect x="726" y="162" width="40" height="26" rx="4" fill="#ffedd5" stroke="#fb923c"/><text x="746" y="180" class="tok" text-anchor="middle">22</text>
+
+<text x="520" y="222" class="small">B</text>
+<rect x="548" y="206" width="46" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="571" y="224" class="tok" text-anchor="middle">101</text>
+<rect x="598" y="206" width="40" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="618" y="224" class="tok" text-anchor="middle">11</text>
+<rect x="642" y="206" width="36" height="26" rx="4" fill="#dcfce7" stroke="#4ade80"/><text x="660" y="224" class="tok" text-anchor="middle">12</text>
+<rect x="682" y="206" width="40" height="26" rx="4" fill="#ffedd5" stroke="#fb923c"/><text x="702" y="224" class="tok" text-anchor="middle">31</text>
+<rect x="726" y="206" width="40" height="26" rx="4" fill="#ffedd5" stroke="#fb923c"/><text x="746" y="224" class="tok" text-anchor="middle">32</text>
+
+<text x="520" y="266" class="small">C</text>
+<rect x="548" y="250" width="46" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="571" y="268" class="tok" text-anchor="middle">101</text>
+<rect x="598" y="250" width="40" height="26" rx="4" fill="#e0e7ff" stroke="#818cf8"/><text x="618" y="268" class="tok" text-anchor="middle">11</text>
+<rect x="642" y="250" width="40" height="26" rx="4" fill="#ffedd5" stroke="#fb923c"/><text x="662" y="268" class="tok" text-anchor="middle">99</text>
+
+<rect x="520" y="302" width="14" height="14" rx="3" fill="#e0e7ff" stroke="#818cf8"/><text x="542" y="314" class="tiny">A/B/C 共享：只存一份 KV</text>
+<rect x="520" y="326" width="14" height="14" rx="3" fill="#dcfce7" stroke="#4ade80"/><text x="542" y="338" class="tiny">A/B 共享：再省一份</text>
+<rect x="520" y="350" width="14" height="14" rx="3" fill="#ffedd5" stroke="#fb923c"/><text x="542" y="362" class="tiny">分支后缀：各自独立</text>
+
+<text x="40" y="420" class="note">分裂只重组 key/value 切片，不复制物理 KV；淘汰从叶子按 LRU 开始，ref_count &gt; 0 的节点不淘汰。</text>
+</svg>

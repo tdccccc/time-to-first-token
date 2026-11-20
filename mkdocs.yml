@@ -102,9 +102,9 @@ nav:
       - 本部分导览: docs/parts/part-2.md
       - 第 6 章 推理瓶颈判断：计算、带宽与启动开销: docs/chapters/chapter-06.md
       - 第 7 章 模型架构: docs/chapters/chapter-07.md
-      - 第 8 章 vLLM：先部署，再读内部实现: docs/chapters/chapter-08.md
+      - 第 8 章 vLLM：一条请求如何穿过引擎: docs/chapters/chapter-08.md
       - 第 9 章 推理服务监控：Prometheus 与 Grafana: docs/chapters/chapter-09.md
-      - 第 10 章 SGLang、RadixAttention 与批处理内部: docs/chapters/chapter-10.md
+      - 第 10 章 SGLang：RadixAttention 与前缀复用: docs/chapters/chapter-10.md
       - 第 11 章 容量评估：并发曲线、SLO 与抢占边界: docs/chapters/chapter-11.md
       - 第 12 章 量化取舍: docs/chapters/chapter-12.md
       - 第 13 章 投机解码与 KV 淘汰: docs/chapters/chapter-13.md
