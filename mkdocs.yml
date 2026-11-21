@@ -58,6 +58,7 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js
   - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js
   - assets/math.js
+  - assets/lightbox.js
   - assets/notes.js
   - assets/progress.js
   - assets/toc.js
