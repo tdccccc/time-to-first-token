@@ -1,58 +1,36 @@
----
-name: Progress tracker
-about: 按章跟踪 5 部分 31 章的阅读进度。Open this in your own fork.
-title: '阅读进度: [your name or handle]'
-labels: progress
----
+# 阅读进度（23 章主线）
 
-> **在网站上**：站点里的[阅读进度](https://tdccccc.github.io/time-to-first-token/docs/progress/)可以勾选、导出 JSON、生成同步链接。这个 issue 模板是给 GitHub 用的静态副本；网页上的勾选不会写回仓库，issue 里的勾选由 GitHub 保存到你的账号。
+在 GitHub Issue 中粘贴本清单即可跨设备跟踪，或直接访问站点的「[阅读进度](https://tdccccc.github.io/time-to-first-token/docs/progress/)」页面。
 
-论文是选读：正文对应章节已有详细总结，读不读论文原文不影响章节进度。
+## 第一篇 · 性能直觉与度量方法
+- [ ] 第 1 章 推理为什么慢：Roofline 与三区间直觉
+- [ ] 第 2 章 模型的显存与计算账本
+- [ ] 第 3 章 推理度量与压测方法
+- [ ] 第 4 章 Profiling 方法论：看时间花在哪
 
-Started on:
+## 第二篇 · 推理引擎与部署优化
+- [ ] 第 5 章 vLLM：一条请求如何穿过推理引擎
+- [ ] 第 6 章 SGLang：RadixAttention 与前缀复用
+- [ ] 第 7 章 可观测性与容量评估
+- [ ] 第 8 章 量化原理与取舍
+- [ ] 第 9 章 投机解码与长上下文 KV 淘汰
+- [ ] 第 10 章 TensorRT-LLM 与三引擎架构横评
+- [ ] 第 11 章 生产架构：PD 解耦、扩缩容与成本路由
 
-## 第一部分 基础与度量
+## 第三篇 · GPU 算子优化与引擎接入
+- [ ] 第 12 章 GPU 执行模型与 GEMM 四版优化阶梯
+- [ ] 第 13 章 Triton 编程模型：从向量加到 2D GEMM
+- [ ] 第 14 章 Fused Attention 深讲：Online Softmax 与分块实现
+- [ ] 第 15 章 量化 Matmul 算子原理：W8A8 与 W8A16
+- [ ] 第 16 章 工业级实现导读：FlashAttention 2/3 与 CUTLASS
+- [ ] 第 17 章 把自定义算子接入推理引擎
 
-- [ ] 第 1 章 Roofline：先算，再优化
-- [ ] 第 2 章 推理度量：四个数，一个分布
-- [ ] 第 3 章 Profiling：看时间花在哪
-- [ ] 第 4 章 写压测脚本：bench_openai.py
-- [ ] 第 5 章 跑出第一份基线
+## 第四篇 · 国产芯片适配原理与方法
+- [ ] 第 18 章 国产芯片全景与软件栈地图
+- [ ] 第 19 章 昇腾部署架构与 vllm-ascend 插件机制
+- [ ] 第 20 章 CANN 分层与 AscendC 算子全链路
+- [ ] 第 21 章 算子覆盖分析与回退定位方法
+- [ ] 第 22 章 跨芯片算子迁移：从 CUDA / Triton 到 Ascend
 
-## 第二部分 推理框架
-
-- [ ] 第 6 章 推理瓶颈判断：计算、带宽与启动开销
-- [ ] 第 7 章 模型架构
-- [ ] 第 8 章 vLLM：一条请求如何穿过引擎
-- [ ] 第 9 章 推理服务监控：Prometheus 与 Grafana
-- [ ] 第 10 章 SGLang：RadixAttention 与前缀复用
-- [ ] 第 11 章 容量评估：并发曲线、SLO 与抢占边界
-- [ ] 第 12 章 量化取舍
-- [ ] 第 13 章 投机解码与 KV 淘汰
-- [ ] 第 14 章 解耦式服务与 Kubernetes
-- [ ] 第 15 章 大规模集群 PD 优化（选读）
-- [ ] 第 16 章 单位经济学与路由器
-- [ ] 第 17 章 发表，然后养成阅读习惯
-- [ ] 第 18 章 TensorRT-LLM：执行后端与三引擎对比（选读）
-
-## 第三部分 算子优化
-
-- [ ] 第 19 章 GEMM 的四版实现：优化、计时与归因
-- [ ] 第 20 章 Triton 入门：用 Python 写 kernel
-- [ ] 第 21 章 Fused Attention 深讲：先推导，再写 kernel
-- [ ] 第 22 章 量化 Matmul 深讲：量化方案本身
-- [ ] 第 23 章 FlashAttention 2/3 与 CUTLASS：读工业级实现
-- [ ] 第 24 章 收口：把自写 kernel 接入推理引擎
-
-## 第四部分 国产芯片适配
-
-- [ ] 第 25 章 芯片与软件栈地图：先画地图，再谈适配
-- [ ] 第 26 章 CANN 与 AscendC 深讲：算子从定义到编译到调用
-- [ ] 第 27 章 同一模型在 Ascend 上跑通 + vllm-ascend 插件架构
-- [ ] 第 28 章 算子覆盖分析
-- [ ] 第 29 章 迁移前检查与实验设计：从 Triton 到 Ascend
-- [ ] 第 30 章 精度回归与调优报告
-
-## 第五部分 综合项目
-
-- [ ] 第 31 章 跨芯片推理优化报告
+## 第五篇 · 综合分析与方法收口
+- [ ] 第 23 章 跨芯片精度回归、性能归因与分析报告范式

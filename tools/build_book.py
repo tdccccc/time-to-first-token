@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
-"""Build the chapter-based book site from the repo's Markdown sources.
+"""Prepare public sources and assemble the book site for MkDocs.
 
-The site is organised as 5 parts / 31 globally numbered chapters:
-
-  Part 1  (ch 1-5)   基础与度量      <- docs/modules/part1-foundations/README.md
-  Part 2  (ch 6-18)  推理框架        <- README.md
-  Part 3  (ch 19-24) 算子优化        <- docs/modules/part3-operators/README.md
-  Part 4  (ch 25-30) 国产芯片适配    <- docs/modules/part4-domestic-chips/README.md
-  Part 5  (ch 31)    综合项目        <- docs/modules/part5-capstone/README.md
-
-Chapters are written to docs/chapters/, part pages to docs/parts/, back
-matter to docs/backmatter/. Old week/day/minute framing is rewritten to
-chapter/section references; code blocks are left untouched.
+With the one-file-per-chapter architecture:
+  docs/index.md             -> site-src/index.md
+  docs/chapters/chapter-01..23.md -> annotated with hover glossary links
+  docs/topics/*.md          -> annotated with hover glossary links
+  docs/toolkit/*.md         -> staged directly
+  docs/parts/part-1..5.md   -> generated with chapter summaries and section counts
+  docs/glossary.md          -> generated from TERM_GLOSSARY
+  docs/progress.md          -> generated for the 23 main chapters
 """
 from __future__ import annotations
 
 import html
-import posixpath
 import re
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,291 +21,162 @@ ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site-src"
 
 PART_TITLES = {
-    1: "基础与度量",
-    2: "推理框架",
-    3: "算子优化",
-    4: "国产芯片适配",
-    5: "综合项目",
+    1: "性能直觉与度量方法",
+    2: "推理引擎与部署优化",
+    3: "GPU 算子优化与引擎接入",
+    4: "国产芯片适配原理与方法",
+    5: "综合分析与方法收口",
 }
-PART_CN = {1: "第一部分", 2: "第二部分", 3: "第三部分", 4: "第四部分", 5: "第五部分"}
+PART_CN = {1: "第一篇", 2: "第二篇", 3: "第三篇", 4: "第四篇", 5: "第五篇"}
+
 PART_LEDES = {
-    1: "先把“快”与“慢”算清楚：Roofline、四个度量、profiling、压测脚本与第一份基线。",
-    2: "围绕一个 OpenAI 兼容的推理服务，从心智模型、vLLM/SGLang，到量化、投机解码、解耦、单位经济学与发表。",
-    3: "打开推理引擎的盒子：CUDA/Triton、fused attention、量化 matmul、FlashAttention/CUTLASS，最后把自写 kernel 接回引擎。",
-    4: "以昇腾为主线，在同一模型、评测集与负载下跑通、分析覆盖、设计迁移并完成回归报告。",
-    5: "把前面所有工具合到一份跨芯片推理优化报告里。",
+    1: "先把“为什么慢”和“怎么量”想透：Roofline 三区间、模型显存与算力账本、延迟分布与 Profiling 诊断。",
+    2: "打开主流推理引擎与生产架构：vLLM、SGLang、监控与容量评估、量化、投机解码、TensorRT-LLM 横评与 PD/路由。",
+    3: "下潜到硬件与内核：GPU 执行模型与四版 GEMM、Triton、FlashAttention、量化 Matmul、CUTLASS 与自定义算子接入。",
+    4: "跳出 CUDA 生态，以华为昇腾为主线系统掌握国产芯片软件栈、插件机制、CANN/AscendC、覆盖归因与算子迁移。",
+    5: "用配对精度回归、五步差异归因、完整跨芯片分析范例与系统论文读法完成全书方法论收口。",
 }
 
 PART_INTROS = {
-    1: """先建立测量口径，再解释性能：第 1–2 章做 Roofline 与指标手算，第 3 章读时间线，第 4–5 章把方法固化成压测和基线。
+    1: """本篇为全书建立统一的物理直觉与测量标尺：第 1 章用 Roofline 分清计算、带宽与启动开销三区间；第 2 章算清参数、KV 缓存、MoE 与线性注意力的显存和算力账；第 3 章把“快”拆成 TTFT、ITL、吞吐、排队与长尾分布；第 4 章用 Profiling 双泳道把时间落到具体算子与空白。
 
-首次动手从[快速上手](../quickstart.md)开始：无 GPU 可用完整 mock SSE 验证客户端；真实基线先完成[第 8 章的部署入口](../chapters/chapter-08.md#82)。mock 结果不代替模型性能。交付物是一张 Roofline 草图、一张指标表和一份带原始记录的基线。""",
-    2: """围绕同一个 OpenAI 兼容服务，按“部署 → 度量 → 容量 → 按瓶颈优化 → 阶段报告”推进。第一次不必先读完全部架构推导：从[快速上手](../quickstart.md)或第 8 章部署开始，再回第 6–7 章解释观测。
+全书默认以 **NVIDIA A100 80GB / H100** 与 **Llama-3.1-8B / Qwen3-8B** 作为主线教学算例，完整规格随时可查[硬件规格与模型账本速查](../toolkit/hardware-models.md)。""",
+    2: """本篇拆解现代 LLM 推理引擎如何组织显存、调度和计算，并梳理生产环境的核心优化杠杆。
 
-第 8–11 章是服务主线；第 12–16 章按量化、投机、部署和成本问题选读；第 17 章收成阶段报告。第 15 章集群与第 18 章三引擎对照是扩展，不是入门门槛。
+第 5–6 章沿请求旅程精讲 vLLM（分页与连续批处理）与 SGLang（基数树前缀复用）；第 7 章串联监控指标与容量拐点；第 8–9 章深入量化、投机解码与 KV 淘汰的收益边界；第 10 章横向对比 vLLM、SGLang 与 TensorRT-LLM；第 11 章落地 PD 解耦、队列扩缩容与成本路由。大规模集群 PD 详见[专题 B](../topics/cluster-pd-mooncake.md)。""",
+    3: """本篇打开推理引擎内部的算子黑盒：第 12 章从 GPU 执行模型切入四版 GEMM 优化阶梯；第 13 章建立 Triton Block 编程心智并写透最小 2D GEMM；第 14–15 章手推并拆解 Fused Attention 与量化 Matmul；第 16 章导读 FlashAttention 2/3 与 CUTLASS/CuTe 工业实现；第 17 章讲清自定义算子接入 vLLM 的注册、启用与分发全链路。""",
+    4: """本篇以华为昇腾 Ascend 为主线，按“先画地图 → 再看部署与插件 → 再钻 CANN/AscendC 底层 → 查覆盖与回退 → 做跨芯片迁移”的顺读顺序推进。
 
-### 适合谁
-
-熟悉 Python、Transformer 和命令行的工程师；不要求先会 Kubernetes 或 CUDA。已有服务的读者可直接从监控与容量章节查漏补缺。
-
-### 需要准备
-
-7–8B 的 16 位权重通常约 14–17 GB；还要为 KV、工作区和图捕获预留空间。24GB 卡可作为短上下文单机起点，实际并发以日志与实测为准，不保证所有 8B 模型都适用。1000 个客户端在途请求不意味着 1000 条序列同时驻留，也不自动要求 H100；多设备 PD 与特定精度另看支持矩阵。""",
-    3: """把算子优化做成可核验的实验：第 19 章比较四版 GEMM，第 20 章写 Triton，第 21–22 章实现融合注意力与量化矩阵乘，第 23 章读工业实现，第 24 章接回引擎。
-
-前置是第 1/3/6 章的上限、时间线与执行模型；直到第 24 章才需要已跑通的 vLLM 服务。内核编译和计时需要匹配工具链与 GPU，无卡可先核对数学和完整参考源码。每一步分别记录数值正确性、实际调用路径和端到端收益；没变快也是有效结果。""",
-    4: """以昇腾 Ascend 为教学主线，其他国产平台保留软件栈地图与扩展入口。推荐顺序是第 25 章画地图 → 第 27 章装环境并跑通同一模型 → 第 26 章读 AscendC 开发链 → 第 28–30 章覆盖、迁移设计与回归。
-
-前置是基础度量和一个已跑通的推理服务，不要求完成第二部分所有部署扩展。缺 NPU 时只查实现、做配置与迁移设计，不能把 GPU 自查升级成 NPU 验证。最终交付带版本、数据路径与配对质量回归的跨芯片初稿。""",
-    5: """升级第 30 章的同一份初稿，不重建一套记录：沿用实验编号、条件和原始数据，补齐重复运行、优化后正确性/质量回归、负面结果与选型边界。
-
-两平台未齐时，交付框架与待测条件；实测终稿必须能追溯到原始记录。所有部分使用同一份[实验约定](../experiments.md)。""",
+第 18 章建立四面墙 × 五层软件栈坐标系；第 19 章拆解昇腾环境链与 `vllm-ascend` 插件架构；第 20 章走完 AscendC 硬件流水与算子四环；第 21 章讲透算子覆盖率与四类回退定位；第 22 章系统梳理从 CUDA/Triton 到 Ascend 的六类语义差异。其他国产平台生态见[专题 E](../topics/domestic-ecosystems.md)。""",
+    5: """本篇将全书的度量、引擎、算子与国产芯片方法合为一体：围绕“同一模型在不同芯片上差异从何而来”，精讲配对精度回归、五步归因闭环与一篇完整的跨芯片对比分析范例，最后用系统论文三遍阅读法为持续演进收尾。""",
 }
 
-# (chapter number, part number, title, source module, source index, optional)
-CHAPTERS = [
-    (1, 1, "Roofline：先算，再优化", "part1", 0, False),
-    (2, 1, "推理度量：四个数，一个分布", "part1", 1, False),
-    (3, 1, "Profiling：看时间花在哪", "part1", 2, False),
-    (4, 1, "写压测脚本：bench_openai.py", "part1", 3, False),
-    (5, 1, "跑出第一份基线", "part1", 4, False),
-    (6, 2, "推理瓶颈判断：计算、带宽与启动开销", "part2", 0, False),
-    (7, 2, "模型架构", "part2", 1, False),
-    (8, 2, "vLLM：一条请求如何穿过引擎", "part2", 2, False),
-    (9, 2, "推理服务监控：Prometheus 与 Grafana", "part2", 3, False),
-    (10, 2, "SGLang：RadixAttention 与前缀复用", "part2", 4, False),
-    (11, 2, "容量评估：并发曲线、SLO 与抢占边界", "part2", 5, False),
-    (12, 2, "量化取舍", "part2", 6, False),
-    (13, 2, "投机解码与 KV 淘汰", "part2", 7, False),
-    (14, 2, "解耦式服务与 Kubernetes", "part2", 8, False),
-    (15, 2, "大规模集群 PD 优化", "part2", 9, True),
-    (16, 2, "单位经济学与路由器", "part2", 10, False),
-    (17, 2, "发表，然后养成阅读习惯", "part2", 11, False),
-    (18, 2, "TensorRT-LLM：执行后端与三引擎对比", "part2", 12, True),
-    (19, 3, "GEMM 的四版实现：优化、计时与归因", "part3", 0, False),
-    (20, 3, "Triton 入门：用 Python 写 kernel", "part3", 1, False),
-    (21, 3, "Fused Attention 深讲：先推导，再写 kernel", "part3", 2, False),
-    (22, 3, "量化 Matmul 深讲：量化方案本身", "part3", 3, False),
-    (23, 3, "FlashAttention 2/3 与 CUTLASS：读工业级实现", "part3", 4, False),
-    (24, 3, "收口：把自写 kernel 接入推理引擎", "part3", 5, False),
-    (25, 4, "芯片与软件栈地图：先画地图，再谈适配", "part4", 0, False),
-    (26, 4, "CANN 与 AscendC 深讲：算子从定义到编译到调用", "part4", 1, False),
-    (27, 4, "同一模型在 Ascend 上跑通 + vllm-ascend 插件架构", "part4", 2, False),
-    (28, 4, "算子覆盖分析", "part4", 3, False),
-    (29, 4, "迁移前检查与实验设计：从 Triton 到 Ascend", "part4", 4, False),
-    (30, 4, "精度回归与调优报告", "part4", 5, False),
-    (31, 5, "跨芯片推理优化报告", "part5", 0, False),
+# (chapter number, part number, title)
+CHAPTERS: list[tuple[int, int, str]] = [
+    (1, 1, "推理为什么慢：Roofline 与三区间直觉"),
+    (2, 1, "模型的显存与计算账本"),
+    (3, 1, "推理度量与压测方法"),
+    (4, 1, "Profiling 方法论：看时间花在哪"),
+    (5, 2, "vLLM：一条请求如何穿过推理引擎"),
+    (6, 2, "SGLang：RadixAttention 与前缀复用"),
+    (7, 2, "可观测性与容量评估"),
+    (8, 2, "量化原理与取舍"),
+    (9, 2, "投机解码与长上下文 KV 淘汰"),
+    (10, 2, "TensorRT-LLM 与三引擎架构横评"),
+    (11, 2, "生产架构：PD 解耦、扩缩容与成本路由"),
+    (12, 3, "GPU 执行模型与 GEMM 四版优化阶梯"),
+    (13, 3, "Triton 编程模型：从向量加到 2D GEMM"),
+    (14, 3, "Fused Attention 深讲：Online Softmax 与分块实现"),
+    (15, 3, "量化 Matmul 算子原理：W8A8 与 W8A16"),
+    (16, 3, "工业级实现导读：FlashAttention 2/3 与 CUTLASS"),
+    (17, 3, "把自定义算子接入推理引擎"),
+    (18, 4, "国产芯片全景与软件栈地图"),
+    (19, 4, "昇腾部署架构与 vllm-ascend 插件机制"),
+    (20, 4, "CANN 分层与 AscendC 算子全链路"),
+    (21, 4, "算子覆盖分析与回退定位方法"),
+    (22, 4, "跨芯片算子迁移：从 CUDA / Triton 到 Ascend"),
+    (23, 5, "跨芯片精度回归、性能归因与分析报告范式"),
 ]
 
-
-CHAPTER_SUMMARIES = {
-    1: "先用算术强度和脊点判断一次推理受算力、显存带宽还是启动开销限制；再用手算例子理解 batch、prefill 与 KV 怎样改变结论。",
-    2: "TTFT、ITL、吞吐、排队深度量的是四件不同的事；只报平均值会藏住长尾。",
-    3: "Profiling 先问时间花在哪个 kernel、哪类访存、哪次启动上，再谈优化。",
-    4: "压测脚本的价值不在跑得快，而在每次跑的条件都一样、结果能复现。",
-    5: "第一份基线要能回答：拐点在哪、p99 多长、瓶颈在算力还是带宽。",
-    6: "一个 kernel 慢，先分清在等计算、等显存搬运还是等启动；三种区间对应三套动作。",
-    7: "总参数、激活参数与 KV 状态三者脱钩，优化清单要按模型重排。",
-    8: "一条请求先排队、再 prefill、再逐步 decode；分页与连续批处理分别解决它占多少显存、一步能带多少请求。沿这条旅程把 KV 账、block table 与调度器算清。",
-    9: "先定义每个面板在量什么、怎么读，再搭 Prometheus/Grafana；说不清定义的指标会参与错误决策。",
-    10: "前缀复用不是一棵树那么简单：从整段哈希到 block 哈希再到基数树，匹配粒度越细，能共享的尾巴越长；再把树接进调度器，用锁、引用计数与 LRU 保证正确与不泄漏；分块 prefill 处理跳不掉的那一半。",
-    11: "压测要扫出整条吞吐—延迟曲线；拐点决定容量，1000 并发只是观测边界。硬件不够时，写清饱和段与待补测条件。",
-    12: "量化省的是搬运量，代价落在精度；先看质量表，再看加速比。",
-    13: "投机统计分清 token 比例与起草轮次，收益用同负载验证；KV 窗口同时检查位置处理和任务质量。",
-    14: "先算干扰与 KV 传输账，再在 Kubernetes 上按排队深度扩缩容。",
-    15: "大规模 PD 的难点在 KV 池、传输和容错，不在把两个服务拆开。",
-    16: "每百万 token 成本由利用率、输入输出比例和批量共同决定；路由器与预算中间件把这笔账写进代码。",
-    17: "把 benchmark 的条件、命令与分位数写全，让读者能复现；用固定流程读论文，把结论写回项目。",
-    18: "区分历史 TensorRT 流程与当前 PyTorch 后端，按执行配置、图覆盖、kernel、调度和冷启动比较三引擎。",
-    19: "同一个 GEMM 写四版，每版只改一个变量；用 ncu 定位瓶颈，用 Roofline 验证收益。",
-    20: "从 block、mask 和 tl.dot 写出最小 kernel，再按目标设备与编译器版本选择合适的抽象和优化路径。",
-    21: "先证 online softmax 精确，再按 SRAM 与寄存器定 block，最后用正确性、计时和 Roofline 验收。",
-    22: "量化 matmul 的收益分两笔：INT8 峰值与权重搬运减半；scale 粒度决定哪一笔能兑现。",
-    23: "从 FA2 的工作划分到 FA3 的异步流水，读懂 flash-attn 主循环与 CUTLASS 三级结构。",
-    24: "自写 kernel 接进引擎要过注册、启用、分发三道门；端到端没变快也是结果。",
-    25: "国产芯片先画软件栈地图：四面墙判断能不能跑，插件与统一算子层决定覆盖，每格标核实日期。",
-    26: "CANN 分五层；算子经定义、编译、注册、调用四环才到 vLLM，读懂最小算子并会定位失败比背 API 有用。",
-    27: "同一模型在 Ascend 上跑通，难点在版本矩阵、插件 hook 与踩坑记录。",
-    28: "用一次推理的算子清单，按个数、调用次数、耗时加权三种口径算覆盖率，再判断瓶颈在算子覆盖还是调度/显存。",
-    29: "用小引擎和 L2_04 讲移植：把每一条 CUDA 假设换成 Ascend 上可验证的检查项。",
-    30: "同一模型、同一评测集在两边各跑一遍：量精度、量性能、归因到算子，写成带版本日期的可复现报告。",
-    31: "综合项目的重点是同一套条件、可追溯的数据和明确的证据等级：把同一模型在两套硬件上的差异做两遍并写清楚。",
-}
-
-def _guidance(environment: str, prerequisite: str, deliverable: str) -> dict[str, str]:
-    return {"environment": environment, "prerequisite": prerequisite, "deliverable": deliverable}
-
-
-# These describe the learning environment, not a claim that a hardware lab
-# has been compiled or benchmarked. Evidence and pending work stay explicit.
-CHAPTER_GUIDANCE = {
-    1: _guidance("纸面推导，无需 GPU", "基础算术、目标模型配置与硬件规格", "一页权重/KV 手算记录与 Roofline 草图"),
-    2: _guidance("纸面时间线，无需 GPU", "一条流式请求的起止时间与输出长度", "指标定义、分位数算法与测量条件表"),
-    3: _guidance("CPU 可读框架时间线；GPU 细节需设备与 profiler", "第 1–2 章；先确认采集权限和测量粒度", "热点、时间线空白与下一步对照实验"),
-    4: _guidance("Python 标准库客户端；CPU mock 或运行中的服务", "快速上手中的 mock 路径，或第 8 章部署入口", "完整请求记录、汇总 JSON 与计时口径检查"),
-    5: _guidance("真实服务基线需 GPU；mock 只验证客户端方法", "第 4 章脚本已跑通，第 8 章服务已就绪", "带条件编号与原始记录的有限工作负载基线"),
-    6: _guidance("纸面估算；可用 profiler 验证实际瓶颈", "第 1 章 Roofline 与第 3 章时间线", "计算、搬运、启动与同步的判断流程"),
-    7: _guidance("阅读模型配置即可，不必下载全部模型权重", "Transformer 基础；首次部署先读主模型与 KV 账", "主模型参数、激活量、KV 状态与优化清单"),
-    8: _guidance("能容纳权重、KV 与工作区的支持设备；源码走读可离线", "匹配的驱动/运行时、模型许可与下载条件；第 7 章的模型与 KV 账", "可复现启动命令、流式冒烟，以及一张从请求到 block table 的路径图"),
-    9: _guidance("运行中的推理服务；监控示例另需 Docker", "第 8 章服务与第 2 章指标边界", "经已知负载验证的 Prometheus/Grafana 面板"),
-    10: _guidance("同一设备先后运行 vLLM 与 SGLang；不跑对照也可只读原理", "第 8 章的分页与调度；固定模型、负载与缓存设置", "前缀重/轻两组对照、命中率与调度分析"),
-    11: _guidance("CPU 压测客户端、真实服务与监控", "第 5 章基线；区分客户端在途数与服务端并发", "SLO 容量、拐点、过载段与抢占边界"),
-    12: _guidance("支持目标量化格式的设备与引擎", "相同底座的检查点、基线与预先定义的质量门槛", "性能/显存/任务质量的同条件对照"),
-    13: _guidance("支持投机或窗口缓存路径的目标引擎", "第 11–12 章；草稿成本、采样设置与 KV 位置约定", "接受 token/轮次记录、收益区间与质量回归"),
-    14: _guidance("实测需多设备及 KV 传输；本地集群只作部署演练", "单机基线、连接器协议与两池请求协调", "传输账、路径证据与部署验收记录"),
-    15: _guidance("集群与互联实测；无集群可完成纸面设计", "第 14 章数据路径与目标负载", "KV 池、拓扑、配比与故障恢复的证据清单"),
-    16: _guidance("成本手算与 CPU 路由逻辑；输入来自已有实测", "第 5/11 章吞吐、利用率和 SLO 记录", "单位成本表、路由规则与预算策略"),
-    17: _guidance("无需新增硬件，使用前面留下的原始记录", "可追溯实验编号、条件和已验证结论", "阶段报告、复现步骤与局限清单"),
-    18: _guidance("NVIDIA 支持矩阵内的设备与匹配后端", "同模型/同负载的 vLLM、SGLang 基线", "具体后端、执行配置与冷启动的三引擎对照"),
-    19: _guidance("CUDA 工具链与 GPU；无卡仅核对源码和数学", "第 1/3/6 章；先读完整参考程序与验证边界", "四版 GEMM 的正确性、计时与归因表"),
-    20: _guidance("受支持的 Triton 设备；部分练习可解释执行", "线程/分块基础、边界 mask 与计时口径", "向量、矩阵与融合算子的最小实现"),
-    21: _guidance("Triton GPU、FP32 参考与 PyTorch SDPA", "第 20 章；纸面 online softmax 可先无卡推导", "因果/非因果与尾块正确性、计时记录"),
-    22: _guidance("数值准备可做 CPU 检查，内核计时需支持的 GPU", "第 12/20 章；FP32 scale 与相同量化参考", "零值/极小值/形状边界与 INT8/fused 对照"),
-    23: _guidance("读源码无需 GPU；FA3 实验需对应 Hopper 能力", "第 19–22 章；核对 CUDA/CUTLASS/Triton 版本", "工业实现机制与单参数 tile 对照设计"),
-    24: _guidance("Python 可查注册；端到端必须使用实际引擎与 GPU", "第 8/20 章；完整插件入口与当前 CustomOp 接口", "注册/启用/分发证据和同负载端到端报告"),
-    25: _guidance("公开软件栈文档，无需设备", "一个目标模型和待适配的平台范围", "带来源、版本与核实日期的软件栈地图"),
-    26: _guidance("AscendC 编译/运行需匹配 SDK 与 NPU", "先完成第 27 章环境与冒烟；无卡只做链路设计", "最小算子的定义、编译、注册与调用检查点"),
-    27: _guidance("支持的 Ascend NPU 与匹配版本组合", "第 8/25 章同模型接口与软件栈地图", "安装、模型加载、流式冒烟与版本记录"),
-    28: _guidance("真实 profiler 清单；无卡只查实现存在性", "第 3/27 章；明确算子/kernel 的计数粒度", "覆盖矩阵、执行路径与耗时加权归因"),
-    29: _guidance("GPU 自查与 NPU 目标验证分别记录", "第 20/27/28 章；无 NPU 仅完成迁移设计", "基线、失效假设、单点修改与待验证记录"),
-    30: _guidance("两平台服务与同题配对评测集", "第 27–29 章；预先确定数值与质量退化门槛", "质量/性能/路径证据齐全的跨芯片初稿"),
-    31: _guidance("两套真实平台；缺一边只交框架和待测条件", "升级第 30 章同一份初稿，复用原始编号", "优化后回归、重复运行与可复现终稿"),
-}
-
-
-CHAPTER_FIGURES = {
-    1: ("roofline.svg", "Roofline 示意图：横轴为算术强度，纵轴为可达性能；斜线是带宽上限，横线是算力上限，交点是脊点；decode 点在斜线一侧，prefill 点越过脊点", "先看斜线、横线与交点（本算例的脊点是 156 FLOP/字节），再找 decode 与 prefill 示例点。结论：decode 在带宽斜线一侧，增加算力不改第一瓶颈；prefill 越过脊点后更受算力限制。"),
-    2: ("timeline.svg", "一次流式请求的时间线：请求到达、排队、prefill、TTFT、逐 token decode 与 ITL", "先看 TTFT 在哪里结束，再看其后的 token 间隔如何组成 ITL。结论：排队和 prefill 都计入 TTFT，不能和 decode 的 step time 混成一个数。"),
-    3: ("profiler-trace.svg", "CPU 与 GPU 双泳道 trace 示意：CPU 侧依次是 Python 调度、连续 kernel 启动与 synchronize，GPU 侧是若干短 kernel、一段空白、一个长 kernel 与更多短 kernel；空白与 CPU 的同步等待对齐", "先对齐 CPU 与 GPU 两条泳道，看 GPU 空白下方 CPU 在做什么；再区分发射跟不上、同步等待与拷贝。结论：GPU 时间线上的空白不是没有成本，它和 kernel 一样要归因。"),
-    7: ("model-ledgers.svg", "五个模型的两列点图：左列总参数（对数轴，8.19B 到 2.78T），右列每 8K 请求的全局 KV（对数轴，6.953 MiB 到 1,152 MiB）；Qwen3-8B 参数最少而 KV 最大，V4.1 Flash 参数第二而 KV 最小", "先看两列的横向位置：同一行是一个模型，参数从少到多排，8K 全局 KV 却没有同向变化。结论：参数规模不决定 KV 账，优化清单要按模型重排。"),
-    6: ("kernel-anatomy.svg", "计算与实际数据搬运的必要下界，启动与同步开销单独列出", "先比较时间尺度，再检查重叠与串行依赖。重叠只能减少相加的时间，不能突破同口径下的计算与搬运下界；实际瓶颈仍要用时间线验证。"),
-    8: ("kv-pages.svg", "PagedAttention 的块表映射：左侧逻辑块 L0–L5，经中间块表映射到右侧非连续物理页", "先看左侧逻辑块和中间块表，再沿映射看右侧物理页；相邻逻辑块可以落在不相邻的物理页。结论：按需分页把浪费压到最后一个未满 block，代价是 attention 按块表 gather。"),
-    10: ("radix-tree.svg", "基数树共享前缀示意：A、B、C 三个请求共享 [101,11]，A、B 再共享 [12]，分叉后的后缀各自独立；颜色相同的 token 指向同一份物理 KV", "先看右侧三条请求的 token 序列，再看左侧树上的共享节点与分叉节点。结论：公共前缀只存一份 KV，分裂只重组 key/value 的切片，不复制物理 KV；匹配粒度到 token，分页共享不了的尾巴也能共享。"),
-    11: ("throughput-knee.svg", "吞吐与 p95 延迟随并发变化的示意曲线，标出拐点与饱和段", "先看吞吐何时停止线性增长，再对照 p95 何时陡增。结论：拐点是容量结论的起点；1000 并发只是观测边界，不是考核指标。"),
-    12: ("quant.svg", "FP16、FP8、INT4 的位数、权重体积与 scale 示意", "先比较三种格式的位数和权重体积，再看 scale 与误差说明。结论：位宽降低直接减少搬运量，但误差、离群值和反量化开销决定它能用到哪里。"),
-    13: ("spec.svg", "投机解码：draft 模型先猜多个 token，target 模型一次验证并接受前缀", "先看 draft 猜了几个，再看 target 验证后接受几个、在哪里截断。结论：收益由接受率和额外计算成本共同决定，低 QPS 的加速比不能外推。"),
-    14: ("pd.svg", "解耦式服务：请求经 router 进入 prefill 池，产出的 KV 经传输层或共享池进入 decode 池，两池各自扩缩容", "先看 router 如何把请求分到 prefill 池，再沿 KV 箭头看传输与共享池两条路径。结论：拆分的收益是消掉的干扰与硬件错配，成本是 KV 传输、两池空闲与运维；两池卡数与扩缩容信号要一起设计。"),
-    15: ("pd.svg", "大规模 PD 的抽象示意：prefill 池、decode 池与 KV 传输；未展开跨节点拓扑", "这张图只抽象两池与 KV 传输，不代表跨节点拓扑。先看 KV 路径，再回到正文核对跨机带宽、池配比和容错；结论必须落在你自己的传输账上。"),
-    18: ("trtllm-pipeline.svg", "TensorRT-LLM PyTorch 后端的准备与运行：预先准备常见执行路径，运行时按请求调度并复用可用计划与图；不是与 vLLM 的 eager 二分", "上半部分是加载与预热阶段的准备，下半部分仍按实际请求调度。编译缓存、kernel 与图捕获不是某个引擎独有的机制；变更时核对图覆盖与后端规则，再决定重载、补捕获或回退。"),
-    19: ("cuda-ladder.svg", "CUDA 优化阶梯：朴素版、shared memory 分块、向量化访存、占用率调优", "先看横轴四个版本，再看每一步只改哪个变量；柱高是示意，不是实测。结论：每一步都要由 ncu 读数和 Roofline 点验证，不能只看总时间。"),
-    22: ("quant.svg", "FP16、FP8、INT4 的位数与 7B 模型权重体积对比：先看位数与体积随位宽减半，再回到正文核对 8 位权重的搬运账。结论：位宽减半，权重搬运减半，这是 fused dequant 要利用的第一笔账。", "先比较三种格式的位数与权重体积，再回到正文核对 8 位权重的搬运账。结论：位宽减半，权重搬运减半；这是 fused dequant 要利用的第一笔账。"),
-    25: ("chip-stack.svg", "国产芯片软件栈：驱动与固件、SDK/运行时、算子库、框架插件、推理引擎", "从下往上看五层软件栈，再检查同一模型经过哪些层。结论：跑通和性能问题都要按层定位，不能只归因到芯片本身。"),
-    26: ("cann-op-chain.svg", "左侧是 CANN 分层（驱动与固件、运行时、算子库、图引擎与框架适配），右侧是一个算子从 AscendC 源码、编译、注册到被 vLLM 调用的四环；先自下而上找层，再沿四环找断点。结论：症状与根因常不在同一层，定位要按链路走", "先看左侧的软件栈分层，再沿右侧四环看一个算子从源码到调用的路径；任何一环没接上，症状都可能出现在别处。结论：定位要按层与链路走，不能只看报错所在的那一层。"),
-    27: ("chip-stack.svg", "vllm-ascend 插件在芯片软件栈中的位置：接入引擎与算子库之间", "先找插件层，再看它向上接 vLLM、向下接 CANN 与算子实现。结论：版本矩阵、插件 hook 和算子覆盖要分别验证，不能互相替代。"),
-    28: ("coverage-attribution.svg", "覆盖矩阵归因：横轴为耗时加权执行覆盖率，纵轴为 Top 3 耗时占比；四个象限分别指向补算子、补长尾、查热点实现和查调度/显存/通信。", "先看覆盖率落在低/高哪一侧，再看 Top 3 是否集中；结论：低覆盖且热点集中才补算子，高覆盖仍慢则查调度、显存与通信。"),
+CHAPTER_SUMMARIES: dict[int, str] = {
+    1: "用算术强度、硬件脊点与计算/带宽/启动三区间，判断一次推理或融合算子究竟卡在哪。",
+    2: "拆解权重、KV 缓存（MHA/GQA/MLA）、MoE 稀疏激活与混合线性注意力的显存与计算账。",
+    3: "把“快”拆成 TTFT、ITL/TPOT、吞吐与排队，掌握分位数分布、SSE 计时原理与拐点读法。",
+    4: "按 torch.profiler → nsys → ncu 三层粒度读懂 CPU/GPU 双泳道，定位热点与时间线空白。",
+    5: "沿一条请求的完整旅程，拆解 vLLM V1 双进程架构、PagedAttention、连续批处理与调度抢占。",
+    6: "从整段哈希到 Block 哈希再到基数树，走完 RadixAttention 前缀复用、调度生命周期与分块 Prefill。",
+    7: "先定义指标再看看板：掌握 Prometheus 三类指标、速率扫描曲线、Little 定律与过载抢占边界。",
+    8: "看清低比特如何省搬运与提算力，用微型算例拆解离群值、SmoothQuant、AWQ/GPTQ 与硬件边界。",
+    9: "先建立草稿并行验证直觉与无损拒绝采样原理，再看清 QPS 交叉点与 Attention Sink 淘汰机制。",
+    10: "厘清 TensorRT-LLM PyExecutor 与三预算账，用一张完整架构总表横评 vLLM、SGLang 与 TRT-LLM。",
+    11: "算清 PD 解耦传输税与 K8s 排队深度扩缩容逻辑，建立单位 Token 经济学与多后端预算路由。",
+    12: "从 Thread/Warp/SM 存储层级出发，走完 GEMM 朴素、Shared 分块、向量化防 Bank 冲突与线程粗化四版阶梯。",
+    13: "建立 Triton Block 级编程思维，打通 1D Mask、Fused Softmax 与最小 2D GEMM 广播指针。",
+    14: "推导 Online Softmax 精确更新与代码化简，算清 SRAM/寄存器上限，拆解完整实现与 Causal 跳块。",
+    15: "看懂 Scale 粒度如何决定 Kernel 结构，对比 W8A8 与 W8A16 Fused Dequant 双路径及 L2 Swizzle。",
+    16: "图解 FlashAttention 2 的 Split-Q 与 cp.async 流水、FA3 Hopper TMA/Warp Specialization 与 CUTLASS/CuTe。",
+    17: "走通 vLLM CustomOp 注册、启用、分发三道门，规避静默失效，并用 Amdahl 归因与扩展地图收口。",
+    18: "以四面墙与五层软件栈建立国产芯片坐标系，对比平台插件与 FlagGems 统一算子层，附主流平台实填表。",
+    19: "理顺昇腾版本咬合链、驱动→框架→插件三层诊断模型与 vllm-ascend 模块架构，对比 CUDA 关键差异。",
+    20: "打通 CANN 五层映射、TBE/AscendC 抽象、MTE2/VEC/MTE3 双缓冲流水线，沿 RMSNorm 走完算子四环。",
+    21: "区分 CPU 回退、图外执行、精度降级与静默回退，用三口径覆盖率、四象限法则与示范 Profiler 清单定位瓶颈。",
+    22: "对照 GPU 与 Ascend 存储流水架构，逐条拆解六类 CUDA 假设失效点与小引擎/Triton 迁移思路。",
+    23: "掌握配对精度检验、五步归因闭环、一篇完整的跨芯片对比分析范例，以及系统论文三遍阅读法。",
 }
 
 TERM_GLOSSARY = [
     {"id": "roofline", "aliases": ("Roofline", "Roofline 模型"), "en": "Roofline model", "zh": "屋顶线模型", "desc": "用峰值算力、峰值显存带宽和算术强度估算 kernel 性能上限的模型"},
-    {"id": "arithmetic_intensity", "aliases": ("算术强度", "arithmetic intensity"), "en": "arithmetic intensity", "zh": "算术强度", "desc": "每搬运 1 字节数据所执行的浮点运算次数"},
-    {"id": "ridge_point", "aliases": ("脊点", "ridge point"), "en": "ridge point", "zh": "脊点", "desc": "硬件峰值算力与峰值显存带宽之比，用来判断计算受限还是带宽受限"},
-    {"id": "memory_bound", "aliases": ("显存带宽受限", "memory-bound", "memory bound"), "en": "memory-bound", "zh": "显存带宽受限", "desc": "运行时间主要受显存带宽而不是计算能力限制的状态"},
-    {"id": "compute_bound", "aliases": ("计算受限", "compute-bound", "compute bound"), "en": "compute-bound", "zh": "计算受限", "desc": "运行时间主要受计算能力而不是显存带宽限制的状态"},
-    {"id": "ttft", "aliases": ("TTFT",), "en": "Time to First Token", "zh": "首 token 延迟", "desc": "从请求发出到首次输出的时间；本书客户端以首个非空内容 chunk 到达作近似，不把 role 或 usage 空块当首 token"},
-    {"id": "itl", "aliases": ("ITL",), "en": "Inter-Token Latency", "zh": "token 间延迟", "desc": "同一请求相邻两个输出 token 之间的间隔（逐个间隔；报告时看 p50/p95/最大间隔）"},
-    {"id": "tpot", "aliases": ("TPOT",), "en": "Time Per Output Token", "zh": "每输出 token 时间", "desc": "首末内容到达时间差除以输出 token 数减一；不足两个输出 token 或只有一个内容 chunk 时不报告，chunk 聚合仍影响近似"},
-    {"id": "prefill", "aliases": ("prefill", "Prefill", "预填充"), "en": "prefill", "zh": "预填充", "desc": "处理新输入 prompt 并写入 KV 缓存的前向阶段，可整段或分块执行"},
-    {"id": "decode", "aliases": ("decode", "Decode", "解码阶段", "解码请求"), "en": "autoregressive decoding", "zh": "解码", "desc": "逐 token 生成输出、并复用已有 KV 缓存的自回归阶段"},
-    {"id": "kv_cache", "aliases": ("KV 缓存", "KV Cache", "KV cache"), "en": "Key-Value Cache", "zh": "键值缓存", "desc": "保存历史 token 的注意力 K/V 向量、避免 decode 时重复计算的显存区域"},
+    {"id": "arithmetic_intensity", "aliases": ("算术强度", "arithmetic intensity"), "en": "arithmetic intensity", "zh": "算术强度", "desc": "每搬运 1 字节数据所执行的浮点运算次数（FLOP/Byte）"},
+    {"id": "ridge_point", "aliases": ("脊点", "ridge point"), "en": "ridge point", "zh": "脊点", "desc": "硬件峰值算力与峰值显存带宽之比，划分带宽受限区与计算受限区"},
+    {"id": "memory_bound", "aliases": ("显存带宽受限", "memory-bound", "memory bound"), "en": "memory-bound", "zh": "显存带宽受限", "desc": "运行时间主要受显存数据搬运速度限制的状态"},
+    {"id": "compute_bound", "aliases": ("计算受限", "compute-bound", "compute bound"), "en": "compute-bound", "zh": "计算受限", "desc": "运行时间主要受算力单元吞吐限制的状态"},
+    {"id": "ttft", "aliases": ("TTFT",), "en": "Time to First Token", "zh": "首 token 延迟", "desc": "从发出请求到收到首个非空生成内容的时间，包含排队与 prefill"},
+    {"id": "itl", "aliases": ("ITL",), "en": "Inter-Token Latency", "zh": "token 间延迟", "desc": "同一请求相邻两个输出 token 之间的时间间隔，决定流式输出是否卡顿"},
+    {"id": "tpot", "aliases": ("TPOT",), "en": "Time Per Output Token", "zh": "每输出 token 平均时间", "desc": "解码阶段总跨度除以输出 token 数减一，衡量平均生成速度"},
+    {"id": "prefill", "aliases": ("prefill", "Prefill", "预填充"), "en": "prefill", "zh": "预填充", "desc": "并行处理输入 prompt 并写入初始 KV 缓存的前向阶段"},
+    {"id": "decode", "aliases": ("decode", "Decode", "解码阶段"), "en": "autoregressive decoding", "zh": "解码", "desc": "逐 token 自回归生成输出、并每步复用历史 KV 缓存的阶段"},
+    {"id": "kv_cache", "aliases": ("KV 缓存", "KV Cache", "KV cache"), "en": "Key-Value Cache", "zh": "键值缓存", "desc": "保存历史 token 注意力 K/V 向量、避免 decode 阶段重复计算的显存区域"},
     {"id": "mha", "aliases": ("MHA",), "en": "Multi-Head Attention", "zh": "多头注意力", "desc": "每个 query 头拥有独立 K/V 头的标准注意力结构"},
-    {"id": "gqa", "aliases": ("GQA",), "en": "Grouped-Query Attention", "zh": "分组查询注意力", "desc": "多个 query 头共享一组 K/V 头，以降低 KV 缓存和访存开销"},
-    {"id": "mla", "aliases": ("MLA",), "en": "Multi-head Latent Attention", "zh": "多头潜变量注意力", "desc": "先把 K/V 压缩到低维潜变量、再按需展开的注意力结构"},
-    {"id": "moe", "aliases": ("MoE",), "en": "Mixture of Experts", "zh": "混合专家", "desc": "每个 token 只激活少数专家网络，以较少计算获得更大参数容量"},
-    {"id": "paged_attention", "aliases": ("PagedAttention", "Paged Attention"), "en": "Paged Attention", "zh": "分页注意力", "desc": "把 KV 缓存切成固定大小 block，并通过块表映射到非连续显存的注意力实现"},
-    {"id": "block_table", "aliases": ("block table",), "en": "block table", "zh": "块表", "desc": "记录逻辑 KV block 到物理显存 block 映射的每请求索引表"},
-    {"id": "continuous_batching", "aliases": ("连续批处理", "continuous batching", "Continuous Batching"), "en": "continuous batching", "zh": "连续批处理", "desc": "每次模型迭代都重新组批，请求完成即退出、等待请求可立即补入的调度方式"},
-    {"id": "chunked_prefill", "aliases": ("chunked prefill", "Chunked Prefill", "分块 prefill"), "en": "chunked prefill", "zh": "分块预填充", "desc": "把长 prompt 的 prefill 切成小块，与 decode 请求交错执行的调度策略"},
-    {"id": "prefix_caching", "aliases": ("prefix caching", "Prefix Caching", "前缀缓存"), "en": "prefix caching", "zh": "前缀缓存", "desc": "复用多个请求相同前缀已计算出的 KV 缓存，避免重复 prefill"},
-    {"id": "radix_attention", "aliases": ("RadixAttention", "Radix Attention"), "en": "Radix Attention", "zh": "基数树注意力", "desc": "用基数树管理可共享前缀的 KV 缓存，以 token 序列为键做复用与淘汰"},
-    {"id": "quantization", "aliases": ("量化", "quantization"), "en": "quantization", "zh": "量化", "desc": "用更低位宽表示权重或激活，以降低显存占用和搬运量", "exclude_prefixes": ("向", "预")},
-    {"id": "awq", "aliases": ("AWQ",), "en": "Activation-aware Weight Quantization", "zh": "激活感知权重量化", "desc": "依据激活分布保护重要权重通道的低比特权重量化方法"},
-    {"id": "gptq", "aliases": ("GPTQ",), "en": "Generative Pre-trained Transformer Quantization", "zh": "GPT 权重量化", "desc": "利用二阶信息逐层最小化重建误差的训练后权重量化方法"},
-    {"id": "fp8", "aliases": ("FP8",), "en": "8-bit Floating Point", "zh": "8 位浮点", "desc": "使用 8 位浮点表示权重或激活的低精度格式"},
-    {"id": "int4", "aliases": ("INT4",), "en": "4-bit Integer", "zh": "4 位整数", "desc": "使用 4 位整数表示权重、配合 scale 反量化的极低位宽格式"},
-    {"id": "speculative_decoding", "aliases": ("投机解码", "speculative decoding"), "en": "speculative decoding", "zh": "投机解码", "desc": "先用草稿模型生成多个候选 token，再由目标模型一次验证和接受"},
-    {"id": "draft_model", "aliases": ("草稿模型", "draft model"), "en": "draft model", "zh": "草稿模型", "desc": "投机解码中快速生成候选 token 的小模型"},
-    {"id": "target_model", "aliases": ("target model",), "en": "target model", "zh": "目标模型", "desc": "投机解码中负责验证候选 token 的原始大模型"},
-    {"id": "acceptance_rate", "aliases": ("接受率", "acceptance rate"), "en": "acceptance rate", "zh": "接受率", "desc": "草稿 token 被目标模型验证通过的比例"},
-    {"id": "kv_eviction", "aliases": ("KV 淘汰", "KV eviction", "KV cache eviction"), "en": "KV cache eviction", "zh": "KV 缓存淘汰", "desc": "按策略丢弃部分历史 KV，以降低长上下文显存与读取量"},
-    {"id": "pd_disaggregation", "aliases": ("PD 解耦", "prefill-decode disaggregation", "解耦式服务"), "en": "prefill-decode disaggregation", "zh": "预填充-解码解耦", "desc": "把 prefill 与 decode 放到不同实例或硬件池，分别优化两种瓶颈"},
-    {"id": "goodput", "aliases": ("goodput", "有效吞吐"), "en": "goodput", "zh": "有效吞吐", "desc": "满足延迟或正确性约束的成功请求吞吐"},
-    {"id": "hpa", "aliases": ("HPA",), "en": "Horizontal Pod Autoscaler", "zh": "水平 Pod 自动扩缩容", "desc": "Kubernetes 中按指标自动调整 Pod 副本数的控制器"},
-    {"id": "keda", "aliases": ("KEDA",), "en": "Kubernetes Event-driven Autoscaling", "zh": "Kubernetes 事件驱动扩缩容", "desc": "把事件或外部指标接入 HPA 的扩缩容组件"},
-    {"id": "router", "aliases": ("router", "Router", "路由器"), "en": "router", "zh": "路由器", "desc": "在多后端或多模型之间按成本、延迟或质量选择目标服务的组件"},
-    {"id": "tensorrt_llm", "aliases": ("TensorRT-LLM",), "en": "TensorRT for Large Language Models", "zh": "TensorRT-LLM 推理引擎", "desc": "NVIDIA 的 LLM 推理系统，须区分历史 TensorRT engine 流程和当前 PyTorch 执行后端；编译与图捕获不是其独有机制"},
+    {"id": "gqa", "aliases": ("GQA",), "en": "Grouped-Query Attention", "zh": "分组查询注意力", "desc": "多个 query 头共享一组 K/V 头，以成倍降低 KV 显存占用与访存量"},
+    {"id": "mla", "aliases": ("MLA",), "en": "Multi-head Latent Attention", "zh": "多头潜变量注意力", "desc": "将 K/V 压缩到低维潜变量缓存，并利用矩阵结合律在查询侧吸收上投影的注意力结构"},
+    {"id": "moe", "aliases": ("MoE",), "en": "Mixture of Experts", "zh": "混合专家", "desc": "每个 token 经路由仅激活少数专家子网络，实现总参数容量与单步计算量脱钩"},
+    {"id": "paged_attention", "aliases": ("PagedAttention", "Paged Attention"), "en": "Paged Attention", "zh": "分页注意力", "desc": "将 KV 缓存切为固定大小 block，通过块表映射到非连续物理显存的注意力管理机制"},
+    {"id": "block_table", "aliases": ("block table",), "en": "block table", "zh": "块表", "desc": "记录序列逻辑 KV block 到物理显存 block 映射的每请求索引数组"},
+    {"id": "continuous_batching", "aliases": ("连续批处理", "continuous batching", "Continuous Batching"), "en": "continuous batching", "zh": "连续批处理", "desc": "以单次迭代为粒度动态组批，已完成请求立即退出、等待请求即时补入的调度机制"},
+    {"id": "chunked_prefill", "aliases": ("chunked prefill", "Chunked Prefill", "分块 prefill", "分块 Prefill"), "en": "chunked prefill", "zh": "分块预填充", "desc": "将长 prompt 的 prefill 切为定长小块，与 decode 请求混批以消除解码卡顿"},
+    {"id": "prefix_caching", "aliases": ("prefix caching", "Prefix Caching", "前缀缓存"), "en": "prefix caching", "zh": "前缀缓存", "desc": "跨请求复用相同 prompt 前缀已计算出的 KV 缓存，跳过重复 prefill"},
+    {"id": "radix_attention", "aliases": ("RadixAttention", "Radix Attention"), "en": "Radix Attention", "zh": "基数树注意力", "desc": "用压缩前缀树（Radix Tree）按 token 粒度管理、共享与 LRU 淘汰 KV 缓存的机制"},
+    {"id": "quantization", "aliases": ("量化", "quantization"), "en": "quantization", "zh": "量化", "desc": "用更低位宽表示权重或激活，以降低显存占用与带宽搬运量", "exclude_prefixes": ("向", "预", "标")},
+    {"id": "awq", "aliases": ("AWQ",), "en": "Activation-aware Weight Quantization", "zh": "激活感知权重量化", "desc": "依据激活幅值分布保护关键权重通道的低比特权重量化方法"},
+    {"id": "gptq", "aliases": ("GPTQ",), "en": "Generative Pre-trained Transformer Quantization", "zh": "GPT 权重量化", "desc": "基于近似二阶海森信息逐列补偿量化误差的训练后权重量化方法"},
+    {"id": "smoothquant", "aliases": ("SmoothQuant",), "en": "SmoothQuant", "zh": "SmoothQuant 平滑量化", "desc": "通过等价通道缩放将激活离群值转移到权重侧，使 W8A8 量化更平滑的方法"},
+    {"id": "fp8", "aliases": ("FP8",), "en": "8-bit Floating Point", "zh": "8 位浮点", "desc": "使用 8 位浮点表示权重或激活的低精度格式，Hopper 及更新架构提供原生 Tensor Core 加速"},
+    {"id": "int4", "aliases": ("INT4",), "en": "4-bit Integer", "zh": "4 位整数", "desc": "每权重仅占 4 bit 的极低位宽格式，常以 W4A16 形式大幅缓解显存与带宽压力"},
+    {"id": "speculative_decoding", "aliases": ("投机解码", "speculative decoding"), "en": "speculative decoding", "zh": "投机解码", "desc": "先由低成本草稿模型预测多步候选 token，再由目标大模型单次并行验证的无损加速方法"},
+    {"id": "kv_eviction", "aliases": ("KV 淘汰", "KV eviction", "KV cache eviction"), "en": "KV cache eviction", "zh": "KV 缓存淘汰", "desc": "按策略丢弃部分历史 KV（如保留 Attention Sink 与滑窗），以控制超长上下文显存"},
+    {"id": "pd_disaggregation", "aliases": ("PD 解耦", "prefill-decode disaggregation", "解耦式服务"), "en": "prefill-decode disaggregation", "zh": "预填充-解码解耦", "desc": "将算力密集的 Prefill 与带宽密集的 Decode 拆分到独立计算池，消除相互干扰"},
+    {"id": "goodput", "aliases": ("goodput", "有效吞吐"), "en": "goodput", "zh": "有效吞吐", "desc": "同时满足延迟（TTFT/ITL）SLO 与正确性约束的有效请求吞吐"},
+    {"id": "hpa", "aliases": ("HPA",), "en": "Horizontal Pod Autoscaler", "zh": "水平 Pod 自动扩缩容", "desc": "Kubernetes 中根据队列或业务指标自动增减副本数的控制器"},
+    {"id": "keda", "aliases": ("KEDA",), "en": "Kubernetes Event-driven Autoscaling", "zh": "Kubernetes 事件驱动扩缩容", "desc": "将 Prometheus 队列深度等外部指标接入 Kubernetes 自动扩缩容的组件"},
+    {"id": "tensorrt_llm", "aliases": ("TensorRT-LLM",), "en": "TensorRT-LLM", "zh": "TensorRT-LLM 推理引擎", "desc": "NVIDIA 面向数据中心 GPU 的高性能 LLM 推理系统，当前默认采用 PyTorch 执行后端"},
     {"id": "cuda", "aliases": ("CUDA",), "en": "Compute Unified Device Architecture", "zh": "统一计算设备架构", "desc": "NVIDIA 的 GPU 并行计算平台与编程模型"},
-    {"id": "cuda_graph", "aliases": ("CUDA Graph", "CUDA 图"), "en": "CUDA Graph", "zh": "CUDA 图", "desc": "把多次 kernel 启动录制成一张图，以减少重复启动开销"},
-    {"id": "triton", "aliases": ("Triton",), "en": "Triton", "zh": "Triton GPU 编程语言", "desc": "用 Python 风格语法编写 GPU kernel 的语言与编译器"},
-    {"id": "shared_memory", "aliases": ("shared memory", "Shared Memory", "共享内存"), "en": "shared memory", "zh": "共享内存", "desc": "同一线程块内可见、延迟远低于显存的可编程片上存储"},
-    {"id": "warp", "aliases": ("warp", "Warp"), "en": "warp", "zh": "线程束", "desc": "NVIDIA CUDA 中通常由 32 个线程组成的指令执行组；其他平台的线程组与调度规则需另查"},
-    {"id": "occupancy", "aliases": ("occupancy", "Occupancy", "占用率"), "en": "occupancy", "zh": "占用率", "desc": "SM 上实际驻留 warp 数占硬件上限的比例"},
-    {"id": "bank_conflict", "aliases": ("bank conflict", "Bank Conflict", "存储体冲突"), "en": "bank conflict", "zh": "存储体冲突", "desc": "多个线程访问同一 shared memory bank 的不同地址而被迫串行"},
-    {"id": "gemm", "aliases": ("GEMM",), "en": "General Matrix Multiplication", "zh": "通用矩阵乘法", "desc": "注意力投影、MLP 和大多数线性层的基础计算算子"},
-    {"id": "fused_attention", "aliases": ("fused attention", "Fused Attention", "融合注意力"), "en": "fused attention", "zh": "融合注意力", "desc": "把 attention 的多个步骤融进一个 kernel，避免中间矩阵写入显存"},
-    {"id": "flash_attention", "aliases": ("FlashAttention",), "en": "FlashAttention", "zh": "FlashAttention", "desc": "通过分块与在线 softmax 减少 HBM 中间矩阵读写的 IO 感知精确注意力实现，不是闪存技术"},
-    {"id": "online_softmax", "aliases": ("online softmax", "Online Softmax", "在线 softmax"), "en": "online softmax", "zh": "在线 softmax", "desc": "分块计算 softmax 时维护运行最大值与归一化因子的数值稳定算法"},
-    {"id": "cutlass", "aliases": ("CUTLASS",), "en": "CUDA Templates for Linear Algebra Subroutines", "zh": "CUDA 线性代数模板库", "desc": "NVIDIA 提供的可组合 GEMM 与流水线 kernel 模板库"},
-    {"id": "cann", "aliases": ("CANN",), "en": "Compute Architecture for Neural Networks", "zh": "昇腾神经网络计算架构", "desc": "华为昇腾 NPU 的软件栈与算子开发平台"},
-    {"id": "ascendc", "aliases": ("AscendC", "Ascend C"), "en": "Ascend C", "zh": "昇腾 C 算子编程语言", "desc": "用于在昇腾 NPU 上编写自定义算子的 C++ 编程接口"},
-    {"id": "npu", "aliases": ("NPU",), "en": "Neural Processing Unit", "zh": "神经网络处理器", "desc": "面向神经网络张量计算加速的专用处理器"},
-    {"id": "vllm_ascend", "aliases": ("vllm-ascend",), "en": "vLLM Ascend plugin", "zh": "vLLM 昇腾插件", "desc": "把昇腾算子与运行时接入 vLLM 的硬件后端插件"},
-    {"id": "operator_coverage", "aliases": ("算子覆盖", "operator coverage"), "en": "operator coverage", "zh": "算子覆盖", "desc": "模型所需算子中，目标硬件已有可用实现的比例与清单"},
-    {"id": "tensor_parallelism", "aliases": ("张量并行", "tensor parallelism"), "en": "tensor parallelism", "zh": "张量并行", "desc": "把单个矩阵或张量切分到多张卡上协同计算"},
-    {"id": "mfu", "aliases": ("MFU",), "en": "Model FLOPs Utilization", "zh": "模型浮点算力利用率", "desc": "实际模型计算吞吐占硬件峰值算力的比例"},
-    {"id": "slo", "aliases": ("SLO",), "en": "Service Level Objective", "zh": "服务等级目标", "desc": "对延迟、可用性或错误率设定的可度量目标"},
-    {"id": "qps", "aliases": ("QPS",), "en": "Queries Per Second", "zh": "每秒查询数", "desc": "系统每秒处理的请求数"},
-    {"id": "ncu", "aliases": ("ncu",), "en": "NVIDIA Nsight Compute", "zh": "NVIDIA 内核性能分析器", "desc": "采集单个 GPU kernel 硬件计数器与瓶颈指标的工具"},
-    {"id": "nsys", "aliases": ("nsys",), "en": "NVIDIA Nsight Systems", "zh": "NVIDIA 系统级性能分析器", "desc": "采集 CPU、GPU、拷贝与同步时间线的系统级 profiler"},
-    {"id": "tbe", "aliases": ("TBE",), "en": "Tensor Boost Engine", "zh": "张量加速引擎", "desc": "昇腾 CANN 中较早的算子开发框架，用 DSL 描述算子计算"},
-    {"id": "rope", "aliases": ("RoPE",), "en": "Rotary Position Embedding", "zh": "旋转位置编码", "desc": "通过旋转 query/key 表示注入相对位置信息的编码方法"},
-    {"id": "rag", "aliases": ("RAG",), "en": "Retrieval-Augmented Generation", "zh": "检索增强生成", "desc": "先从外部知识库检索相关文档，再把结果交给模型生成"
-},
+    {"id": "cuda_graph", "aliases": ("CUDA Graph", "CUDA 图"), "en": "CUDA Graph", "zh": "CUDA 图", "desc": "将一连串 GPU kernel 启动录制成静态图单次重放，显著降低 CPU 发射开销"},
+    {"id": "triton", "aliases": ("Triton",), "en": "Triton", "zh": "Triton GPU 编程语言", "desc": "以 Block 级张量抽象用 Python 编写高性能 GPU kernel 的语言与编译器"},
+    {"id": "shared_memory", "aliases": ("shared memory", "Shared Memory", "共享内存"), "en": "shared memory", "zh": "共享内存", "desc": "同一线程块（SM）内可见、带宽极高、延迟仅数十周期的可编程片上存储"},
+    {"id": "warp", "aliases": ("warp", "Warp"), "en": "warp", "zh": "线程束", "desc": "NVIDIA GPU 中以 32 个线程为一组按 SIMT 方式同步调度的最小硬件执行单元"},
+    {"id": "occupancy", "aliases": ("occupancy", "Occupancy", "占用率"), "en": "occupancy", "zh": "占用率", "desc": "SM 上实际驻留活跃 warp 数占硬件最大支持 warp 数的比例"},
+    {"id": "bank_conflict", "aliases": ("bank conflict", "Bank Conflict", "存储体冲突"), "en": "bank conflict", "zh": "存储体冲突", "desc": "同一 warp 内多个线程同时访问同一 shared memory bank 的不同地址而导致的串行化"},
+    {"id": "gemm", "aliases": ("GEMM",), "en": "General Matrix Multiplication", "zh": "通用矩阵乘法", "desc": "Transformer 投影层、MLP 与输出头的核心基础计算算子"},
+    {"id": "flash_attention", "aliases": ("FlashAttention",), "en": "FlashAttention", "zh": "FlashAttention", "desc": "通过片上分块与在线 Softmax 消除 N×N 中间矩阵 HBM 读写的 IO 感知精确注意力算法"},
+    {"id": "online_softmax", "aliases": ("online softmax", "Online Softmax", "在线 softmax"), "en": "online softmax", "zh": "在线 Softmax", "desc": "分块扫描时动态维护运行最大值与归一化分母、与整行计算精确等价的数值稳定算法"},
+    {"id": "cutlass", "aliases": ("CUTLASS",), "en": "CUDA Templates for Linear Algebra Subroutines", "zh": "CUTLASS 模板库", "desc": "NVIDIA 开源的可组合高性能 GEMM 与流水线 C++/CuTe 模板库"},
+    {"id": "cann", "aliases": ("CANN",), "en": "Compute Architecture for Neural Networks", "zh": "昇腾神经网络计算架构", "desc": "华为昇腾 NPU 的分层异构计算软件栈与算子开发平台"},
+    {"id": "ascendc", "aliases": ("AscendC", "Ascend C"), "en": "Ascend C", "zh": "AscendC 算子编程语言", "desc": "面向华为昇腾 NPU 的 C++ 自定义算子编程接口，显式管理片上 UB 与硬件流水"},
+    {"id": "npu", "aliases": ("NPU",), "en": "Neural Processing Unit", "zh": "神经网络处理器", "desc": "专为矩阵与向量张量计算设计的专用人工智能加速处理器"},
+    {"id": "vllm_ascend", "aliases": ("vllm-ascend",), "en": "vLLM Ascend plugin", "zh": "vLLM 昇腾插件", "desc": "将昇腾 NPU 平台、算子库与通信后端无缝挂载到 vLLM 主干的官方硬件插件"},
+    {"id": "operator_coverage", "aliases": ("算子覆盖", "operator coverage"), "en": "operator coverage", "zh": "算子覆盖", "desc": "模型推理所需算子在目标硬件上由原生或专用实现承接的比例与清单"},
+    {"id": "tensor_parallelism", "aliases": ("张量并行", "tensor parallelism"), "en": "tensor parallelism", "zh": "张量并行", "desc": "将单层权重矩阵切分到多张加速卡上并行计算并通过集合通信汇总的并行策略"},
+    {"id": "mfu", "aliases": ("MFU",), "en": "Model FLOPs Utilization", "zh": "模型算力利用率", "desc": "实际有效模型计算吞吐占硬件理论峰值算力的比例"},
+    {"id": "slo", "aliases": ("SLO",), "en": "Service Level Objective", "zh": "服务等级目标", "desc": "对服务延迟分位数（如 TTFT/ITL p95）与可用性设定的可度量目标"},
+    {"id": "qps", "aliases": ("QPS",), "en": "Queries Per Second", "zh": "每秒请求数", "desc": "系统每秒到达或完成的请求数量"},
+    {"id": "ncu", "aliases": ("ncu",), "en": "NVIDIA Nsight Compute", "zh": "Nsight Compute", "desc": "采集单个 GPU kernel 硬件计数器、指令与访存瓶颈的微观性能分析器"},
+    {"id": "nsys", "aliases": ("nsys",), "en": "NVIDIA Nsight Systems", "zh": "Nsight Systems", "desc": "采集 CPU、GPU、内存拷贝与跨进程同步全景时间线的系统级分析器"},
+    {"id": "tbe", "aliases": ("TBE",), "en": "Tensor Boost Engine", "zh": "张量加速引擎", "desc": "昇腾 CANN 上一代基于 Python DSL 描述计算与自动调度的算子开发框架"},
+    {"id": "rope", "aliases": ("RoPE",), "en": "Rotary Position Embedding", "zh": "旋转位置编码", "desc": "通过旋转 query/key 向量注入相对位置信息的经典位置编码方法"},
 ]
-
-CHAPTER_FIGURE_PLACEMENT = {
-    1: (3, 6),    # 1.3 after the ridge-point cross-over is solved
-    2: (None, 1), # chapter opens with the metric question; figure before the table
-    3: (2, 1),    # 3.2 CPU/GPU trace lanes
-    7: (5, 1),    # 7.5 five-model ledger comparison
-    6: (1, 1),    # 6.1 three bottleneck buckets
-    8: (4, 1),    # 8.4 PagedAttention block mapping
-    10: (3, 1),   # 10.3 radix tree
-    11: (4, 1),   # 11.4 throughput knee
-    12: (1, 1),   # 12.1 weight volume by precision
-    13: (2, 1),   # 13.2 proposer/scorer/verifier pipeline
-    14: (1, 1),   # 14.1 prefill/decode separation
-    15: (2, 1),   # 15.2 Mooncake request path
-    18: (1, 6),   # 18.1 after the compile-time section
-    19: (2, 1),   # 19.2 measurement bench and optimization ladder
-    22: (3, 1),   # 22.3 fused dequant+matmul
-    25: (2, 1),   # 25.2 software stack layers
-    26: (4, 1),   # 26.4 operator chain
-    27: (3, 1),   # 27.3 plugin position in the stack
-    28: (5, 6),   # 28.5 after the threshold paragraph
-}
-
-# Legacy week-to-chapter maps for old drafts. Parts 1 and 5 originally reused
-# the part-2 map; keep that behavior when rewriting imported notes.
-PART2_WEEK_TO_CH = {
-    "1": 6, "1续": 7, "2": 8, "3": 9, "4": 10, "5": 11, "6": 12,
-    "7": 13, "8": 14, "8续": 15, "9": 16, "10": 17, "11": 18,
-}
-PART3_WEEK_TO_CH = {str(i + 1): 19 + i for i in range(6)}
-PART4_WEEK_TO_CH = {str(i + 1): 25 + i for i in range(6)}
-PART_WEEKS = {"part2": PART2_WEEK_TO_CH, "part3": PART3_WEEK_TO_CH, "part4": PART4_WEEK_TO_CH, "part1": PART2_WEEK_TO_CH, "part5": PART2_WEEK_TO_CH}
 
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)(\))")
 CONFLICT_RE = re.compile(r"^(?:<{7}|>{7})(?:\s|$)")
-CHAPTER_HEADING_RE = re.compile(r"^#{1,6}\s+第\s*(\d+)\s*章")
 
+INLINE_PROTECT_RE = re.compile(
+    r"(`[^`]*`|\$\$[^$]*\$\$|\$(?!\s)[^$\n]+?(?<!\s)\$|!?\[[^\]]*\]\([^)]*\)|<[^>]+>|https?://\S+)"
+)
 
-@dataclass
-class Heading:
-    level: int
-    title: str
-    line: int
+NON_DEFINITION_PREFIXES = (
+    "如果", "若", "例如", "比如", "见", "可", "当", "在", "不", "只",
+    "按", "默认", "下文", "本节", "第", "以及", "或", "并", "但",
+)
 
 
 @dataclass
@@ -318,19 +184,11 @@ class Chapter:
     num: int
     part: int
     title: str
-    source: str
-    index: int
-    optional: bool = False
     sections: list[str] = field(default_factory=list)
-    raw: list[str] = field(default_factory=list)
 
     @property
     def slug(self) -> str:
         return f"chapter-{self.num:02d}"
-
-    @property
-    def link(self) -> str:
-        return f"docs/chapters/{self.slug}.md"
 
 
 @dataclass
@@ -343,226 +201,12 @@ class Part:
     def slug(self) -> str:
         return f"part-{self.num}"
 
-    @property
-    def link(self) -> str:
-        return f"docs/parts/{self.slug}.md"
 
-
-def read_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8").splitlines()
-
-
-def write(rel: str, text: str) -> Path:
+def write_staged(rel: str, text: str) -> Path:
     path = SITE / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
     return path
-
-
-def scan(lines: list[str]) -> list[Heading]:
-    out: list[Heading] = []
-    fence: str | None = None
-    for i, line in enumerate(lines):
-        m = FENCE_RE.match(line)
-        if m:
-            marker = m.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif fence == marker:
-                fence = None
-            continue
-        if fence is not None:
-            continue
-        m = HEADING_RE.match(line)
-        if m:
-            out.append(Heading(len(m.group(1)), m.group(2).strip(), i))
-    return out
-
-
-def section_end(hs: list[Heading], idx: int, total: int) -> int:
-    level = hs[idx].level
-    for other in hs[idx + 1:]:
-        if other.level <= level:
-            return other.line
-    return total
-
-
-def take(lines: list[str], hs: list[Heading], idx: int) -> list[str]:
-    return lines[hs[idx].line:section_end(hs, idx, len(lines))]
-
-
-def strip_blank(lines: list[str]) -> list[str]:
-    start, end = 0, len(lines)
-    while start < end and not lines[start].strip():
-        start += 1
-    while end > start and not lines[end - 1].strip():
-        end -= 1
-    return lines[start:end]
-
-
-def find_h2(lines: list[str], hs: list[Heading], title: str) -> int:
-    for i, h in enumerate(hs):
-        if h.level == 2 and h.title == title:
-            return i
-    raise SystemExit(f"missing h2: {title!r}")
-
-
-def clean_ws(text: str) -> str:
-    text = text.replace("\u00a0", " ")
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    text = re.sub(r"（\s*）", "", text)
-    text = re.sub(r"，\s*，", "，", text)
-    text = re.sub(r"。。", "。", text)
-    text = re.sub(r"\s+([，。；：！？、])", r"\1", text)
-    return text
-
-
-def protect(text: str) -> tuple[str, list[str]]:
-    store: list[str] = []
-
-    def keep(match: re.Match[str]) -> str:
-        store.append(match.group(0))
-        return f"\x00{len(store) - 1}\x00"
-
-    text = re.sub(r"\x60[^\x60]*\x60", keep, text)
-    text = re.sub(r"\]\([^)]+\)", keep, text)
-    text = re.sub(r"<https?://[^>]+>", keep, text)
-    text = re.sub(r"https?://\S+", keep, text)
-    return text, store
-
-
-def restore(text: str, store: list[str]) -> str:
-    def back(match: re.Match[str]) -> str:
-        return store[int(match.group(1))]
-    return re.sub(r"\x00(\d+)\x00", back, text)
-
-
-
-
-KEYLINE_RE = re.compile(r"^\*\*(本章目标|本章产出|本章主线|阅读材料|目标|怎么做|产出|阅读锚点|硬件门槛|状态|小结|验收|产出物)([。：:])?\*\*")
-BRIEF_RE = re.compile(r"^\*\*(本章目标|本章产出)[。：:]?\*\*\s*(.+)$")
-KEYLINE_KIND = {
-    "本章目标": "goal", "目标": "goal", "本章主线": "goal",
-    "本章产出": "output", "产出": "output", "产出物": "output",
-    "阅读材料": "read", "阅读锚点": "read",
-    "怎么做": "how",
-    "硬件门槛": "note", "状态": "note",
-    "小结": "summary", "验收": "summary",
-}
-
-REFERENCE_LABEL_RE = re.compile(r"^\s*>?\s*(?:\*\*(阅读锚点|阅读材料|延伸阅读|延伸|阅读|参考)(?:[。：:]?)\*\*|(阅读锚点|阅读材料|延伸阅读|延伸|阅读|参考)[：:])(?:[。：:]?)\s*(.*)$")
-HOW_LABEL_RE = re.compile(r"^\*\*怎么做\*\*(?:（[^）]*）|\([^)]*\))?[：:]?\s*(.*)$")
-OUTPUT_LABEL_RE = re.compile(r"^\*\*(?:本章产出|产出|产出物)([。：:]?)\*\*(?:[。：:]?)\s*.*$")
-BUFFER_LABEL_RE = re.compile(r"^\*\*缓冲\*\*.*$")
-
-
-def chapter_goal(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Extract the chapter-level goal as plain prose."""
-    goals: list[str] = []
-    kept: list[str] = []
-    for line in lines:
-        match = BRIEF_RE.match(line)
-        if match:
-            if match.group(1) == "本章目标":
-                goals.append(match.group(2).strip())
-            continue
-        kept.append(line)
-    return goals, kept
-
-
-def insert_figure_after_paragraphs(
-    lines: list[str], figure: list[str], after_paragraphs: int = 1
-) -> list[str]:
-    """Insert a figure after the Nth prose block in a section."""
-    if not figure or after_paragraphs <= 0:
-        return lines
-    out: list[str] = []
-    prose_seen = 0
-    i = 0
-    while i < len(lines):
-        if not lines[i].strip():
-            out.append(lines[i])
-            i += 1
-            continue
-        first = lines[i]
-        stripped = first.lstrip()
-
-        # Keep fenced blocks together and do not count them as prose.
-        if stripped.startswith(("```", "~~~")):
-            fence = stripped[:3]
-            out.append(lines[i])
-            i += 1
-            while i < len(lines) and not lines[i].lstrip().startswith(fence):
-                out.append(lines[i])
-                i += 1
-            if i < len(lines):
-                out.append(lines[i])
-                i += 1
-            continue
-
-        block: list[str] = []
-        while i < len(lines) and lines[i].strip():
-            block.append(lines[i])
-            i += 1
-
-        is_prose = not (
-            stripped.startswith(("#", "|", "<", ">", "---"))
-            or re.match(r"^(?:[-*+]\s|\d+\.\s)", stripped)
-            or KEYLINE_RE.match(first)
-        )
-        out.extend(block)
-        if is_prose:
-            prose_seen += 1
-            if prose_seen == after_paragraphs:
-                out += ["", *figure, ""]
-    if prose_seen < after_paragraphs:
-        out += ["", *figure, ""]
-    return out
-
-
-def chapter_figure(chapter: Chapter) -> list[str]:
-    figure = CHAPTER_FIGURES.get(chapter.num)
-    if not figure:
-        return []
-    filename, alt, caption = figure
-    return [
-        '<figure class="book-figure">',
-        f'<img src="../../../assets/figures/{filename}" alt="{html.escape(alt)}" loading="lazy">',
-        f'<figcaption><span class="book-figure__label">图 {chapter.num}-1</span>{html.escape(caption)}</figcaption>',
-        "</figure>",
-    ]
-
-
-def split_long_paragraph(line: str) -> list[str]:
-    if len(line) <= 280 or line.startswith(("|", "#", ">", "- ", "* ", "+ ", "    ", "<", "!")):
-        return [line]
-    if re.match(r"^\d+\.\s", line):
-        return [line]
-    protected, store = protect(line)
-    sentences = [part.strip() for part in re.split(r"(?<=[。！？])", protected) if part.strip()]
-    if len(sentences) <= 1:
-        return [line]
-    groups: list[str] = []
-    buf = ""
-    for sentence in sentences:
-        if buf and len(buf) + len(sentence) > 260:
-            groups.append(buf)
-            buf = sentence
-        else:
-            buf += sentence
-        if len(buf) >= 190:
-            groups.append(buf)
-            buf = ""
-    if buf:
-        groups.append(buf)
-    if len(groups) <= 1:
-        return [line]
-    return [restore(group, store) for group in groups]
-
-
-INLINE_PROTECT_RE = re.compile(
-    r"(`[^`]*`|!?\[[^\]]*\]\([^)]*\)|<[^>]+>|https?://\S+)"
-)
 
 
 def protect_inline(text: str) -> tuple[str, list[str]]:
@@ -575,6 +219,10 @@ def protect_inline(text: str) -> tuple[str, list[str]]:
     return INLINE_PROTECT_RE.sub(keep, text), store
 
 
+def restore_inline(text: str, store: list[str]) -> str:
+    return re.sub(r"\x00(\d+)\x00", lambda m: store[int(m.group(1))], text)
+
+
 def inside_parentheses(text: str, pos: int) -> bool:
     depth = 0
     for ch in text[:pos]:
@@ -585,12 +233,6 @@ def inside_parentheses(text: str, pos: int) -> bool:
     return depth > 0
 
 
-NON_DEFINITION_PREFIXES = (
-    "如果", "若", "例如", "比如", "见", "可", "当", "在", "不", "只",
-    "按", "默认", "下文", "本节", "第", "以及", "或", "并", "但",
-)
-
-
 def looks_like_definition(text: str, end: int) -> bool:
     match = re.match(r"\s*[（(]([^（）()]{1,180})[）)]", text[end:])
     if match is None:
@@ -598,9 +240,7 @@ def looks_like_definition(text: str, end: int) -> bool:
     content = match.group(1).strip()
     if not content or content.startswith(NON_DEFINITION_PREFIXES):
         return False
-    if re.search(r"[A-Za-z]", content):
-        return True
-    if re.search(r"[，,：:]", content):
+    if re.search(r"[A-Za-z]", content) or re.search(r"[，,：:]", content):
         return True
     return len(content) >= 3
 
@@ -619,14 +259,14 @@ def annotatable_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return False
-    if stripped.startswith(("#", "|", "<", ">", "---", "```", "~~~")):
+    if stripped.startswith(("#", "|", "<", ">", "---", "```", "~~~", "$$", "!!!", "???")):
         return False
     if line.startswith(("    ", "\t")):
         return False
     return True
 
 
-def glossary_annotation(term: str, entry: dict[str, str]) -> str:
+def glossary_annotation(term: str, entry: dict[str, str], glossary_rel: str = "../glossary.md") -> str:
     en = entry["en"]
     zh = entry["zh"]
     desc = entry["desc"]
@@ -640,13 +280,14 @@ def glossary_annotation(term: str, entry: dict[str, str]) -> str:
     else:
         inside = f"{en}，{zh}：{desc}"
     tooltip = html.escape(inside, quote=True)
-    return f'[{term}](../glossary.md#{entry["id"]}){{ .term-ref title="{tooltip}" }}'
+    return f'[{term}]({glossary_rel}#{entry["id"]}){{ .term-ref title="{tooltip}" }}'
 
 
 class TermAnnotator:
-    """Annotate the first prose use of each known term in a chapter once."""
+    """Annotate the first prose occurrence of each known term in a document once."""
 
-    def __init__(self) -> None:
+    def __init__(self, glossary_rel: str = "../glossary.md") -> None:
+        self.glossary_rel = glossary_rel
         self.seen: set[str] = set()
         self.entries: list[tuple[dict[str, str], list[re.Pattern[str]]]] = []
         for entry in TERM_GLOSSARY:
@@ -661,7 +302,7 @@ class TermAnnotator:
                     continue
                 escaped = re.escape(alias)
                 if re.search(r"[A-Za-z]", alias):
-                    escaped = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
+                    escaped = rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])"
                 patterns.append(re.compile(escaped, re.IGNORECASE))
             self.entries.append((entry, patterns))
 
@@ -697,24 +338,24 @@ class TermAnnotator:
                 break
             _, _, entry, match = best
             self.seen.add(entry["id"])
-            after = protected[match.end():]
             if (
                 entry["id"] in defined_here
                 or inside_parentheses(protected, match.start())
                 or looks_like_definition(protected, match.end())
             ):
                 continue
-            replacement = glossary_annotation(match.group(0), entry)
+            replacement = glossary_annotation(match.group(0), entry, self.glossary_rel)
             store.append(replacement)
             end = match.end()
-            if protected[end:end + 1] == " ":
+            if protected[end : end + 1] == " ":
                 end += 1
             protected = protected[: match.start()] + f"\x00{len(store) - 1}\x00" + protected[end:]
-        return restore(protected, store)
+        return restore_inline(protected, store)
 
     def annotate_lines(self, lines: list[str]) -> list[str]:
         out: list[str] = []
         fence: str | None = None
+        in_math = False
         html_depth = 0
         for line in lines:
             stripped = line.strip()
@@ -726,6 +367,13 @@ class TermAnnotator:
                 continue
             if fence_match:
                 fence = fence_match.group(1)[0]
+                out.append(line)
+                continue
+            if stripped == "$$":
+                in_math = not in_math
+                out.append(line)
+                continue
+            if in_math:
                 out.append(line)
                 continue
             if html_depth > 0:
@@ -747,679 +395,65 @@ class TermAnnotator:
         return out
 
 
-def format_blocks(lines: list[str], references: list[str] | None = None) -> list[str]:
-    """Split walls of text, wrap labels in callouts, and keep code/tables separate."""
-    out: list[str] = []
-    i = 0
-
-    def blank() -> None:
-        if out and out[-1] != "":
-            out.append("")
-
-    while i < len(lines):
-        line = lines[i]
-        ref_match = REFERENCE_LABEL_RE.match(line)
-        if ref_match:
-            label = ref_match.group(1) or ref_match.group(2)
-            content = ref_match.group(3).strip()
-            if (
-                label != "阅读材料"
-                and content
-                and not content.startswith("本章不读新材料")
-                and references is not None
-                and re.search(r"https?://|\[[^\]]+\]\([^)]+\)", content)
-            ):
-                references.append(content)
-            i += 1
-            continue
-
-        how_match = HOW_LABEL_RE.match(line)
-        if how_match:
-            rest = how_match.group(1).strip()
-            if rest:
-                out.extend(split_long_paragraph(rest))
-                out.append("")
-            i += 1
-            continue
-
-        if OUTPUT_LABEL_RE.match(line) or BUFFER_LABEL_RE.match(line):
-            i += 1
-            continue
-
-        if line.startswith("```"):
-            blank()
-            raw_info = line.strip()[3:].strip()
-            lang = raw_info.split()[0] if raw_info else ""
-            lang = re.sub(r"[^A-Za-z0-9_+-]", "", lang)
-            data_attr = f' data-lang="{html.escape(lang, quote=True)}"' if lang else ""
-            out += [f'<div class="code-block"{data_attr} markdown>', ""]
-            if line.strip() == "```":
-                out.append("```text")
-            else:
-                out.append(line)
-            i += 1
-            while i < len(lines) and not lines[i].startswith("```"):
-                out.append(lines[i])
-                i += 1
-            if i < len(lines):
-                out.append(lines[i])
-                i += 1
-            out += ["", "</div>"]
-            blank()
-            continue
-
-        if line.lstrip().startswith("|"):
-            blank()
-            while i < len(lines) and lines[i].lstrip().startswith("|"):
-                out.append(lines[i])
-                i += 1
-            blank()
-            continue
-
-        match = KEYLINE_RE.match(line)
-        if match:
-            kind = KEYLINE_KIND.get(match.group(1), "note")
-            if kind == "goal":
-                rest = line[match.end():].lstrip("。：: ")
-                if rest:
-                    blank()
-                    out.extend(split_long_paragraph(rest))
-                    blank()
-                i += 1
-                continue
-            blank()
-            out += [f'<div class="keyline keyline--{kind}" markdown>', "", line, "", "</div>"]
-            blank()
-            i += 1
-            continue
-
-        if line.startswith("#"):
-            blank()
-            out.append(line)
-            blank()
-            i += 1
-            continue
-
-        if line.startswith(">"):
-            blank()
-            while i < len(lines) and lines[i].startswith(">"):
-                out.append(lines[i])
-                i += 1
-            blank()
-            continue
-
-        if line.startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s", line):
-            blank()
-            while i < len(lines) and (
-                lines[i].startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s", lines[i])
-            ):
-                out.append(lines[i])
-                i += 1
-            blank()
-            continue
-
-        if not line.strip():
-            blank()
-            i += 1
-            continue
-
-        for paragraph in split_long_paragraph(line):
-            out.append(paragraph)
-            out.append("")
-        i += 1
-
-    text = "\n".join(out)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.splitlines()
-
-
 def validate_markdown(path: Path) -> list[str]:
     lines = path.read_text(encoding="utf-8").splitlines()
     problems: list[str] = []
     fence: str | None = None
-    for i, line in enumerate(lines):
-        if line.startswith("```"):
+    for i, line in enumerate(lines, 1):
+        if CONFLICT_RE.match(line):
+            problems.append(f"{path}:{i}: unresolved merge conflict marker")
+        m = FENCE_RE.match(line)
+        if m:
             if fence is None:
-                fence = line.strip()
-                if fence == "```":
-                    problems.append(f"{path}:{i + 1}: code fence without language")
-            else:
+                fence = m.group(1)[0]
+                if line.strip() == "```":
+                    problems.append(f"{path}:{i}: code fence without language")
+            elif fence == m.group(1)[0]:
                 fence = None
-        if line.lstrip().startswith("|") and (i == 0 or not lines[i - 1].lstrip().startswith("|")):
-            if i + 1 >= len(lines) or not re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", lines[i + 1]):
-                problems.append(f"{path}:{i + 1}: table without separator row")
+            continue
+        if fence is not None:
+            continue
+        if line.lstrip().startswith("|") and (i == 1 or not lines[i - 2].lstrip().startswith("|")):
+            if i >= len(lines) or not re.match(r"^\s*\|?[\s:|-]+\|[\s:|-]*$", lines[i]):
+                problems.append(f"{path}:{i}: table without separator row")
     if fence is not None:
         problems.append(f"{path}: unclosed code fence")
     return problems
 
 
-def map_week(text: str, module: str) -> str:
-    current = PART_WEEKS[module]
-    prefixes = {"part1": PART2_WEEK_TO_CH, "part2": PART2_WEEK_TO_CH, "part3": PART3_WEEK_TO_CH, "part4": PART4_WEEK_TO_CH, "part5": PART2_WEEK_TO_CH}
-
-    def repl(match: re.Match[str]) -> str:
-        mod = match.group(1)
-        n = match.group(2)
-        cont = match.group(3) or ""
-        key = n + ("续" if cont else "")
-        table = current if not mod else PART_WEEKS[{"0": "part1", "1": "part2", "2": "part3", "3": "part4"}[mod]]
-        num = table.get(key)
-        return f"第 {num} 章" if num else match.group(0)
-
-    # module-prefixed weeks
-    text = re.sub(r"M([0-3])\s*第\s*(\d+)\s*周(（续）)?", repl, text)
-    # bare weeks, longest labels first
-    for key in sorted(current, key=len, reverse=True):
-        cont = "（续）" if key.endswith("续") else ""
-        n = key[:-1] if cont else key
-        text = re.sub(rf"第\s*{re.escape(n)}\s*周{re.escape(cont)}", f"第 {current[key]} 章", text)
-    # week ranges such as 第 1–6 周
-    def range_repl(match: re.Match[str]) -> str:
-        a = current.get(match.group(1))
-        b = current.get(match.group(2))
-        return f"第 {a}–{b} 章" if a and b else match.group(0)
-    text = re.sub(r"第\s*(\d+)\s*[–-]\s*(\d+)\s*周", range_repl, text)
-    return text
-
-
-def transform_text(text: str, module: str, chapter: Chapter) -> str:
-    text, store = protect(text)
-    text = text.replace("上周五", "上一章第 5 节").replace("下周一", "下一章第 1 节")
-    # Weekday references become numbered sections.
-    for i, day in enumerate(("一", "二", "三", "四", "五"), 1):
-        text = text.replace(f"周{day}", f"{chapter.num}.{i}")
-    text = text.replace("本周", "本章").replace("下周", "下一章").replace("上周", "上一章")
-    text = text.replace("每周", "每章").replace("这周", "本章")
-    text = map_week(text, module)
-    # Legacy M-prefixed week ranges and section references (old drafts may
-    # still use "M0 第 1 节"); current sources use 第 N 部分.
-    def module_range(match: re.Match[str]) -> str:
-        table = PART_WEEKS[{"0": "part1", "1": "part2", "2": "part3", "3": "part4"}[match.group(1)]]
-        a = table.get(match.group(2))
-        b = table.get(match.group(3))
-        return f"第 {a}–{b} 章" if a and b else match.group(0)
-
-    text = re.sub(r"M([0-3])\s*第\s*(\d+)\s*[–-]\s*(\d+)\s*周", module_range, text)
-    text = re.sub(r"M0\s*第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)} 章", text)
-    # Chapter + section references, then bare section references.
-    text = re.sub(r"第\s*(\d+)\s*章第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)}.{m.group(2)} 节", text)
-    if module == "part1":
-        text = re.sub(r"第\s*(\d+)\s*节", lambda m: f"第 {m.group(1)} 章", text)
-    else:
-        text = re.sub(r"第\s*(\d+)\s*节", lambda m: f"{chapter.num}.{m.group(1)}", text)
-    # Module labels become parts.
-    # Legacy labels from imported drafts become part names; current sources
-    # already write 第 N 部分, so this is a no-op for them.
-    text = text.replace("M0–M4", "第一部分到第五部分")
-    text = re.sub(
-        r"(?<![A-Za-z0-9])M([0-4])(?![A-Za-z0-9])",
-        lambda m: {"0": "第一部分", "1": "第二部分", "2": "第三部分",
-                   "3": "第四部分", "4": "第五部分"}[m.group(1)],
-        text,
-    )
-    text = text.replace("模块地图", "全书结构")
-    if module == "part5":
-        text = text.replace("这个模块", "这个项目").replace("逐周教程", "正文教程")
-    text = text.replace("本模块", "本部分").replace("该模块", "该部分")
-    text = text.replace("这个模块", "这个部分")
-    # Chapter-intro labels.
-    text = text.replace("**重点。**", "**本章目标。**")
-    text = text.replace("**形式。**", "**阅读材料。**")
-    text = text.replace("**产出。**", "**本章产出。**")
-    text = text.replace("**本周主线**", "**本章主线**")
-    # Week wording.
-    text = text.replace("后面九周", "后面的章节").replace("后面五周", "后面的章节")
-    text = text.replace("每一周", "每一章").replace("这一周", "这一章")
-    text = text.replace("上一周", "上一章").replace("下一周", "下一章")
-    text = text.replace("这一续周", "这一章").replace("续周", "章")
-    text = text.replace("6 周分工", "章节分工").replace("10 周路线图", "第二部分")
-    text = text.replace("11 周主线", "第二部分").replace("每周", "每章")
-    # Course wording.
-    text = text.replace("55 节核心课", "13 章核心内容").replace("核心课", "核心章节")
-    text = text.replace("节课", "节").replace("这一课", "这一节")
-    text = text.replace("课程", "本书")
-    # Time framing.
-    text = text.replace("（60 分钟，", "（")
-    text = text.replace("（60 分钟）", "")
-    text = text.replace("60 分钟/节", "每节")
-    text = text.replace("每节 60 分钟", "每节")
-    text = text.replace("5 节 × 60 分钟", "5 节")
-    text = text.replace("共 300 分钟（5 小时）", "")
-    text = text.replace("300 分钟（5 小时）", "")
-    text = text.replace("前 30 分钟", "前半部分").replace("后 30 分钟", "后半部分")
-    text = text.replace("30 分钟读一篇论文", "读一篇论文")
-    text = text.replace("这 60 分钟用来干什么", "这一章要解决什么")
-    text = text.replace("这一节的 60 分钟", "这一节的时间")
-    text = text.replace("租卡的 60 分钟", "租卡的上机时间")
-    text = text.replace("后面几周", "后面的章节").replace("后面的周", "后面的章节")
-    text = text.replace("模块总时长", "")
-    text = re.sub(r"每天\s*60\s*分钟", "", text)
-    text = re.sub(r"每天", "", text)
-    text = re.sub(r"(?<![\d.])55\s*小时", "", text)
-    text = re.sub(r"(?<![\d.])5\s*小时", "", text)
-    text = re.sub(r"(?<![\d.])11\s*周", "第二部分", text)
-    text = re.sub(r"(?<![\d.])10\s*周", "第二部分", text)
-    text = re.sub(r"(?<![\d.])6\s*周", "本部分", text)
-    text = re.sub(r"(?<![\d.])5\s*周", "本部分", text)
-    text = re.sub(r"(?<![\d.])1\s*周", "第一部分", text)
-    text = re.sub(r"(\d+)\s*周", lambda m: f"{m.group(1)} 章", text)
-    text = text.replace("| 周 | 主题 | 产出 |", "| 阶段 | 主题 | 产出 |")
-    text = text.replace("第三部分/第四部分", "第三、第四部分")
-    text = text.replace("整周", "整章").replace("两周", "两章").replace("三周", "三章")
-    text = text.replace("四周", "四章").replace("五周", "五章").replace("六周", "六章")
-    text = text.replace("七周", "七章").replace("八周", "八章").replace("九周", "九章").replace("十周", "十章")
-    text = text.replace("每一课", "每一节").replace("这一课", "这一节")
-    text = text.replace("全周", "全章")
-    text = text.replace("那一周", "那一章").replace("隔着一周", "隔着一章")
-    text = text.replace("过一周", "过一段时间").replace("那几周", "那几章")
-    text = text.replace("数周起步", "工作量很大").replace("读一小时", "读一遍")
-    text = text.replace("第一次真正派上用场的周", "第一次真正派上用场")
-    text = text.replace("本章花 60 分钟把抓取修好", "本章把抓取修好")
-    text = text.replace("先算一笔时间总账：本部分 × 5 节 = 1800 分钟 = 30 小时。本章 5 节是 300 分钟、。这 30 小时的账要这么读：", "这五章的账要这么读：")
-    text = text.replace("那才是这 30 小时真正留下的东西", "那才是这份报告真正留下的东西")
-    text = text.replace("先算一笔总账：本部分 × 5 节 = 1800 分钟 = 30 小时。本章 5 节是 300 分钟、。报告就是这 30 小时的收口。", "这五章的材料最后收进一份报告。")
-    text = text.replace("这五章的材料最后收进一份报告。把第 19–24 章的东西收进一份报告：", "把第 19–24 章的东西收进一份报告：")
-    text = text.replace("纯文字的周", "纯文字的章节")
-    text = text.replace("缓冲日", "复习").replace("学习日", "阅读日")
-    text = re.sub(r"(\d+\.\d)([\u4e00-\u9fff])", r"\1 \2", text)
-    text = re.sub(r"(\d+\.\d+) 直在", r"\1 一直在", text)
-    text = re.sub(r"([\u4e00-\u9fff])(\d+\.\d)", r"\1 \2", text)
-    text = re.sub(r"(第\s*\d+\s*章)(\d)", r"\1 \2", text)
-    text = text.replace("第一部分 的", "第一部分的").replace("第二部分 的", "第二部分的")
-    text = text.replace("第三部分 的", "第三部分的").replace("第四部分 的", "第四部分的")
-    text = text.replace("第五部分 的", "第五部分的")
-    text = text.replace("每节，每章", "每章").replace("每节，", "每节")
-    # Remove spaces introduced when module references become part/chapter references.
-    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*[一二三四五]部分)", r"\1", text)
-    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*[一二三四五](?:、第?\s*[一二三四五])*部分)", r"\1", text)
-    text = re.sub(r"(第\s*[一二三四五]部分)\s+(?=[\u4e00-\u9fff、，。；：）])", r"\1", text)
-    text = re.sub(r"(第\s*\d+\s*章)\s+(?=[\u4e00-\u9fff、，。；：）])", r"\1", text)
-    text = re.sub(r"(?<=[\u4e00-\u9fff])\s+(第\s*\d+\s*章)", r"\1", text)
-    text = clean_ws(text)
-    return restore(text, store)
-
-
-def transform_title(title: str, module: str, chapter: Chapter) -> str:
-    title = re.sub(r"^第\s*\d+\s*周(（续）)?\s*[：·]\s*", "", title)
-    title = re.sub(r"^第\s*\d+\s*节\s*[·：]\s*", "", title)
-    title = re.sub(r"^周[一二三四五]\s*[·：]\s*", "", title)
-    title = re.sub(r"（60 分钟）", "", title)
-    title = title.replace("论文精读（原文均为选读）", "论文选读")
-    title = title.replace("建议的 6 周安排", "工作阶段")
-    title = transform_text(title, module, chapter)
-    return clean_ws(title).strip()
-
-
-def map_repo_path(path: str) -> str:
-    table = {
-        "README.md": "docs/parts/part-2.md",
-        "docs/modules/part1-foundations/README.md": "docs/parts/part-1.md",
-        "docs/modules/part3-operators/README.md": "docs/parts/part-3.md",
-        "docs/modules/part4-domestic-chips/README.md": "docs/parts/part-4.md",
-        "docs/modules/part5-capstone/README.md": "docs/chapters/chapter-31.md",
-        "docs/MODULES.md": "docs/MODULES.md",
-        "progress.md": "docs/progress.md",
-        "tracker": "docs/progress.md",
-        "tracker/index.html": "docs/progress.md",
-    }
-    return table.get(path, path)
-
-
-def rewrite_links(text: str, source_dir: str, target_dir: str) -> str:
-    out: list[str] = []
-    fence: str | None = None
-    for line in text.splitlines():
-        m = FENCE_RE.match(line)
-        if m:
-            marker = m.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif fence == marker:
-                fence = None
-            out.append(line)
-            continue
-        if fence is not None:
-            out.append(line)
-            continue
-
-        def repl(match: re.Match[str]) -> str:
-            url = match.group(2)
-            if url.startswith(("#", "http://", "https://", "mailto:", "data:", "//", "/")):
-                return match.group(0)
-            path, sep, frag = url.partition("#")
-            if not path:
-                return match.group(0)
-            trailing = path.endswith("/")
-            resolved = posixpath.normpath(posixpath.join(source_dir, path))
-            if resolved == ".." or resolved.startswith("../"):
-                return match.group(0)
-            mapped = map_repo_path(resolved)
-            if trailing and not mapped.endswith((".md", ".html")):
-                mapped = posixpath.join(mapped, "index.html")
-            rel = posixpath.relpath(mapped, target_dir)
-            if sep:
-                rel += "#" + frag
-            return match.group(1) + rel + match.group(3)
-
-        out.append(LINK_RE.sub(repl, line))
-    return "\n".join(out)
-
-
-@dataclass
-class Source:
-    module: str
-    path: Path
-    lines: list[str]
-    hs: list[Heading]
-    h1: Heading
-
-
-def load_source(module: str) -> Source:
-    path = {
-        "part1": SITE / "docs/modules/part1-foundations/README.md",
-        "part2": SITE / "README.md",
-        "part3": SITE / "docs/modules/part3-operators/README.md",
-        "part4": SITE / "docs/modules/part4-domestic-chips/README.md",
-        "part5": SITE / "docs/modules/part5-capstone/README.md",
-    }[module]
-    lines = read_lines(path)
-    hs = scan(lines)
-    h1 = next(h for h in hs if h.level == 1)
-    return Source(module, path, lines, hs, h1)
-
-
-def source_chapter_blocks(src: Source) -> list[list[str]]:
-    blocks: list[list[str]] = []
-    if src.module == "part1":
-        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)]
-    elif src.module == "part2":
-        picks = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
-    elif src.module in ("part3", "part4"):
-        picks = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)]
-    else:
-        chunks = [src.lines[src.h1.line:]]
-        return chunks
-    for i, h in enumerate(picks):
-        idx = src.hs.index(h)
-        end = section_end(src.hs, idx, len(src.lines))
-        blocks.append(src.lines[h.line:end])
-    return blocks
-
-
-def source_pre(src: Source) -> list[str]:
-    if src.module == "part5":
-        return []
-    if src.module == "part1":
-        first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title))
-        return src.lines[src.h1.line + 1:first.line]
-    if src.module == "part2":
-        first = next(h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
-        return src.lines[src.h1.line + 1:first.line]
-    first = next(h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title))
-    return src.lines[src.h1.line + 1:first.line]
-
-
-def source_post(src: Source) -> list[str]:
-    if src.module == "part5":
-        return []
-    if src.module == "part1":
-        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:节|章)", h.title)][-1]
-    elif src.module == "part2":
-        last = [h for h in src.hs if h.level == 3 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
-    else:
-        last = [h for h in src.hs if h.level == 2 and re.match(r"第\s*\d+\s*(?:周|章)", h.title)][-1]
-    end = section_end(src.hs, src.hs.index(last), len(src.lines))
-    return src.lines[end:]
-
-
-def transform_lines(lines: list[str], module: str, chapter: Chapter) -> list[str]:
-    out: list[str] = []
+def extract_h2_sections(lines: list[str]) -> list[str]:
+    sections: list[str] = []
     fence: str | None = None
     for line in lines:
         m = FENCE_RE.match(line)
         if m:
-            marker = m.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif fence == marker:
-                fence = None
-            out.append(line)
+            fence = None if fence == m.group(1)[0] else (m.group(1)[0] if fence is None else fence)
             continue
         if fence is not None:
-            out.append(line)
             continue
-        out.append(transform_text(line, module, chapter))
-    return out
-
-
-def chapter_is_section(h: Heading, module: str) -> bool:
-    if module == "part1":
-        return h.level == 3
-    if module == "part2":
-        return h.level == 4
-    if module == "part3":
-        return h.level == 3 and re.match(r"第\s*\d+\s*节", h.title) is not None
-    if module == "part4":
-        return h.level == 3
-    if module == "part5":
-        return h.level == 2
-    return False
-
-
-def section_title(title: str, module: str, chapter: Chapter) -> str:
-    title = re.sub(r"^第\s*\d+\s*节\s*[·：]\s*", "", title)
-    title = re.sub(r"^周[一二三四五]\s*[·：]\s*", "", title)
-    title = re.sub(r"（60 分钟）", "", title)
-    if title.startswith("论文精读"):
-        title = "论文选读"
-    if title.startswith("本周论文精读"):
-        title = "论文选读"
-    if title.startswith("建议的 6 周安排"):
-        title = "工作阶段"
-    return transform_title(title, module, chapter)
-
-
-def subhead_level(h: Heading, module: str) -> int:
-    if module == "part1":
-        return 2 if h.level == 3 else 3
-    if module == "part2":
-        return 3
-    if module in ("part3", "part4"):
-        return 3 if h.level == 3 else 4
-    if module == "part5":
-        return 3 if h.level == 3 else 4
-    return h.level
+        hm = HEADING_RE.match(line)
+        if hm and len(hm.group(1)) == 2 and hm.group(2).strip() != "参考文献":
+            sections.append(hm.group(2).strip())
+    return sections
 
 
 def render_glossary() -> str:
     out = [
-        "# 术语表", "",
-        "正文首次出现的术语链接到这里；悬停链接可查看简短解释。定义描述机制，不替代具体版本、形状和负载下的验证。", "",
-        "[快速上手](quickstart.md) · [统一实验约定](experiments.md)", "",
+        "# 术语表",
+        "",
+        "正文首次出现的专业术语自动链接至本页；将鼠标悬停在带虚线下划线的术语上即可查看精简解释。",
+        "",
+        "[硬件规格与模型速查](toolkit/hardware-models.md) · [测量口径与分析方法](toolkit/methodology.md)",
+        "",
     ]
     for entry in TERM_GLOSSARY:
         label = entry["zh"] if entry["zh"] == entry["en"] else f'{entry["zh"]}（{entry["en"]}）'
         aliases = "、".join(f"`{alias}`" for alias in dict.fromkeys(entry["aliases"]))
-        out += [f'## {label} {{ #{entry["id"]} }}', "", entry["desc"], "", f"常用写法：{aliases}。", ""]
+        out += [f'## {label} {{ #{entry["id"]} }}', "", entry["desc"], "", f"常见写法：{aliases}。", ""]
     return "\n".join(out)
 
 
-def build_glossary_page() -> None:
-    write("docs/glossary.md", render_glossary())
-
-
-def chapter_start(chapter: Chapter, source_dir: str) -> list[str]:
-    info = CHAPTER_GUIDANCE[chapter.num]
-    links = [("统一实验约定", "docs/experiments.md"), ("快速上手", "docs/quickstart.md"), ("术语表", "docs/glossary.md")]
-    footer = " · ".join(f"[{label}]({posixpath.relpath(path, source_dir)})" for label, path in links)
-    return [
-        '??? note "开始前：环境、前置与交付物"', "",
-        f'    - **环境**：{info["environment"]}。',
-        f'    - **前置**：{info["prerequisite"]}。',
-        f'    - **交付物**：{info["deliverable"]}。', "",
-        "    环境要求不代表本书已在该设备上验证；实验状态与证据按正文和原始记录判断。", "",
-        f"    {footer}", "",
-    ]
-
-
-def render_chapter(chapter: Chapter, raw: list[str], module: str) -> None:
-    hs = scan(raw)
-    if not hs:
-        return
-    body = raw[hs[0].line + 1:]
-    body_hs = scan(body)
-    sections = [h for h in body_hs if chapter_is_section(h, module)]
-    section_titles = [section_title(h.title, module, chapter) for h in sections]
-    chapter.sections = section_titles
-    first_section_line = sections[0].line if sections else len(body)
-    intro = body[:first_section_line]
-    source_dir = {
-        "part1": "docs/modules/part1-foundations",
-        "part2": ".",
-        "part3": "docs/modules/part3-operators",
-        "part4": "docs/modules/part4-domestic-chips",
-        "part5": "docs/modules/part5-capstone",
-    }[module]
-    summary = CHAPTER_SUMMARIES.get(chapter.num, "")
-    out: list[str] = [
-        f'# 第 {chapter.num} 章 {chapter.title} {{ .chapter-title }}',
-        "",
-    ]
-    if summary:
-        out += [f'<p class="chapter-summary">{html.escape(summary)}</p>', ""]
-    intro_lines = transform_lines(intro, module, chapter) if intro else []
-    goals, intro_lines = chapter_goal(intro_lines)
-    if goals:
-        goal_text = "；".join(html.escape(goal) for goal in goals)
-        out += [
-            f'<p class="chapter-goal"><strong>本章目标</strong>：{goal_text}</p>',
-            "",
-        ]
-    out += chapter_start(chapter, source_dir)
-    figure_lines = chapter_figure(chapter)
-    placement = CHAPTER_FIGURE_PLACEMENT.get(chapter.num, (None, 1) if not sections else (1, 1))
-    target_section, figure_after = placement
-    if figure_lines and target_section is None:
-        intro_lines = insert_figure_after_paragraphs(intro_lines, figure_lines, figure_after)
-        figure_lines = []
-    references: list[str] = []
-    if intro_lines:
-        out += format_blocks(intro_lines, references)
-        out.append("")
-    sec = 0
-    for i, h in enumerate(body_hs):
-        end = body_hs[i + 1].line if i + 1 < len(body_hs) else len(body)
-        chunk = body[h.line:end]
-        if chapter_is_section(h, module):
-            sec += 1
-            title = section_titles[sec - 1]
-            out.append(f"## {chapter.num}.{sec} {title}")
-            out.append("")
-            section_lines = transform_lines(chunk[1:], module, chapter)
-            if figure_lines and target_section == sec:
-                section_lines = insert_figure_after_paragraphs(
-                    section_lines, figure_lines, figure_after
-                )
-                figure_lines = []
-            out += format_blocks(section_lines, references)
-            out.append("")
-        else:
-            level = subhead_level(h, module)
-            title = transform_title(h.title, module, chapter)
-            out.append("#" * level + " " + title)
-            out.append("")
-            out += format_blocks(transform_lines(chunk[1:], module, chapter), references)
-            out.append("")
-    if figure_lines:
-        out += ["", *figure_lines, ""]
-    unique_refs: list[str] = []
-    seen_refs: set[str] = set()
-    for ref in references:
-        normalized = re.sub(r"\s+", " ", ref).strip()
-        if normalized and normalized not in seen_refs:
-            seen_refs.add(normalized)
-            unique_refs.append(normalized)
-    if unique_refs:
-        out += ["## 参考文献", ""]
-        out += [f"- {ref}" for ref in unique_refs]
-        out.append("")
-    text = "\n".join(out)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = rewrite_links(text, source_dir, "docs/chapters")
-    text = "\n".join(TermAnnotator().annotate_lines(text.splitlines()))
-    text = re.sub(r"^\*\*(?:怎么做|本章产出|产出|产出物|阅读材料|缓冲)[^\n]*\n?", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    write(f"docs/chapters/{chapter.slug}.md", text)
-
-
-def validate_source_blocks(sources: dict[str, Source], blocks: dict[str, list[list[str]]]) -> None:
-    """Fail the build on merge debris or a chapter split that silently shifts."""
-    expected: dict[str, list[int]] = {}
-    for num, _part, _title, module, _index, _optional in CHAPTERS:
-        expected.setdefault(module, []).append(num)
-    for module, src in sources.items():
-        for lineno, line in enumerate(src.lines, 1):
-            if CONFLICT_RE.match(line):
-                raise SystemExit(f"{src.path}:{lineno}: unresolved merge conflict marker: {line!r}")
-        want = expected[module]
-        got = blocks[module]
-        if len(got) != len(want):
-            raise SystemExit(
-                f"{src.path}: found {len(got)} chapter blocks, expected {len(want)} "
-                f"(chapters {want[0]}–{want[-1]}); check for duplicate or missing chapter headings"
-            )
-        if module == "part5":
-            continue
-        for block, num in zip(got, want):
-            match = CHAPTER_HEADING_RE.match(block[0]) if block else None
-            found = int(match.group(1)) if match else None
-            if found != num:
-                raise SystemExit(
-                    f"{src.path}: block for chapter {num} starts with chapter {found}: "
-                    f"{(block[0] if block else '')!r}"
-                )
-
-
-def build_sources_and_chapters() -> dict[str, Source]:
-    sources = {m: load_source(m) for m in ("part1", "part2", "part3", "part4", "part5")}
-    blocks: dict[str, list[list[str]]] = {m: source_chapter_blocks(s) for m, s in sources.items()}
-    validate_source_blocks(sources, blocks)
-    for num, part_num, title, module, index, optional in CHAPTERS:
-        if index >= len(blocks[module]):
-            raise SystemExit(f"missing source block: {module} #{index} (ch {num})")
-        ch = Chapter(num, part_num, title, module, index, optional)
-        ch.raw = blocks[module][index]
-        CH_BY_NUM[num] = ch
-    return sources
-
-
-CH_BY_NUM: dict[int, Chapter] = {}
-PARTS: dict[int, Part] = {i: Part(i, PART_TITLES[i]) for i in PART_TITLES}
-
-
-def build_parts() -> None:
-    for num, part_num, title, module, index, optional in CHAPTERS:
-        PARTS[part_num].chapters.append(CH_BY_NUM[num])
-
-
-def m1_block(src: Source, title: str) -> list[str]:
-    idx = find_h2(src.lines, src.hs, title)
-    return take(src.lines, src.hs, idx)
-
-
-def transform_fragment(lines: list[str], module: str, chapter: Chapter, title: str | None = None) -> list[str]:
-    hs = scan(lines)
-    out: list[str] = []
-    start = 0
-    if hs and hs[0].line == 0 and title is not None:
-        out.append("## " + title)
-        out.append("")
-        start = 1
-    out.extend(transform_lines(lines[start:], module, chapter))
-    return out
-
-
-def build_part_page(part: Part, sources: dict[str, Source]) -> None:
+def build_part_page(part: Part) -> None:
     out: list[str] = [
         "---",
         f"title: {PART_CN[part.num]} {part.title}",
@@ -1437,157 +471,51 @@ def build_part_page(part: Part, sources: dict[str, Source]) -> None:
         "",
         f'<p class="part-lede">{PART_LEDES[part.num]}</p>',
         "",
-        "## 本部分导览",
+        "## 本篇导览",
+        "",
+        *PART_INTROS[part.num].splitlines(),
+        "",
+        "## 本篇章节",
+        "",
+        '<div class="grid cards chapter-cards" markdown>',
         "",
     ]
-    out += PART_INTROS[part.num].splitlines()
-    out += ["", "## 本部分章节", "", '<div class="grid cards chapter-cards" markdown>', ""]
     for ch in part.chapters:
-        count = len(ch.sections)
-        meta = f"{count} 节" if count else "专题"
-        if ch.optional:
-            meta += " · 选读"
+        sec_label = f"{len(ch.sections)} 节" if ch.sections else "精讲"
+        summary = CHAPTER_SUMMARIES.get(ch.num, "")
         out += [
             f"- **第 {ch.num} 章 · {ch.title}**",
             "",
             "    ---",
             "",
-            f"    {meta} · {PART_CN[part.num]}",
+            f'    <span class="chapter-card-summary">{html.escape(summary)}</span>',
             "",
-            f"    [阅读本章](../chapters/{ch.slug}.md)",
+            f"    {sec_label} · [阅读本章](../chapters/{ch.slug}.md)",
             "",
         ]
     out += ["</div>", ""]
-
-    post = strip_blank(source_post(sources["part1" if part.num == 1 else "part3" if part.num == 3 else "part4"])) if part.num in (1, 3, 4) else []
-    if post:
-        post_text = "\n".join(post)
-        post_text = post_text.replace("## 本模块检查清单", "## 本部分检查清单")
-        if not re.search(r"^## ", post_text, re.MULTILINE):
-            out += ["## 本部分检查清单", ""]
-        module = "part1" if part.num == 1 else "part3" if part.num == 3 else "part4"
-        ch = CH_BY_NUM[1 if part.num == 1 else 19 if part.num == 3 else 25]
-        post_text = rewrite_links(transform_text(post_text, module, ch), "docs/modules/part1-foundations" if part.num == 1 else "docs/modules/part3-operators" if part.num == 3 else "docs/modules/part4-domestic-chips", "docs/parts")
-        out.append(post_text)
-        out.append("")
-
-    write(f"docs/parts/{part.slug}.md", "\n".join(out))
-
-
-def render_appendix(src: Source, h2_title: str, filename: str, new_title: str | None = None,
-                    notice: str | None = None, relevel_body: bool = True) -> list[str]:
-    idx = find_h2(src.lines, src.hs, h2_title)
-    block = take(src.lines, src.hs, idx)
-    body = block[1:]
-    out: list[str] = [f"# {new_title or h2_title}", ""]
-    if notice:
-        out += [notice, ""]
-    fence: str | None = None
-    for line in body:
-        m = FENCE_RE.match(line)
-        if m:
-            marker = m.group(1)[0]
-            if fence is None:
-                fence = marker
-            elif fence == marker:
-                fence = None
-            out.append(line)
-            continue
-        if fence is None and relevel_body:
-            hm = HEADING_RE.match(line)
-            if hm:
-                level = max(1, len(hm.group(1)) - 1)
-                line = "#" * level + " " + transform_title(hm.group(2), "part2", CH_BY_NUM[6])
-            else:
-                line = transform_text(line, "part2", CH_BY_NUM[6])
-        out.append(line)
-    text = rewrite_links("\n".join(out), ".", "docs/backmatter")
-    write(f"docs/backmatter/{filename}", text)
-    return [new_title or h2_title, filename]
-
-
-def build_backmatter(src: Source) -> list[tuple[str, str]]:
-    entries: list[tuple[str, str]] = []
-    entries.append(("跟踪进度", "tracking.md"))
-    write("docs/backmatter/tracking.md", """# 跟踪进度
-
-阅读进度现在集中在[阅读进度](../progress.md)页：
-
-- 勾选已经读完的章节，进度自动保存在当前浏览器；
-- 点“导出 JSON”，把文件带到另一台设备后“导入 JSON”；
-- 点“复制同步链接”，进度会编码在 URL 里，打开链接即可恢复；
-- 清空浏览器数据前，先导出或复制链接。
-
-## 用 GitHub issue 跟踪
-
-Fork 本仓库，新建一个 issue，把根目录 [progress.md](https://github.com/tdccccc/time-to-first-token/blob/main/progress.md) 里的章节清单复制进去，在 issue 里打勾。GitHub 会把任务列表状态保存在你的账号里，换设备登录也能看到。
-
-## 为什么不做账号系统
-
-站点是纯静态的，没有后端，也不收集账号。阅读进度是本地的，同步链接与 JSON 导出覆盖了跨设备需求；如果要做多人排行榜，才需要后端与身份系统。""")
-    render_appendix(src, "发表 benchmark 之前", "benchmark.md")
-    render_appendix(src, "决策点", "decisions.md")
-    render_appendix(src, "参考资料", "references.md")
-    col: list[str] = ["# 来源、贡献与许可", ""]
-    for title in ("关于来源的说明", "参与贡献", "许可与出处"):
-        idx = find_h2(src.lines, src.hs, title)
-        block = take(src.lines, src.hs, idx)
-        col.append("## " + transform_title(title, "part2", CH_BY_NUM[6]))
-        col.append("")
-        for line in block[1:]:
-            col.append(transform_text(line, "part2", CH_BY_NUM[6]))
-        col.append("")
-    write("docs/backmatter/colophon.md", rewrite_links("\n".join(col), ".", "docs/backmatter"))
-    entries.append(("来源、贡献与许可", "colophon.md"))
-    return entries
-
-
-def build_catalog(parts: dict[int, Part]) -> None:
-    out = ["# 全书目录", "", "5 部分 · 31 章是知识地图，不必一次完成。先看[快速上手](quickstart.md)与[统一实验约定](experiments.md)，再按目标选读。", ""]
-    for part in parts.values():
-        out += [f"## {PART_CN[part.num]} {part.title}", "", f"[本部分导览](parts/{part.slug}.md)", ""]
-        for ch in part.chapters:
-            opt = " · 选读" if ch.optional else ""
-            out += [f"### 第 {ch.num} 章 {ch.title}{opt}", ""]
-            out.append(f"[阅读本章](chapters/{ch.slug}.md)")
-            out.append("")
-    write("docs/catalog.md", "\n".join(out))
-
-
-def build_structure_page(parts: dict[int, Part]) -> None:
-    out = ["# 全书结构", "", "全书按主题分为五部分，共 31 章；章内小节按编号排列。这是知识地图，不必一次完成；先看[快速上手](quickstart.md)与[统一实验约定](experiments.md)，再按目标选读。", "", "| 部分 | 章节 | 主题 |", "|---|---|---|"]
-    for part in parts.values():
-        nums = f"{part.chapters[0].num}–{part.chapters[-1].num}" if len(part.chapters) > 1 else str(part.chapters[0].num)
-        out.append(f"| [{PART_CN[part.num]} {part.title}](parts/{part.slug}.md) | {nums} | {PART_LEDES[part.num]} |")
-    out += ["", "## 章节", ""]
-    for part in parts.values():
-        out += [f"### {PART_CN[part.num]} {part.title}", ""]
-        for ch in part.chapters:
-            opt = "（选读）" if ch.optional else ""
-            out.append(f"- [第 {ch.num} 章 {ch.title}{opt}](chapters/{ch.slug}.md)")
-        out.append("")
-    write("docs/MODULES.md", "\n".join(out))
+    write_staged(f"docs/parts/{part.slug}.md", "\n".join(out))
 
 
 def build_progress_page(parts: dict[int, Part]) -> None:
+    total = len(CHAPTERS)
     out = [
         "# 阅读进度 { .part-title }",
         "",
-        '<p class="progress-lede">勾选已经读完的章节。进度只保存在当前浏览器；可以导出 JSON，或生成同步链接带到另一台设备。</p>',
+        '<p class="progress-lede">勾选已读完的章节。进度保存在当前浏览器本地，支持导出 JSON 或复制同步链接跨设备恢复。</p>',
         "",
-        '<div class="progress-summary"><div class="progress-track"><span id="book-progress-fill"></span></div><span id="book-progress-text">0 / 31 章</span></div>',
+        f'<div class="progress-summary"><div class="progress-track"><span id="book-progress-fill"></span></div><span id="book-progress-text">0 / {total} 章</span></div>',
         "",
-        '<div class="book-progress" data-total="31">',
+        f'<div class="book-progress" data-total="{total}">',
     ]
     for part in parts.values():
         out.append('  <section class="progress-part">')
         out.append(f'    <h2 id="part-{part.num}">{PART_CN[part.num]} {part.title}</h2>')
         for ch in part.chapters:
-            opt = '<span class="progress-opt">选读</span>' if ch.optional else ""
             out.append(
                 f'    <label class="progress-row"><input type="checkbox" data-chapter="{ch.num}">'
                 f'<span class="progress-num">{ch.num:02d}</span>'
-                f'<span class="progress-title">第 {ch.num} 章 {ch.title}{opt}</span>'
+                f'<span class="progress-title">第 {ch.num} 章 {html.escape(ch.title)}</span>'
                 f'<a class="progress-link" href="../chapters/{ch.slug}/">阅读</a></label>'
             )
         out.append("  </section>")
@@ -1600,55 +528,68 @@ def build_progress_page(parts: dict[int, Part]) -> None:
         '  <input type="file" id="book-progress-import" accept="application/json" hidden>',
         '  <button type="button" id="book-progress-link" class="md-button">复制同步链接</button>',
         '  <button type="button" id="book-progress-reset" class="md-button">重置</button>',
-        '  <span id="book-progress-feedback" class="progress-feedback" aria-live="polite"></span>',
         "</div>",
+        '<p class="progress-feedback" id="book-progress-feedback" aria-live="polite"></p>',
     ]
-    write("docs/progress.md", "\n".join(out))
-    write("progress/index.html", """<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="refresh" content="0; url=../docs/progress/">
-  <link rel="canonical" href="../docs/progress/">
-  <title>阅读进度 · 边做边学 LLM 推理服务</title>
-</head>
-<body><p>正在前往<a href="../docs/progress/">阅读进度</a>…</p></body>
-</html>""")
-
-
-def cleanup_sources() -> None:
-    for rel in [
-        "README.md",
-        "docs/modules/part1-foundations/README.md",
-        "docs/modules/part3-operators/README.md",
-        "docs/modules/part4-domestic-chips/README.md",
-        "docs/modules/part5-capstone/README.md",
-    ]:
-        p = SITE / rel
-        if p.exists():
-            p.unlink()
-    for rel in ["docs/modules/part3-operators", "docs/modules/part5-capstone"]:
-        p = SITE / rel
-        if p.exists() and not any(p.iterdir()):
-            p.rmdir()
+    write_staged("docs/progress.md", "\n".join(out))
 
 
 def main() -> None:
-    sources = build_sources_and_chapters()
-    build_parts()
-    for num in sorted(CH_BY_NUM):
-        ch = CH_BY_NUM[num]
-        render_chapter(ch, ch.raw, ch.source)
-    for part in PARTS.values():
-        build_part_page(part, sources)
-    build_backmatter(sources["part2"])
-    build_catalog(PARTS)
-    build_structure_page(PARTS)
-    build_progress_page(PARTS)
-    build_glossary_page()
-    shutil.copyfile(ROOT / "tools" / "homepage.md", SITE / "index.md")
-    cleanup_sources()
-    print("built 5 parts / 31 chapters:", ", ".join(f"P{p.num}={len(p.chapters)}" for p in PARTS.values()))
+    parts: dict[int, Part] = {num: Part(num, title) for num, title in PART_TITLES.items()}
+    problems: list[str] = []
+
+    # 1. Stage homepage docs/index.md -> site-src/index.md and drop repo README from docs_dir
+    index_src = SITE / "docs/index.md"
+    if not index_src.is_file():
+        raise SystemExit(f"missing homepage source: {index_src}")
+    problems.extend(validate_markdown(index_src))
+    (SITE / "index.md").write_text(index_src.read_text(encoding="utf-8"), encoding="utf-8")
+    index_src.unlink()
+    staged_readme = SITE / "README.md"
+    if staged_readme.is_file():
+        staged_readme.unlink()
+
+    # 2. Validate and annotate all 23 chapters
+    for num, part_num, title in CHAPTERS:
+        ch = Chapter(num, part_num, title)
+        path = SITE / f"docs/chapters/{ch.slug}.md"
+        if not path.is_file():
+            raise SystemExit(f"missing chapter source: {path}")
+        problems.extend(validate_markdown(path))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        ch.sections = extract_h2_sections(lines)
+        annotated = "\n".join(TermAnnotator("../glossary.md").annotate_lines(lines)).rstrip() + "\n"
+        path.write_text(annotated, encoding="utf-8")
+        parts[part_num].chapters.append(ch)
+
+    # 3. Validate and annotate topics
+    topics_dir = SITE / "docs/topics"
+    if topics_dir.is_dir():
+        for path in sorted(topics_dir.glob("*.md")):
+            problems.extend(validate_markdown(path))
+            lines = path.read_text(encoding="utf-8").splitlines()
+            annotated = "\n".join(TermAnnotator("../glossary.md").annotate_lines(lines)).rstrip() + "\n"
+            path.write_text(annotated, encoding="utf-8")
+
+    # 4. Validate toolkit pages
+    toolkit_dir = SITE / "docs/toolkit"
+    if toolkit_dir.is_dir():
+        for path in sorted(toolkit_dir.glob("*.md")):
+            problems.extend(validate_markdown(path))
+
+    if problems:
+        raise SystemExit("Markdown validation failed:\n" + "\n".join(problems))
+
+    # 5. Generate part landing pages, glossary, progress page, and redirect shim
+    for part in parts.values():
+        build_part_page(part)
+    write_staged("docs/glossary.md", render_glossary())
+    build_progress_page(parts)
+    write_staged(
+        "progress/index.html",
+        '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=../docs/progress/"><title>阅读进度</title>',
+    )
+    print(f"Built {len(CHAPTERS)} chapters across {len(parts)} parts.")
 
 
 if __name__ == "__main__":

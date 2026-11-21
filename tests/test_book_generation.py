@@ -1,8 +1,4 @@
-"""Regression checks for compact glossary annotations and stable book IDs.
-
-Only Python's standard library is required; these tests never rebuild the site
-or touch another agent's source files.
-"""
+"""Regression checks for compact glossary annotations, math preservation, and 23-chapter IDs."""
 import importlib.util
 import re
 import sys
@@ -34,19 +30,31 @@ class BookGenerationTests(unittest.TestCase):
         self.assertEqual(output.count("[TTFT](../glossary.md#ttft)"), 1)
         self.assertIn("比较 TTFT 时要固定条件。", output)
 
-    def test_fenced_code_and_inline_code_are_unchanged(self):
-        lines = ["```python", "print('TTFT')", "```", "`TTFT` 是字段名。"]
+    def test_fenced_code_inline_code_and_math_are_unchanged(self):
+        lines = [
+            "```python",
+            "print('TTFT')",
+            "```",
+            "`TTFT` 是字段名。",
+            "公式 $TTFT + ITL$ 不应被插入链接。",
+            "$$",
+            "TTFT = T_{queue} + T_{prefill}",
+            "$$",
+        ]
         self.assertEqual(BOOK.TermAnnotator().annotate_lines(lines), lines)
 
     def test_existing_definitions_are_not_repeated(self):
         line = "TTFT（首 token 延迟）量的是第一次反馈。"
         self.assertEqual(BOOK.TermAnnotator().annotate_lines([line]), [line])
 
+    def test_scalarization_is_not_annotated_as_quantization(self):
+        line = "不对齐可能触发编译器标量化处理。"
+        self.assertEqual(BOOK.TermAnnotator().annotate_lines([line]), [line])
+
     def test_flashattention_is_not_translated_as_storage_flash(self):
         self.assertNotEqual(self.entry("flash_attention")["zh"], "闪存注意力")
 
     def test_glossary_has_one_explicit_anchor_per_entry(self):
-        self.assertTrue(hasattr(BOOK, "render_glossary"), "missing glossary page renderer")
         output = BOOK.render_glossary()
         anchors = re.findall(r"\{\s*#([a-z0-9_]+)\s*\}", output)
         expected = [item["id"] for item in BOOK.TERM_GLOSSARY]
@@ -54,30 +62,16 @@ class BookGenerationTests(unittest.TestCase):
         self.assertEqual(len(anchors), len(set(anchors)))
         self.assertNotIn("闪存注意力", output)
 
-    def test_guidance_covers_every_existing_chapter(self):
-        self.assertTrue(hasattr(BOOK, "CHAPTER_GUIDANCE"), "missing chapter starting guidance")
-        self.assertEqual(set(BOOK.CHAPTER_GUIDANCE), set(range(1, 32)))
-        for number, fields in BOOK.CHAPTER_GUIDANCE.items():
-            with self.subTest(chapter=number):
-                self.assertEqual(set(fields), {"environment", "prerequisite", "deliverable"})
-                self.assertTrue(all(value.strip() for value in fields.values()))
-
-    def test_revised_titles_keep_chapter_ids(self):
+    def test_twenty_three_canonical_chapters_and_summaries(self):
         titles = {row[0]: row[2] for row in BOOK.CHAPTERS}
-        self.assertEqual(sorted(titles), list(range(1, 32)))
-        expected = {
-            6: "推理瓶颈判断：计算、带宽与启动开销",
-            9: "推理服务监控：Prometheus 与 Grafana",
-            11: "容量评估：并发曲线、SLO 与抢占边界",
-            18: "TensorRT-LLM：执行后端与三引擎对比",
-            19: "GEMM 的四版实现：优化、计时与归因",
-            29: "迁移前检查与实验设计：从 Triton 到 Ascend",
-        }
-        for number, title in expected.items():
-            with self.subTest(chapter=number):
-                self.assertEqual(titles[number], title)
-                chapter = BOOK.Chapter(number, 1, title, "part1", 0)
-                self.assertEqual(chapter.slug, f"chapter-{number:02d}")
+        self.assertEqual(sorted(titles), list(range(1, 24)))
+        self.assertEqual(set(BOOK.CHAPTER_SUMMARIES), set(range(1, 24)))
+        self.assertTrue(all(v.strip() for v in BOOK.CHAPTER_SUMMARIES.values()))
+        self.assertEqual(titles[1], "推理为什么慢：Roofline 与三区间直觉")
+        self.assertEqual(titles[5], "vLLM：一条请求如何穿过推理引擎")
+        self.assertEqual(titles[12], "GPU 执行模型与 GEMM 四版优化阶梯")
+        self.assertEqual(titles[19], "昇腾部署架构与 vllm-ascend 插件机制")
+        self.assertEqual(titles[23], "跨芯片精度回归、性能归因与分析报告范式")
 
 
 if __name__ == "__main__":

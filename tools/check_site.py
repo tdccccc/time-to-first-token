@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the generated book's IDs, titles, local links and publication boundary.
+"""Check the generated book's IDs, titles, local links, figures and publication boundary.
 
 This is an offline artifact check, not a browser interaction or device test.
 """
@@ -24,6 +24,7 @@ class Page(HTMLParser):
         self.heading: list[str] = []
         self.in_heading = False
         self.note_key: str | None = None
+        self.figure_count = 0
         self.feed(text)
 
     def handle_starttag(self, tag, attributes):
@@ -37,6 +38,8 @@ class Page(HTMLParser):
                 self.references.append(attrs[name])
         if tag == "input" and attrs.get("data-chapter"):
             self.chapters.append(int(attrs["data-chapter"]))
+        if tag == "figure":
+            self.figure_count += 1
         if tag == "h1":
             self.in_heading = True
 
@@ -98,7 +101,8 @@ def validate_site(root: Path = ROOT) -> list[str]:
     sys.modules[spec.name] = book
     spec.loader.exec_module(book)
     problems = []
-    for number, _part, title, _module, _index, _optional in book.CHAPTERS:
+
+    for number, _part, title in book.CHAPTERS:
         path = site / f"docs/chapters/chapter-{number:02d}/index.html"
         if not path.is_file():
             problems.append(f"missing chapter {number}: {path}")
@@ -106,33 +110,50 @@ def validate_site(root: Path = ROOT) -> list[str]:
         text = path.read_text(encoding="utf-8")
         page = Page(text)
         if page.title != f"第 {number} 章 {title}":
-            problems.append(f"chapter {number}: generated title differs from canonical title")
+            problems.append(f"chapter {number}: title {page.title!r} != expected '第 {number} 章 {title}'")
         if page.note_key != f"docs/chapters/chapter-{number:02d}/":
-            problems.append(f"chapter {number}: existing URL-based note key changed")
-        if "开始前：环境、前置与交付物" not in text:
-            problems.append(f"chapter {number}: missing starting guidance")
+            problems.append(f"chapter {number}: note key mismatch: {page.note_key!r}")
+        if page.figure_count < 1:
+            problems.append(f"chapter {number}: missing visual figure")
         if 'class="term-def"' in text:
             problems.append(f"chapter {number}: obsolete long automatic term annotation")
-    for name in ("quickstart", "experiments", "glossary"):
-        if not (site / f"docs/{name}/index.html").is_file():
-            problems.append(f"missing public reading entry: {name}")
+
+    required_pages = (
+        "docs/topics/advanced-architectures/index.html",
+        "docs/topics/cluster-pd-mooncake/index.html",
+        "docs/topics/edge-runtimes/index.html",
+        "docs/topics/paper-notes/index.html",
+        "docs/topics/domestic-ecosystems/index.html",
+        "docs/toolkit/hardware-models/index.html",
+        "docs/toolkit/methodology/index.html",
+        "docs/toolkit/tools-and-configs/index.html",
+        "docs/glossary/index.html",
+        "docs/progress/index.html",
+        "docs/colophon/index.html",
+    )
+    for rel in required_pages:
+        if not (site / rel).is_file():
+            problems.append(f"missing public page: {rel}")
+
     progress = site / "docs/progress/index.html"
     if progress.is_file():
-        if Page(progress.read_text(encoding="utf-8")).chapters != list(range(1, 32)):
-            problems.append("reading progress chapter IDs changed or are duplicated")
-    else:
-        problems.append("missing reading progress page")
+        expected_ids = [row[0] for row in book.CHAPTERS]
+        if Page(progress.read_text(encoding="utf-8")).chapters != expected_ids:
+            problems.append("reading progress chapter IDs mismatch")
+
     glossary = site / "docs/glossary/index.html"
     if glossary.is_file():
         anchors = Page(glossary.read_text(encoding="utf-8")).ids
         missing = {entry["id"] for entry in book.TERM_GLOSSARY} - anchors
         if missing:
             problems.append(f"missing glossary anchors: {sorted(missing)}")
+
     for tree in (root / "site-src", site):
         if (tree / "docs/helm").exists():
             problems.append(f"internal Helm documents leaked into {tree.name}")
         if any(tree.rglob("*.pyc")) or any(tree.rglob("__pycache__")):
             problems.append(f"Python caches leaked into {tree.name}")
+
     config = (root / "mkdocs.yml").read_text(encoding="utf-8")
     match = re.search(r"^site_url:\s*(\S+)", config, re.MULTILINE)
     prefix = urlsplit(match.group(1)).path if match else "/"
@@ -146,7 +167,7 @@ def main() -> None:
         for problem in problems:
             print(problem, file=sys.stderr)
         raise SystemExit(1)
-    print("PASS: 31 chapter titles/IDs, starting guidance, glossary anchors, local links and public-only artifacts.")
+    print("PASS: 23 chapters (with figures), 5 topics, toolkit, glossary anchors, local links and public-only artifacts.")
 
 
 if __name__ == "__main__":

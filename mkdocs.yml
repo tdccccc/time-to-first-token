@@ -1,22 +1,14 @@
-# 书籍站点的网站版（MkDocs + Material 主题），部署到 GitHub Pages。
-# 书籍式结构：5 部分 / 31 章；左侧可折叠目录，右侧本页笔记。
+# 《LLM 推理工程：原理与方法》（MkDocs + Material 主题），部署到 GitHub Pages。
+# 结构：首页全景导览 + 5 篇 23 章主线 + 2 个独立横切区（参考手册与工具箱、进阶专题库）。
 #
-# Markdown 仍是唯一事实来源：改内容请改 md，推送后 Actions 自动重新生成上线。
-# site-build.sh 会把 README / 模块 README 重排成 docs/chapters/ 下的章节页。
-#
-# 本地预览（默认 http://127.0.0.1:8010/time-to-first-token/）：
-#   uv venv .venv-mkdocs
-#   uv pip install --python .venv-mkdocs/bin/python -r requirements.txt
-#   bash site-build.sh serve
-# 没有 uv 时：python3 -m venv .venv-mkdocs && .venv-mkdocs/bin/pip install -r requirements.txt
-#
-# 推送到 main 后，.github/workflows/pages.yml 会自动构建并发布到 GitHub Pages。
-site_name: 边做边学 LLM 推理服务
-site_description: 面向工程师的 LLM 推理学习路线：性能度量、框架调优、算子优化与昇腾适配，以可复现报告为目标。
+# 一章一文件：权威源稿位于 docs/chapters/、docs/topics/、docs/toolkit/ 与 docs/index.md。
+# 推送到 main 后，.github/workflows/pages.yml 自动运行单测、构建并发布到 GitHub Pages。
+site_name: LLM 推理工程：原理与方法
+site_description: 面向工程师的 LLM 推理原理与方法精讲：性能直觉与度量、主流推理框架、GPU 算子优化与国产芯片适配。
 site_url: https://tdccccc.github.io/time-to-first-token/
 repo_url: https://github.com/tdccccc/time-to-first-token
 repo_name: tdccccc/time-to-first-token
-copyright: 基于 CC BY 4.0 发布 · 上游 patchy631/time-to-first-token
+copyright: 基于 CC BY 4.0 发布 · 灵感源于 patchy631/time-to-first-token
 
 docs_dir: site-src
 site_dir: site
@@ -61,7 +53,11 @@ theme:
 
 extra_css:
   - assets/extra.css
+  - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css
 extra_javascript:
+  - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js
+  - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js
+  - assets/math.js
   - assets/notes.js
   - assets/progress.js
   - assets/toc.js
@@ -79,6 +75,8 @@ markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.details
   - pymdownx.highlight
   - pymdownx.superfences
@@ -86,66 +84,57 @@ markdown_extensions:
       custom_checkbox: true
 
 nav:
-  - 前言: index.md
-  - 快速上手: docs/quickstart.md
-  - 全书目录: docs/catalog.md
+  - 全景导览: index.md
 
-  - 第一部分 基础与度量:
-      - 本部分导览: docs/parts/part-1.md
-      - 第 1 章 Roofline：先算，再优化: docs/chapters/chapter-01.md
-      - 第 2 章 推理度量：四个数，一个分布: docs/chapters/chapter-02.md
-      - 第 3 章 Profiling：看时间花在哪: docs/chapters/chapter-03.md
-      - 第 4 章 写压测脚本：bench_openai.py: docs/chapters/chapter-04.md
-      - 第 5 章 跑出第一份基线: docs/chapters/chapter-05.md
+  - 第一篇 性能直觉与度量方法:
+      - 本篇导览: docs/parts/part-1.md
+      - 第 1 章 推理为什么慢：Roofline 与三区间直觉: docs/chapters/chapter-01.md
+      - 第 2 章 模型的显存与计算账本: docs/chapters/chapter-02.md
+      - 第 3 章 推理度量与压测方法: docs/chapters/chapter-03.md
+      - 第 4 章 Profiling 方法论：看时间花在哪: docs/chapters/chapter-04.md
 
-  - 第二部分 推理框架:
-      - 本部分导览: docs/parts/part-2.md
-      - 第 6 章 推理瓶颈判断：计算、带宽与启动开销: docs/chapters/chapter-06.md
-      - 第 7 章 模型架构: docs/chapters/chapter-07.md
-      - 第 8 章 vLLM：一条请求如何穿过引擎: docs/chapters/chapter-08.md
-      - 第 9 章 推理服务监控：Prometheus 与 Grafana: docs/chapters/chapter-09.md
-      - 第 10 章 SGLang：RadixAttention 与前缀复用: docs/chapters/chapter-10.md
-      - 第 11 章 容量评估：并发曲线、SLO 与抢占边界: docs/chapters/chapter-11.md
-      - 第 12 章 量化取舍: docs/chapters/chapter-12.md
-      - 第 13 章 投机解码与 KV 淘汰: docs/chapters/chapter-13.md
-      - 第 14 章 解耦式服务与 Kubernetes: docs/chapters/chapter-14.md
-      - 第 15 章 大规模集群 PD 优化: docs/chapters/chapter-15.md
-      - 第 16 章 单位经济学与路由器: docs/chapters/chapter-16.md
-      - 第 17 章 发表，然后养成阅读习惯: docs/chapters/chapter-17.md
-      - 第 18 章 TensorRT-LLM：执行后端与三引擎对比: docs/chapters/chapter-18.md
+  - 第二篇 推理引擎与部署优化:
+      - 本篇导览: docs/parts/part-2.md
+      - 第 5 章 vLLM：一条请求如何穿过推理引擎: docs/chapters/chapter-05.md
+      - 第 6 章 SGLang：RadixAttention 与前缀复用: docs/chapters/chapter-06.md
+      - 第 7 章 可观测性与容量评估: docs/chapters/chapter-07.md
+      - 第 8 章 量化原理与取舍: docs/chapters/chapter-08.md
+      - 第 9 章 投机解码与长上下文 KV 淘汰: docs/chapters/chapter-09.md
+      - 第 10 章 TensorRT-LLM 与三引擎架构横评: docs/chapters/chapter-10.md
+      - 第 11 章 生产架构：PD 解耦、扩缩容与成本路由: docs/chapters/chapter-11.md
 
-  - 第三部分 算子优化:
-      - 本部分导览: docs/parts/part-3.md
-      - 第 19 章 GEMM 的四版实现：优化、计时与归因: docs/chapters/chapter-19.md
-      - 第 20 章 Triton 入门：用 Python 写 kernel: docs/chapters/chapter-20.md
-      - 第 21 章 Fused Attention 深讲：先推导，再写 kernel: docs/chapters/chapter-21.md
-      - 第 22 章 量化 Matmul 深讲：量化方案本身: docs/chapters/chapter-22.md
-      - 第 23 章 FlashAttention 2/3 与 CUTLASS：读工业级实现: docs/chapters/chapter-23.md
-      - 第 24 章 收口：把自写 kernel 接入推理引擎: docs/chapters/chapter-24.md
+  - 第三篇 GPU 算子优化与引擎接入:
+      - 本篇导览: docs/parts/part-3.md
+      - 第 12 章 GPU 执行模型与 GEMM 四版优化阶梯: docs/chapters/chapter-12.md
+      - 第 13 章 Triton 编程模型：从向量加到 2D GEMM: docs/chapters/chapter-13.md
+      - 第 14 章 Fused Attention 深讲：Online Softmax 与分块实现: docs/chapters/chapter-14.md
+      - 第 15 章 量化 Matmul 算子原理：W8A8 与 W8A16: docs/chapters/chapter-15.md
+      - 第 16 章 工业级实现导读：FlashAttention 2/3 与 CUTLASS: docs/chapters/chapter-16.md
+      - 第 17 章 把自定义算子接入推理引擎: docs/chapters/chapter-17.md
 
-  - 第四部分 国产芯片适配:
-      - 本部分导览: docs/parts/part-4.md
-      - 第 25 章 芯片与软件栈地图：先画地图，再谈适配: docs/chapters/chapter-25.md
-      - 第 26 章 CANN 与 AscendC 深讲：算子从定义到编译到调用: docs/chapters/chapter-26.md
-      - 第 27 章 同一模型在 Ascend 上跑通 + vllm-ascend 插件架构: docs/chapters/chapter-27.md
-      - 第 28 章 算子覆盖分析: docs/chapters/chapter-28.md
-      - 第 29 章 迁移前检查与实验设计：从 Triton 到 Ascend: docs/chapters/chapter-29.md
-      - 第 30 章 精度回归与调优报告: docs/chapters/chapter-30.md
+  - 第四篇 国产芯片适配原理与方法:
+      - 本篇导览: docs/parts/part-4.md
+      - 第 18 章 国产芯片全景与软件栈地图: docs/chapters/chapter-18.md
+      - 第 19 章 昇腾部署架构与 vllm-ascend 插件机制: docs/chapters/chapter-19.md
+      - 第 20 章 CANN 分层与 AscendC 算子全链路: docs/chapters/chapter-20.md
+      - 第 21 章 算子覆盖分析与回退定位方法: docs/chapters/chapter-21.md
+      - 第 22 章 跨芯片算子迁移：从 CUDA / Triton 到 Ascend: docs/chapters/chapter-22.md
 
-  - 第五部分 综合项目:
-      - 本部分导览: docs/parts/part-5.md
-      - 第 31 章 跨芯片推理优化报告: docs/chapters/chapter-31.md
+  - 第五篇 综合分析与方法收口:
+      - 本篇导览: docs/parts/part-5.md
+      - 第 23 章 跨芯片精度回归、性能归因与分析报告范式: docs/chapters/chapter-23.md
 
-  - 附录:
-      - 阅读进度: docs/progress.md
-      - 全书结构: docs/MODULES.md
-      - 统一实验约定: docs/experiments.md
+  - 进阶专题库:
+      - 专题 A：前沿长上下文与混合架构拆账: docs/topics/advanced-architectures.md
+      - 专题 B：大规模集群 PD 与分布式 KV 池: docs/topics/cluster-pd-mooncake.md
+      - 专题 C：端侧与浏览器推理运行时: docs/topics/edge-runtimes.md
+      - 专题 D：各章核心论文精读与数据口径: docs/topics/paper-notes.md
+      - 专题 E：主流国产芯片生态速查: docs/topics/domestic-ecosystems.md
+
+  - 参考手册与工具箱:
+      - 硬件规格与模型账本速查: docs/toolkit/hardware-models.md
+      - 测量口径与对比分析方法: docs/toolkit/methodology.md
+      - 工程脚本与配置参考: docs/toolkit/tools-and-configs.md
       - 术语表: docs/glossary.md
-      - 发表 benchmark 之前: docs/backmatter/benchmark.md
-      - 决策点: docs/backmatter/decisions.md
-      - 参考资料: docs/backmatter/references.md
-      - 跟踪进度: docs/backmatter/tracking.md
-      - 来源、贡献与许可: docs/backmatter/colophon.md
-      - 基线报告模板: docs/modules/part1-foundations/baseline-report-template.md
-      - 跨芯片对比报告模板: docs/modules/part4-domestic-chips/cross-chip-report-template.md
-      - 上游英文原文: docs/original-README.md
+      - 阅读进度: docs/progress.md
+      - 来源、贡献与许可: docs/colophon.md

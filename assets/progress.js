@@ -4,10 +4,10 @@
   var root = document.querySelector(".book-progress");
   if (!root) return;
 
-  var KEY = "ttft-book-progress:v2";
-  var TOTAL = 31;
-  var ALPHABET = "0123456789abcdefghijklmnopqrstuv";
+  var KEY = "ttft-book-progress:v3";
   var boxes = Array.prototype.slice.call(root.querySelectorAll("input[data-chapter]"));
+  var TOTAL = Number(root.getAttribute("data-total")) || boxes.length || 23;
+  var ALPHABET = "0123456789abcdefghijklmnopqrstuv";
   var fill = document.getElementById("book-progress-fill");
   var text = document.getElementById("book-progress-text");
   var feedback = document.getElementById("book-progress-feedback");

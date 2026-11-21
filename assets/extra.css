@@ -699,7 +699,25 @@ body {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 0.2rem;
+  border-radius: 0.35rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+}
+
+[data-md-color-scheme="slate"] .book-figure img {
+  filter: invert(0.91) hue-rotate(180deg) brightness(1.03) contrast(0.96);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.md-typeset .arithmatex {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+}
+
+.chapter-card-summary {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.72rem;
+  line-height: 1.6;
 }
 
 .md-typeset .book-figure figcaption {
