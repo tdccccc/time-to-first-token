@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-label="NVIDIA GPU 与华为昇腾 Ascend NPU 的存储层次、计算单元与同步原语镜像对照，以及中间四类常见迁移踩坑点">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .col-hd { font-size: 14px; font-weight: 700; }
+    .box-t { font-size: 12.5px; font-weight: 700; fill: #1e293b; }
+    .box-s { font-size: 10.5px; fill: #475569; }
+    .sub-t { font-size: 11.5px; font-weight: 700; fill: #1e293b; }
+    .sub-s { font-size: 10px; fill: #475569; }
+    .pit-t { font-size: 11.5px; font-weight: 700; fill: #dc2626; }
+    .pit-s { font-size: 10px; fill: #7f1d1d; }
+    .mid-tag { font-size: 10px; font-weight: 600; fill: #475569; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arr-both-e" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-both-s" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M10,1 L1,5 L10,9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="470" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">NVIDIA GPU vs 昇腾 Ascend NPU：存储与计算对照</text>
+  <text x="36" y="61" class="sub">左右镜像映射片外显存、片上缓存、计算核与同步原语；中间红框标出跨平台迁移的四类高频踩坑点。</text>
+
+  <!-- ==================== Left Column: NVIDIA GPU ==================== -->
+  <rect x="36" y="76" width="318" height="352" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.4"/>
+  <path d="M36,86 a10,10 0 0 1 10,-10 h298 a10,10 0 0 1 10,10 v22 h-318 z" fill="#ecfdf5"/>
+  <line x1="36" y1="108" x2="354" y2="108" stroke="#a7f3d0" stroke-width="1"/>
+  <text x="195" y="97" class="col-hd" fill="#047857" text-anchor="middle">NVIDIA GPU（SIMT 架构）</text>
+
+  <!-- GPU Row 1: HBM -->
+  <rect x="50" y="116" width="290" height="46" rx="7" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="195" y="135" class="box-t" text-anchor="middle">HBM（Global Memory）</text>
+  <text x="195" y="153" class="box-s" text-anchor="middle">片外高带宽主存 · 依赖合并访存（Coalescing）</text>
+
+  <line x1="195" y1="163" x2="195" y2="175" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- GPU Row 2: L2 Cache -->
+  <rect x="50" y="176" width="290" height="44" rx="7" fill="#e0f2fe" stroke="#7dd3fc"/>
+  <text x="195" y="194" class="box-t" fill="#0369a1" text-anchor="middle">L2 Cache（硬件透明缓存）</text>
+  <text x="195" y="212" class="box-s" text-anchor="middle">全卡 SM 共享 · 硬件自动命中与替换</text>
+
+  <line x1="195" y1="221" x2="195" y2="233" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- GPU Row 3: Shared Memory & Registers -->
+  <rect x="50" y="234" width="146" height="64" rx="7" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="123" y="254" class="sub-t" fill="#047857" text-anchor="middle">Shared Memory</text>
+  <text x="123" y="271" class="sub-s" text-anchor="middle">SM 内可编程片上内存</text>
+  <text x="123" y="287" class="sub-s" fill="#047857" text-anchor="middle">注意 Bank Conflict</text>
+
+  <rect x="204" y="234" width="136" height="64" rx="7" fill="#fffbeb" stroke="#fbbf24"/>
+  <text x="272" y="254" class="sub-t" fill="#b45309" text-anchor="middle">Registers</text>
+  <text x="272" y="271" class="sub-s" text-anchor="middle">线程私有寄存器文件</text>
+  <text x="272" y="287" class="sub-s" fill="#b45309" text-anchor="middle">超低延迟累加</text>
+
+  <line x1="195" y1="299" x2="195" y2="311" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- GPU Row 4: Compute Units -->
+  <rect x="50" y="312" width="290" height="48" rx="7" fill="#ecfdf5" stroke="#10b981"/>
+  <text x="195" y="332" class="box-t" fill="#047857" text-anchor="middle">CUDA Core / Tensor Core</text>
+  <text x="195" y="350" class="box-s" text-anchor="middle">同 SM 内混合发射 · Warp（32 线程）调度</text>
+
+  <!-- GPU Row 5: Sync & Grid -->
+  <rect x="50" y="368" width="290" height="48" rx="7" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="195" y="388" class="mono box-t" text-anchor="middle">__syncthreads() / mbarrier</text>
+  <text x="195" y="406" class="box-s" text-anchor="middle">块内共享屏障 · 硬件原生 3D Grid (x, y, z)</text>
+
+  <!-- ==================== Right Column: Ascend NPU ==================== -->
+  <rect x="566" y="76" width="318" height="352" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.4"/>
+  <path d="M566,86 a10,10 0 0 1 10,-10 h298 a10,10 0 0 1 10,10 v22 h-318 z" fill="#eef2ff"/>
+  <line x1="566" y1="108" x2="884" y2="108" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="725" y="97" class="col-hd" fill="#3f51b5" text-anchor="middle">华为昇腾 Ascend NPU（达芬奇架构）</text>
+
+  <!-- NPU Row 1: GM (HBM) -->
+  <rect x="580" y="116" width="290" height="46" rx="7" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="725" y="135" class="box-t" text-anchor="middle">GM（Global Memory / HBM）</text>
+  <text x="725" y="153" class="box-s" text-anchor="middle">片外主存 · MTE2 / MTE3 显式 DMA 搬运</text>
+
+  <line x1="725" y1="163" x2="725" y2="175" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- NPU Row 2: L1 Buffer -->
+  <rect x="580" y="176" width="290" height="44" rx="7" fill="#e0f2fe" stroke="#7dd3fc"/>
+  <text x="725" y="194" class="box-t" fill="#0369a1" text-anchor="middle">L1 Buffer（核内显式缓存）</text>
+  <text x="725" y="212" class="box-s" text-anchor="middle">AIC 矩阵侧暂存 · 由编译器或算子显式调度</text>
+
+  <line x1="725" y1="221" x2="725" y2="233" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- NPU Row 3: L0A/B/C & UB -->
+  <rect x="580" y="234" width="140" height="64" rx="7" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="650" y="254" class="mono sub-t" fill="#3f51b5" text-anchor="middle">L0A / L0B / L0C</text>
+  <text x="650" y="271" class="sub-s" text-anchor="middle">Matrix 专用三级暂存</text>
+  <text x="650" y="287" class="sub-s" fill="#3f51b5" text-anchor="middle">直连 Cube 矩阵单元</text>
+
+  <rect x="728" y="234" width="142" height="64" rx="7" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="799" y="254" class="sub-t" fill="#b45309" text-anchor="middle">UB（Vector）</text>
+  <text x="799" y="271" class="sub-s" text-anchor="middle">统一向量片上缓冲</text>
+  <text x="799" y="287" class="sub-s" fill="#b45309" text-anchor="middle">192–256 KB 硬上限</text>
+
+  <line x1="725" y1="299" x2="725" y2="311" stroke="#64748b" stroke-width="1.2" marker-start="url(#arr-both-s)" marker-end="url(#arr-both-e)"/>
+
+  <!-- NPU Row 4: AIC / AIV -->
+  <rect x="580" y="312" width="290" height="48" rx="7" fill="#eef2ff" stroke="#6366f1"/>
+  <text x="725" y="332" class="box-t" fill="#3f51b5" text-anchor="middle">AIC 矩阵核 / AIV 向量核</text>
+  <text x="725" y="350" class="box-s" text-anchor="middle">物理分离（常 1:2 配比）· 经 GM / L2 交互</text>
+
+  <!-- NPU Row 5: MTE2/MTE3 Event Sync -->
+  <rect x="580" y="368" width="290" height="48" rx="7" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="725" y="388" class="box-t" text-anchor="middle">MTE2 / MTE3 事件流水同步</text>
+  <text x="725" y="406" class="box-s" text-anchor="middle">TQue / PipeBarrier · 1D BlockIdx 核分派</text>
+
+  <!-- ==================== Center: Dashed Mappings & 4 Migration Pitfalls ==================== -->
+  <!-- Pitfall 1: 32B/512B alignment -->
+  <line x1="354" y1="139" x2="372" y2="139" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="548" y1="139" x2="566" y2="139" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <rect x="372" y="116" width="176" height="46" rx="7" fill="#fef2f2" stroke="#f87171" stroke-width="1.3"/>
+  <text x="460" y="135" class="pit-t" text-anchor="middle">坑 ① 32B / 512B 尾轴对齐</text>
+  <text x="460" y="152" class="pit-s" text-anchor="middle">非对齐搬运性能骤降或报错</text>
+
+  <!-- Neutral bridge: L2 vs L1 -->
+  <line x1="354" y1="198" x2="394" y2="198" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="526" y1="198" x2="566" y2="198" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="394" y="187" width="132" height="22" rx="11" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="460" y="202" class="mid-tag" text-anchor="middle">透明缓存 ↔ 显式缓冲</text>
+
+  <!-- Pitfall 2: UB Capacity Limit -->
+  <line x1="354" y1="266" x2="372" y2="266" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="548" y1="266" x2="566" y2="266" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <rect x="372" y="242" width="176" height="48" rx="7" fill="#fef2f2" stroke="#f87171" stroke-width="1.3"/>
+  <text x="460" y="261" class="pit-t" text-anchor="middle">坑 ② UB 容量上限</text>
+  <text x="460" y="279" class="pit-s" text-anchor="middle">大 Tile 直接超 UB 溢出失败</text>
+
+  <!-- Pitfall 3: 2D Grid Folding -->
+  <line x1="354" y1="336" x2="372" y2="336" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="548" y1="336" x2="566" y2="336" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <rect x="372" y="312" width="176" height="48" rx="7" fill="#fef2f2" stroke="#f87171" stroke-width="1.3"/>
+  <text x="460" y="331" class="pit-t" text-anchor="middle">坑 ③ 2D Grid 折叠</text>
+  <text x="460" y="349" class="pit-s" text-anchor="middle">多维网格须手动折算 1D 核号</text>
+
+  <!-- Pitfall 4: Cross-Core Sync -->
+  <line x1="354" y1="392" x2="372" y2="392" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <line x1="548" y1="392" x2="566" y2="392" stroke="#ef4444" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <rect x="372" y="368" width="176" height="48" rx="7" fill="#fef2f2" stroke="#f87171" stroke-width="1.3"/>
+  <text x="460" y="387" class="pit-t" text-anchor="middle">坑 ④ 跨核同步</text>
+  <text x="460" y="405" class="pit-s" text-anchor="middle">AIC/AIV 核间无共享内存屏障</text>
+
+  <!-- Bottom takeaway -->
+  <text x="36" y="448" class="note">迁移要点：勿照搬 GPU 大 Tile 与透明缓存假设；按 UB 上限与 32B 对齐重算 Tiling，改用 1D 切核与事件流水。</text>
+</svg>

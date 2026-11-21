@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 460" role="img" aria-label="Prometheus Pull 采集链路与 Histogram 分位数插值：上半展示 vLLM /metrics 被 Prometheus 定时拉取再由 Grafana 查询的三段链路与排障检查点；下半展示累计 le 桶与 p95 线性插值过程">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .card-t { font-size: 14.5px; font-weight: 700; }
+    .card-b { font-size: 11.5px; fill: #334155; }
+    .pill { font-size: 10.5px; font-weight: 700; text-anchor: middle; }
+    .chk-t { font-size: 11.5px; font-weight: 700; fill: #92400e; }
+    .chk-s { font-size: 11px; fill: #78350f; }
+    .tick { font-size: 11px; fill: #64748b; }
+    .bar-lbl { font-size: 11px; font-weight: 700; text-anchor: middle; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arrow-sky" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#0284c7"/>
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="460" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="38" y="38" class="title">可观测性采集链路与 Histogram 分位数插值</text>
+  <text x="38" y="62" class="sub">上：Pull 模式三段采集链路与排障第一检查点；下：累计 le 桶如何通过 histogram_quantile(0.95) 线性插值。</text>
+
+  <!-- ==================== TOP HALF: PULL PIPELINE & CHECKPOINTS ==================== -->
+  <!-- Card 1: vLLM /metrics -->
+  <g>
+    <rect x="38" y="78" width="236" height="84" rx="9" fill="#eef2ff" stroke="#818cf8" stroke-width="1.4"/>
+    <text x="52" y="101" class="card-t mono" fill="#3730a3">vLLM /metrics</text>
+    <rect x="202" y="86" width="60" height="20" rx="10" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="232" y="100" class="pill" fill="#3730a3">暴露端</text>
+    <text x="52" y="121" class="card-b">• Gauge：running / waiting / KV%</text>
+    <text x="52" y="137" class="card-b">• Counter：tokens_total 累计计数</text>
+    <text x="52" y="153" class="card-b">• Histogram：TTFT / ITL _bucket</text>
+  </g>
+
+  <!-- Pull Arrow 1: Prometheus -> vLLM -->
+  <g>
+    <text x="308" y="104" font-size="11.5" font-weight="700" fill="#0369a1" text-anchor="middle">定时 Pull</text>
+    <line x1="340" y1="115" x2="278" y2="115" stroke="#0284c7" stroke-width="2.2" marker-end="url(#arrow-sky)"/>
+    <text x="308" y="131" font-size="10.5" class="mono" fill="#64748b" text-anchor="middle">scrape</text>
+    <text x="308" y="144" font-size="10.5" class="mono" fill="#64748b" text-anchor="middle">interval</text>
+  </g>
+
+  <!-- Card 2: Prometheus -->
+  <g>
+    <rect x="342" y="78" width="236" height="84" rx="9" fill="#f0f9ff" stroke="#38bdf8" stroke-width="1.4"/>
+    <text x="356" y="101" class="card-t" fill="#075985">Prometheus</text>
+    <rect x="506" y="86" width="60" height="20" rx="10" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="536" y="100" class="pill" fill="#0369a1">时序库</text>
+    <text x="356" y="121" class="card-b">• 按 scrape_interval 主动拉取</text>
+    <text x="356" y="137" class="card-b">• 写入本地 TSDB 时间序列</text>
+    <text x="356" y="153" class="card-b">• 最新值滞后 ≤ 1 个抓取周期</text>
+  </g>
+
+  <!-- Pull Arrow 2: Grafana -> Prometheus -->
+  <g>
+    <text x="612" y="104" font-size="11.5" font-weight="700" fill="#047857" text-anchor="middle">PromQL</text>
+    <line x1="644" y1="115" x2="582" y2="115" stroke="#059669" stroke-width="2.2" marker-end="url(#arrow-emerald)"/>
+    <text x="612" y="132" font-size="10.5" fill="#64748b" text-anchor="middle">查询聚合</text>
+  </g>
+
+  <!-- Card 3: Grafana -->
+  <g>
+    <rect x="646" y="78" width="236" height="84" rx="9" fill="#ecfdf5" stroke="#34d399" stroke-width="1.4"/>
+    <text x="660" y="101" class="card-t" fill="#065f46">Grafana 看板</text>
+    <rect x="810" y="86" width="60" height="20" rx="10" fill="#d1fae5" stroke="#6ee7b7"/>
+    <text x="840" y="100" class="pill" fill="#065f46">可视化</text>
+    <text x="660" y="121" class="card-b">• rate() 计算吞吐（tok/s）</text>
+    <text x="660" y="137" class="card-b">• histogram_quantile 算 p95</text>
+    <text x="660" y="153" class="card-b">• 按 [5m] 滑动窗口绘制曲线</text>
+  </g>
+
+  <!-- Troubleshooting First Checkpoints -->
+  <line x1="156" y1="162" x2="156" y2="174" stroke="#d97706" stroke-width="1.4" stroke-dasharray="3 2"/>
+  <rect x="38" y="174" width="236" height="44" rx="7" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="50" y="192" class="chk-t">排障检查①：<tspan class="mono">curl /metrics</tspan></text>
+  <text x="50" y="209" class="chk-s">核对端口连通与原始指标是否输出</text>
+
+  <line x1="460" y1="162" x2="460" y2="174" stroke="#d97706" stroke-width="1.4" stroke-dasharray="3 2"/>
+  <rect x="342" y="174" width="236" height="44" rx="7" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="354" y="192" class="chk-t">排障检查②：<tspan class="mono">:9090/targets</tspan></text>
+  <text x="354" y="209" class="chk-s">核对状态 UP/DOWN、报错与抓取耗时</text>
+
+  <line x1="764" y1="162" x2="764" y2="174" stroke="#d97706" stroke-width="1.4" stroke-dasharray="3 2"/>
+  <rect x="646" y="174" width="236" height="44" rx="7" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="658" y="192" class="chk-t">排障检查③：PromQL 与 <tspan class="mono">model_name</tspan></text>
+  <text x="658" y="209" class="chk-s">核对标签过滤、sum by(le) 与窗口长度</text>
+
+  <!-- ==================== BOTTOM HALF: HISTOGRAM LE BUCKETS & P95 ==================== -->
+  <rect x="38" y="230" width="844" height="182" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+
+  <!-- Left Chart: Cumulative Histogram Bars -->
+  <text x="54" y="252" font-size="13.5" font-weight="700" fill="#1e293b">Histogram 累计延迟桶（_bucket，窗口样本 N = 1000）</text>
+
+  <!-- Axes & Grid (y: 270 [100%] to 380 [0%], height=110px) -->
+  <line x1="94" y1="270" x2="528" y2="270" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="94" y1="325" x2="528" y2="325" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="94" y1="380" x2="532" y2="380" stroke="#94a3b8" stroke-width="1.5"/>
+  <line x1="94" y1="266" x2="94" y2="380" stroke="#94a3b8" stroke-width="1.5"/>
+
+  <text x="86" y="274" class="tick mono" text-anchor="end">100%</text>
+  <text x="86" y="329" class="tick mono" text-anchor="end">50%</text>
+  <text x="86" y="384" class="tick mono" text-anchor="end">0%</text>
+
+  <!-- Cumulative Bars (width=52, step=70, x=112..462) -->
+  <!-- 0.05s: 12% -> h=13.2, y=366.8 -->
+  <rect x="112" y="366.8" width="52" height="13.2" rx="3" fill="#c7d2fe" stroke="#818cf8"/>
+  <text x="138" y="361" class="bar-lbl mono" fill="#4f46e5">12%</text>
+  <text x="138" y="396" class="tick mono" text-anchor="middle">≤0.05s</text>
+
+  <!-- 0.10s: 42% -> h=46.2, y=333.8 -->
+  <rect x="182" y="333.8" width="52" height="46.2" rx="3" fill="#c7d2fe" stroke="#818cf8"/>
+  <text x="208" y="328" class="bar-lbl mono" fill="#4f46e5">42%</text>
+  <text x="208" y="396" class="tick mono" text-anchor="middle">≤0.10s</text>
+
+  <!-- 0.25s: 76% -> h=83.6, y=296.4 -->
+  <rect x="252" y="296.4" width="52" height="83.6" rx="3" fill="#c7d2fe" stroke="#818cf8"/>
+  <text x="278" y="291" class="bar-lbl mono" fill="#4f46e5">76%</text>
+  <text x="278" y="396" class="tick mono" text-anchor="middle">≤0.25s</text>
+
+  <!-- 0.50s: 91% -> h=100.1, y=279.9 -->
+  <rect x="322" y="279.9" width="52" height="100.1" rx="3" fill="#a5b4fc" stroke="#6366f1"/>
+  <text x="348" y="296" class="bar-lbl mono" fill="#312e81">91%</text>
+  <text x="348" y="396" class="tick mono" text-anchor="middle">≤0.50s</text>
+
+  <!-- 1.00s: 98% -> h=107.8, y=272.2 (TARGET BUCKET! Highlight incremental 91%..98% band) -->
+  <rect x="392" y="272.2" width="52" height="107.8" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.8"/>
+  <!-- Highlighted increment slice (91%..98%, y=272.2..279.9) -->
+  <rect x="393" y="273" width="50" height="7" fill="#f59e0b" opacity="0.55"/>
+  <text x="418" y="296" class="bar-lbl mono" fill="#92400e">98%</text>
+  <text x="418" y="396" font-size="11" font-weight="700" class="mono" fill="#b45309" text-anchor="middle">≤1.00s ★</text>
+
+  <!-- +Inf: 100% -> h=110, y=270 -->
+  <rect x="462" y="270" width="52" height="110" rx="3" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="488" y="296" class="bar-lbl mono" fill="#475569">100%</text>
+  <text x="488" y="396" class="tick mono" text-anchor="middle">+Inf</text>
+
+  <!-- p95 horizontal dashed line at 95% (y = 380 - 0.95*110 = 275.5) -->
+  <line x1="94" y1="275.5" x2="528" y2="275.5" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <circle cx="418" cy="275.5" r="4" fill="#dc2626" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="108" y="261" width="168" height="18" rx="4" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="192" y="273.5" font-size="10.5" font-weight="700" fill="#dc2626" text-anchor="middle">p95 = 95% 线（第 950 样本）</text>
+
+  <!-- Right Card: p95 Interpolation Formula & Caveat -->
+  <g>
+    <rect x="548" y="244" width="320" height="156" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="564" y="266" font-size="13.5" font-weight="700" fill="#1e293b">p95 落桶与线性插值直觉</text>
+
+    <text x="564" y="287" font-size="12" fill="#334155">① 定位落桶：累计占比 91% &lt; 95% ≤ 98%</text>
+    <text x="564" y="305" font-size="12" font-weight="700" fill="#b45309">   → p95 落在 (0.50s, 1.00s] 桶区间</text>
+
+    <rect x="564" y="315" width="288" height="40" rx="6" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="574" y="332" font-size="11.5" class="mono" fill="#92400e">p95 = 0.50 + (950−910)/(980−910)×0.50</text>
+    <text x="574" y="349" font-size="12" font-weight="700" class="mono" fill="#b45309">    ≈ 0.79 s（假定桶内均匀分布）</text>
+
+    <text x="564" y="374" font-size="11.5" font-weight="700" fill="#dc2626">风险提醒：histogram_quantile 只插值不验样本量！</text>
+    <text x="564" y="391" font-size="11" fill="#64748b">窗口内 _count 过少或桶边界过宽时，p95 结论会失真。</text>
+  </g>
+
+  <!-- Bottom takeaway -->
+  <rect x="38" y="422" width="844" height="24" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="50" y="438" class="note"><tspan font-weight="700" fill="#1e293b">排障口诀：</tspan>看板无数据或曲线异常时，按 ① <tspan class="mono">curl /metrics</tspan> → ② <tspan class="mono">:9090/targets</tspan> → ③ PromQL 与样本量逐段排查。</text>
+</svg>

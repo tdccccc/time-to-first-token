@@ -1,0 +1,270 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 510" role="img" aria-label="FlashAttention 片上数据流、Online Softmax 递推状态更新环与 Causal Mask 4×4 分块方阵：左半展示 Q_i 驻留 SRAM、K_j/V_j 逐块流入，S_ij 与 P_ij 永不写回 HBM，下方框出 m_new、α 及 l/Õ 同步缩放环；右半展示 4×4 因果分块中下三角全保留、对角线逐元素 mask、上三角整块跳过节省约 50% 计算">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 13.5px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12px; font-weight: 700; }
+    .body { font-size: 11px; fill: #334155; }
+    .tiny { font-size: 10px; fill: #64748b; }
+    .pill { font-size: 11px; font-weight: 700; }
+    .blk { font-size: 11px; font-weight: 700; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3f51b5"/>
+    </marker>
+    <marker id="arr-sky" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#0284c7"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#d97706"/>
+    </marker>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="510" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">FlashAttention：SRAM 片上融合、Online Softmax 与因果跳过</text>
+  <text x="36" y="62" class="sub">左：Q_i 驻留片上、K_j/V_j 逐块流入，中间矩阵 S/P 永不落盘 HBM；右：因果分块剪枝省去 ~50% 计算。</text>
+
+  <!-- ==================== LEFT PANEL: SRAM DATAFLOW + ONLINE SOFTMAX ==================== -->
+  <rect x="36" y="78" width="516" height="388" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.3"/>
+  <rect x="52" y="92" width="146" height="22" rx="11" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="125" y="107" class="pill" fill="#3f51b5" text-anchor="middle">片上数据流与递推</text>
+  <text x="208" y="108" class="body" fill="#dc2626" style="font-weight:700">S_ij、P_ij 永不写回 HBM（省 O(N²) 读写）</text>
+
+  <!-- Tier 1: HBM -->
+  <rect x="52" y="122" width="484" height="60" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="64" y="139" class="h3" fill="#475569">HBM（全局显存：大容量 · 相对低带宽）</text>
+
+  <!-- HBM Q, K, V, O blocks aligned to exact SRAM columns below -->
+  <rect x="64"  y="146" width="60" height="28" rx="5" fill="#eef2ff" stroke="#6366f1" stroke-width="1.3"/>
+  <text x="94"  y="164" class="blk mono" fill="#312e81" text-anchor="middle">Q [Q_i]</text>
+
+  <rect x="138" y="146" width="58" height="28" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.3"/>
+  <text x="167" y="164" class="blk mono" fill="#0c4a6e" text-anchor="middle">K [K_j]</text>
+
+  <rect x="384" y="146" width="58" height="28" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.3"/>
+  <text x="413" y="164" class="blk mono" fill="#065f46" text-anchor="middle">V [V_j]</text>
+
+  <rect x="462" y="146" width="62" height="28" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+  <text x="493" y="164" class="blk mono" fill="#92400e" text-anchor="middle">O [O_i]</text>
+
+  <!-- Tier 2: On-chip SRAM (drawn before cross-tier arrows so arrows & arrowheads render on top) -->
+  <rect x="52" y="212" width="484" height="114" rx="8" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+  <text x="290" y="229" class="h3" fill="#0369a1" text-anchor="middle">On-chip SRAM（片上融合 · 零落盘）</text>
+
+  <!-- HBM <-> SRAM Vertical Arrows (Zero crossings!) -->
+  <!-- Q -> Q_i -->
+  <line x1="94"  y1="174" x2="94"  y2="240" stroke="#3f51b5" stroke-width="1.8" marker-end="url(#arr-indigo)"/>
+  <text x="99"  y="200" class="tiny" fill="#3f51b5" style="font-weight:600">载入1次</text>
+
+  <!-- K -> K_j -->
+  <line x1="167" y1="174" x2="167" y2="240" stroke="#0284c7" stroke-width="1.8" marker-end="url(#arr-sky)"/>
+  <text x="172" y="200" class="tiny" fill="#0284c7" style="font-weight:600">逐块流入</text>
+
+  <!-- V -> V_j -->
+  <line x1="413" y1="174" x2="413" y2="240" stroke="#059669" stroke-width="1.8" marker-end="url(#arr-emerald)"/>
+  <text x="408" y="200" class="tiny" fill="#059669" text-anchor="end" style="font-weight:600">逐块流入</text>
+
+  <!-- SRAM -> O -->
+  <path d="M 442 300 L 493 300 L 493 178" fill="none" stroke="#d97706" stroke-width="1.8" marker-end="url(#arr-amber)"/>
+  <text x="488" y="200" class="tiny" fill="#b45309" text-anchor="end" style="font-weight:600">最终写回</text>
+
+  <!-- Q_i resident block -->
+  <rect x="64" y="244" width="60" height="70" rx="6" fill="#eef2ff" stroke="#3f51b5" stroke-width="1.6"/>
+  <text x="94" y="271" class="blk mono" fill="#312e81" text-anchor="middle">Q_i</text>
+  <text x="94" y="289" class="tiny" fill="#4338ca" text-anchor="middle" style="font-weight:700">驻留不动</text>
+  <text x="94" y="304" class="tiny" fill="#64748b" text-anchor="middle">(外循环)</text>
+
+  <!-- K_j streaming block -->
+  <rect x="138" y="244" width="58" height="28" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+  <text x="167" y="262" class="blk mono" fill="#0c4a6e" text-anchor="middle">K_j</text>
+
+  <!-- Connector Q_i + K_j -> S_ij -->
+  <line x1="124" y1="258" x2="136" y2="258" stroke="#3f51b5" stroke-width="1.4"/>
+  <line x1="196" y1="258" x2="210" y2="258" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr-slate)"/>
+
+  <!-- S_ij = Q_i K_j^T -->
+  <rect x="214" y="244" width="76" height="28" rx="5" fill="#ffffff" stroke="#f43f5e" stroke-width="1.3" stroke-dasharray="3,2"/>
+  <text x="252" y="262" class="mono" style="font-size:10.5px;font-weight:700;fill:#be123c" text-anchor="middle">S_ij=QKᵀ</text>
+
+  <line x1="290" y1="258" x2="302" y2="258" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr-slate)"/>
+
+  <!-- P_ij = exp(S_ij - m) -->
+  <rect x="306" y="244" width="66" height="28" rx="5" fill="#ffffff" stroke="#f43f5e" stroke-width="1.3" stroke-dasharray="3,2"/>
+  <text x="339" y="262" class="mono" style="font-size:10.5px;font-weight:700;fill:#be123c" text-anchor="middle">P_ij</text>
+
+  <!-- V_j streaming block -->
+  <rect x="384" y="244" width="58" height="28" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.4"/>
+  <text x="413" y="262" class="blk mono" fill="#065f46" text-anchor="middle">V_j</text>
+
+  <!-- P_ij and V_j feed down into O_tilde -->
+  <line x1="339" y1="272" x2="339" y2="283" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr-slate)"/>
+  <line x1="413" y1="272" x2="413" y2="283" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-emerald)"/>
+
+  <!-- Note on S_ij, P_ij never written back -->
+  <text x="212" y="302" class="tiny" fill="#be123c" text-anchor="middle" style="font-weight:700">虚线块仅存 SRAM</text>
+  <text x="212" y="315" class="tiny" fill="#be123c" text-anchor="middle">用完即弃、零落盘</text>
+
+  <!-- O_tilde Accumulator -->
+  <rect x="298" y="286" width="144" height="28" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+  <text x="370" y="304" class="mono" style="font-size:10.5px;font-weight:700;fill:#92400e" text-anchor="middle">Õ ← α·Õ + P_ij·V_j</text>
+
+  <!-- Tier 3: Online Softmax State Update Loop -->
+  <rect x="52" y="338" width="484" height="116" rx="8" fill="#fffbeb" stroke="#fde68a" stroke-width="1.3"/>
+  <text x="66" y="357" class="h3" fill="#92400e">Online Softmax 递推状态更新环（单趟精确归一化，无需两遍扫 K）</text>
+
+  <!-- Step 1 -->
+  <rect x="64" y="368" width="136" height="44" rx="6" fill="#ffffff" stroke="#f59e0b" stroke-width="1.3"/>
+  <text x="132" y="385" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">① 更新行最大值</text>
+  <text x="132" y="403" class="mono" style="font-size:10.5px;font-weight:700;fill:#1e293b" text-anchor="middle">m_new = max(m, m_b)</text>
+
+  <line x1="200" y1="390" x2="215" y2="390" stroke="#d97706" stroke-width="1.8" marker-end="url(#arr-amber)"/>
+
+  <!-- Step 2 -->
+  <rect x="219" y="368" width="134" height="44" rx="6" fill="#ffffff" stroke="#f59e0b" stroke-width="1.3"/>
+  <text x="286" y="385" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">② 计算重标定因子</text>
+  <text x="286" y="403" class="mono" style="font-size:10.5px;font-weight:700;fill:#1e293b" text-anchor="middle">α = exp(m − m_new)</text>
+
+  <line x1="353" y1="390" x2="368" y2="390" stroke="#059669" stroke-width="1.8" marker-end="url(#arr-emerald)"/>
+
+  <!-- Step 3 -->
+  <rect x="372" y="368" width="152" height="44" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.4"/>
+  <text x="448" y="385" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">③ 同步缩放 l 与 Õ</text>
+  <text x="448" y="403" class="mono" style="font-size:9.5px;font-weight:700;fill:#065f46" text-anchor="middle">l←αl+l_b; Õ←αÕ+PV</text>
+
+  <!-- Loop-back dashed arrow -->
+  <path d="M 448 412 L 448 426 L 132 426 L 132 415" fill="none" stroke="#d97706" stroke-width="1.4" stroke-dasharray="4,2" marker-end="url(#arr-amber)"/>
+  <text x="294" y="445" class="tiny" fill="#92400e" text-anchor="middle" style="font-weight:600">内层遍历全部 (K_j, V_j) 块后，末步归一化 O_i = Õ / l 写回 HBM</text>
+
+  <!-- ==================== RIGHT PANEL: CAUSAL MASK 4x4 BLOCK MATRIX ==================== -->
+  <rect x="568" y="78" width="316" height="388" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.3"/>
+  <rect x="584" y="92" width="144" height="22" rx="11" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="656" y="107" class="pill" fill="#059669" text-anchor="middle">Causal Mask 4×4 分块</text>
+  <text x="738" y="108" class="body" fill="#047857" style="font-weight:700">节省 ~50% 计算</text>
+
+  <!-- Matrix Axis Labels -->
+  <text x="747" y="136" class="body" fill="#475569" text-anchor="middle" style="font-weight:700">Key 块 (K_j) →</text>
+  <g class="mono" style="font-size:11px;font-weight:700;fill:#475569" text-anchor="middle">
+    <text x="660" y="155">K0</text>
+    <text x="718" y="155">K1</text>
+    <text x="776" y="155">K2</text>
+    <text x="834" y="155">K3</text>
+  </g>
+
+  <text x="586" y="275" class="body" fill="#475569" text-anchor="middle" style="font-weight:700" transform="rotate(-90 586 275)">Query 块 (Q_i) →</text>
+  <g class="mono" style="font-size:11px;font-weight:700;fill:#475569" text-anchor="end">
+    <text x="624" y="192">Q0</text>
+    <text x="624" y="250">Q1</text>
+    <text x="624" y="308">Q2</text>
+    <text x="624" y="366">Q3</text>
+  </g>
+
+  <!-- 4x4 Grid (origin x=634, y=162, cell=52, gap=6 -> step=58) -->
+  <!-- Row 0: (0,0) diag, (0,1..3) skip -->
+  <g>
+    <!-- (0,0) Diagonal -->
+    <rect x="634" y="162" width="52" height="52" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+    <polygon points="636,164 684,212 636,212" fill="#fde68a" opacity="0.7"/>
+    <text x="660" y="185" class="blk" fill="#92400e" text-anchor="middle">逐元</text>
+    <text x="660" y="201" class="tiny mono" fill="#b45309" text-anchor="middle" style="font-weight:700">Mask</text>
+
+    <!-- (0,1), (0,2), (0,3) Skip -->
+    <rect x="692" y="162" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="718" y="185" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="718" y="201" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+
+    <rect x="750" y="162" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="776" y="185" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="776" y="201" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+
+    <rect x="808" y="162" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="834" y="185" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="834" y="201" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+  </g>
+
+  <!-- Row 1: (1,0) full, (1,1) diag, (1,2..3) skip -->
+  <g>
+    <rect x="634" y="220" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="660" y="243" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="660" y="259" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="692" y="220" width="52" height="52" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+    <polygon points="694,222 742,270 694,270" fill="#fde68a" opacity="0.7"/>
+    <text x="718" y="243" class="blk" fill="#92400e" text-anchor="middle">逐元</text>
+    <text x="718" y="259" class="tiny mono" fill="#b45309" text-anchor="middle" style="font-weight:700">Mask</text>
+
+    <rect x="750" y="220" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="776" y="243" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="776" y="259" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+
+    <rect x="808" y="220" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="834" y="243" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="834" y="259" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+  </g>
+
+  <!-- Row 2: (2,0..1) full, (2,2) diag, (2,3) skip -->
+  <g>
+    <rect x="634" y="278" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="660" y="301" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="660" y="317" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="692" y="278" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="718" y="301" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="718" y="317" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="750" y="278" width="52" height="52" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+    <polygon points="752,280 800,328 752,328" fill="#fde68a" opacity="0.7"/>
+    <text x="776" y="301" class="blk" fill="#92400e" text-anchor="middle">逐元</text>
+    <text x="776" y="317" class="tiny mono" fill="#b45309" text-anchor="middle" style="font-weight:700">Mask</text>
+
+    <rect x="808" y="278" width="52" height="52" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="834" y="301" class="blk" fill="#94a3b8" text-anchor="middle">跳过</text>
+    <text x="834" y="317" class="tiny mono" fill="#cbd5e1" text-anchor="middle">Skip</text>
+  </g>
+
+  <!-- Row 3: (3,0..2) full, (3,3) diag -->
+  <g>
+    <rect x="634" y="336" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="660" y="359" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="660" y="375" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="692" y="336" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="718" y="359" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="718" y="375" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="750" y="336" width="52" height="52" rx="6" fill="#059669" stroke="#047857" stroke-width="1.3"/>
+    <text x="776" y="359" class="blk" fill="#ffffff" text-anchor="middle">全保留</text>
+    <text x="776" y="375" class="tiny" fill="#d1fae5" text-anchor="middle">无掩码</text>
+
+    <rect x="808" y="336" width="52" height="52" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+    <polygon points="810,338 858,386 810,386" fill="#fde68a" opacity="0.7"/>
+    <text x="834" y="359" class="blk" fill="#92400e" text-anchor="middle">逐元</text>
+    <text x="834" y="375" class="tiny mono" fill="#b45309" text-anchor="middle" style="font-weight:700">Mask</text>
+  </g>
+
+  <!-- Legend & Compute Savings Box -->
+  <rect x="584" y="398" width="284" height="56" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <rect x="596" y="408" width="11" height="11" rx="2" fill="#059669"/>
+  <text x="612" y="418" class="tiny" fill="#334155" style="font-weight:600">下三角全算</text>
+  <rect x="678" y="408" width="11" height="11" rx="2" fill="#fde68a" stroke="#d97706"/>
+  <text x="694" y="418" class="tiny" fill="#334155" style="font-weight:600">对角逐元 Mask</text>
+  <rect x="780" y="408" width="11" height="11" rx="2" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="2,1"/>
+  <text x="796" y="418" class="tiny" fill="#334155" style="font-weight:600">整块跳过</text>
+
+  <text x="726" y="442" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">上三角整块直接跳过循环，长序列省去 ~50% 计算与访存</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="488" class="note">要点：FlashAttention 用 Online Softmax 在 SRAM 内单趟完成注意力，将 HBM 访存从 O(N²) 降至 O(N)，并借因果跳过再提速近倍。</text>
+</svg>

@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 440" role="img" aria-label="跨芯片精度与性能差异五步归因闭环与二分法定位收敛示意（8 候选经 3 轮收敛至 1 个根因）">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .step-t { font-size: 13px; font-weight: 700; }
+    .num { font-size: 11.5px; font-weight: 700; fill: #ffffff; }
+    .bul { font-size: 11px; font-weight: 600; fill: #1e293b; }
+    .bul-s { font-size: 10px; fill: #64748b; }
+    .foot { font-size: 10px; font-weight: 700; }
+    .loop-t { font-size: 11px; font-weight: 600; fill: #475569; }
+    .bi-hd { font-size: 13px; font-weight: 700; fill: #1e293b; }
+    .st-t { font-size: 11.5px; font-weight: 700; }
+    .st-s { font-size: 10px; fill: #64748b; }
+    .cell { font-size: 10.5px; font-weight: 700; }
+    .rnd { font-size: 10.5px; font-weight: 700; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arr-main" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#475569"/>
+    </marker>
+    <marker id="arr-loop" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-rose" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="440" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">跨芯片差异归因：五步闭环与二分法收敛</text>
+  <text x="36" y="61" class="sub">跨芯片精度或吞吐出现差异时，按量化 → 分层 → 候选 → 对照 → 沉淀闭环推进，拒绝凭体感拍脑袋。</text>
+
+  <!-- ==================== Top: 5-Step Attribution Loop ==================== -->
+  <!-- Step 1 -->
+  <rect x="36" y="78" width="156" height="128" rx="9" fill="#ffffff" stroke="#7dd3fc" stroke-width="1.3"/>
+  <path d="M36,87 a9,9 0 0 1 9,-9 h138 a9,9 0 0 1 9,9 v21 h-156 z" fill="#e0f2fe"/>
+  <circle cx="53" cy="93" r="9.5" fill="#0284c7"/>
+  <text x="53" y="97" class="num" text-anchor="middle">1</text>
+  <text x="68" y="98" class="step-t" fill="#0369a1">现象量化</text>
+  <text x="46" y="127" class="bul">• 精度配对差</text>
+  <text x="54" y="142" class="bul-s">同输入逐层误差对比</text>
+  <text x="46" y="162" class="bul">• 多并发曲线比值</text>
+  <text x="54" y="177" class="mono bul-s">TTFT / TPOT / QPS</text>
+  <text x="114" y="197" class="foot" fill="#0284c7" text-anchor="middle">先把体感变成基线数字</text>
+
+  <line x1="192" y1="142" x2="207" y2="142" stroke="#475569" stroke-width="1.6" marker-end="url(#arr-main)"/>
+
+  <!-- Step 2 -->
+  <rect x="209" y="78" width="156" height="128" rx="9" fill="#ffffff" stroke="#a5b4fc" stroke-width="1.3"/>
+  <path d="M209,87 a9,9 0 0 1 9,-9 h138 a9,9 0 0 1 9,9 v21 h-156 z" fill="#eef2ff"/>
+  <circle cx="226" cy="93" r="9.5" fill="#4f46e5"/>
+  <text x="226" y="97" class="num" text-anchor="middle">2</text>
+  <text x="241" y="98" class="step-t" fill="#3730a3">定位分层</text>
+  <text x="219" y="127" class="bul">• 四面墙 × 五层栈</text>
+  <text x="227" y="142" class="bul-s">算力/带宽/显存/通信</text>
+  <text x="219" y="162" class="bul">• Profiler 清单</text>
+  <text x="227" y="177" class="bul-s">nsys / msProf 逐项对账</text>
+  <text x="287" y="197" class="foot" fill="#4f46e5" text-anchor="middle">锁定问题所在硬件层</text>
+
+  <line x1="365" y1="142" x2="380" y2="142" stroke="#475569" stroke-width="1.6" marker-end="url(#arr-main)"/>
+
+  <!-- Step 3 -->
+  <rect x="382" y="78" width="156" height="128" rx="9" fill="#ffffff" stroke="#fcd34d" stroke-width="1.3"/>
+  <path d="M382,87 a9,9 0 0 1 9,-9 h138 a9,9 0 0 1 9,9 v21 h-156 z" fill="#fffbeb"/>
+  <circle cx="399" cy="93" r="9.5" fill="#d97706"/>
+  <text x="399" y="97" class="num" text-anchor="middle">3</text>
+  <text x="414" y="98" class="step-t" fill="#b45309">候选机制</text>
+  <text x="392" y="126" class="bul">• 量化精度与累加</text>
+  <text x="392" y="143" class="bul">• 算子回退 CPU</text>
+  <text x="392" y="160" class="bul">• KV 布局与搬运</text>
+  <text x="392" y="177" class="bul">• 调度与图编译</text>
+  <text x="460" y="197" class="foot" fill="#b45309" text-anchor="middle">列出可证伪假设清单</text>
+
+  <line x1="538" y1="142" x2="553" y2="142" stroke="#475569" stroke-width="1.6" marker-end="url(#arr-main)"/>
+
+  <!-- Step 4 -->
+  <rect x="555" y="78" width="156" height="128" rx="9" fill="#ffffff" stroke="#fca5a5" stroke-width="1.3"/>
+  <path d="M555,87 a9,9 0 0 1 9,-9 h138 a9,9 0 0 1 9,9 v21 h-156 z" fill="#fef2f2"/>
+  <circle cx="572" cy="93" r="9.5" fill="#dc2626"/>
+  <text x="572" y="97" class="num" text-anchor="middle">4</text>
+  <text x="587" y="98" class="step-t" fill="#dc2626">对照与二分</text>
+  <text x="565" y="127" class="bul">• 单点变量对照</text>
+  <text x="573" y="142" class="bul-s">每次仅切换单个开关</text>
+  <text x="565" y="162" class="bul">• 二分法验证</text>
+  <text x="573" y="177" class="bul-s">对半折减快速锁根因</text>
+  <text x="633" y="197" class="foot" fill="#dc2626" text-anchor="middle">实验实证，杜绝臆断</text>
+
+  <line x1="711" y1="142" x2="726" y2="142" stroke="#475569" stroke-width="1.6" marker-end="url(#arr-main)"/>
+
+  <!-- Step 5 -->
+  <rect x="728" y="78" width="156" height="128" rx="9" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.3"/>
+  <path d="M728,87 a9,9 0 0 1 9,-9 h138 a9,9 0 0 1 9,9 v21 h-156 z" fill="#ecfdf5"/>
+  <circle cx="745" cy="93" r="9.5" fill="#059669"/>
+  <text x="745" y="97" class="num" text-anchor="middle">5</text>
+  <text x="760" y="98" class="step-t" fill="#047857">结论沉淀</text>
+  <text x="738" y="127" class="bul">• 写明适用边界</text>
+  <text x="746" y="142" class="bul-s">芯片/版本/序列/并发</text>
+  <text x="738" y="162" class="bul">• 沉淀回归用例</text>
+  <text x="746" y="177" class="bul-s">接入基线与持续守护</text>
+  <text x="806" y="197" class="foot" fill="#047857" text-anchor="middle">版本升级即重验结论</text>
+
+  <!-- Closed Loop Return Path (5 -> 1) -->
+  <path d="M806,206 L806,232 L114,232 L114,209" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-loop)"/>
+  <rect x="296" y="221" width="328" height="22" rx="11" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="460" y="236" class="loop-t" text-anchor="middle">归因闭环：驱动 / 框架 / 模型版本变更后重跑 ①→⑤ 复验</text>
+
+  <!-- ==================== Bottom: Bisection Convergence (8 -> 4 -> 2 -> 1) ==================== -->
+  <rect x="36" y="256" width="848" height="140" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.3"/>
+  <text x="52" y="279" class="bi-hd">步骤 ④ 展开：二分法定位收敛示意（8 个候选算子 / 开关 → log₂8 = 3 轮精准收敛）</text>
+
+  <!-- Stage 0: 8 candidates -->
+  <rect x="52" y="292" width="176" height="88" rx="7" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="140" y="311" class="st-t" fill="#334155" text-anchor="middle">初始：8 个候选</text>
+  <g transform="translate(61,322)">
+    <rect x="0" y="0" width="17" height="24" rx="3" fill="#e0e7ff" stroke="#818cf8"/>
+    <text x="8.5" y="16" class="mono cell" fill="#3730a3" text-anchor="middle">1</text>
+    <rect x="20" y="0" width="17" height="24" rx="3" fill="#e0e7ff" stroke="#818cf8"/>
+    <text x="28.5" y="16" class="mono cell" fill="#3730a3" text-anchor="middle">2</text>
+    <rect x="40" y="0" width="17" height="24" rx="3" fill="#e0e7ff" stroke="#818cf8"/>
+    <text x="48.5" y="16" class="mono cell" fill="#3730a3" text-anchor="middle">3</text>
+    <rect x="60" y="0" width="17" height="24" rx="3" fill="#e0e7ff" stroke="#818cf8"/>
+    <text x="68.5" y="16" class="mono cell" fill="#3730a3" text-anchor="middle">4</text>
+    <rect x="81" y="0" width="17" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="89.5" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">5</text>
+    <rect x="101" y="0" width="17" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="109.5" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">6</text>
+    <rect x="121" y="0" width="17" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="129.5" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">7</text>
+    <rect x="141" y="0" width="17" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="149.5" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">8</text>
+  </g>
+  <text x="140" y="368" class="st-s" text-anchor="middle">对半切分：[1–4] vs [5–8]</text>
+
+  <!-- Round 1 arrow -->
+  <line x1="228" y1="336" x2="276" y2="336" stroke="#dc2626" stroke-width="1.8" marker-end="url(#arr-rose)"/>
+  <text x="252" y="324" class="rnd" fill="#dc2626" text-anchor="middle">第 1 轮</text>
+  <text x="252" y="352" class="st-s" text-anchor="middle">右半异常</text>
+
+  <!-- Stage 1: 4 candidates -->
+  <rect x="279" y="292" width="146" height="88" rx="7" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="352" y="311" class="st-t" fill="#b45309" text-anchor="middle">剩余：4 个候选</text>
+  <g transform="translate(295,322)">
+    <rect x="0" y="0" width="24" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="12" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">5</text>
+    <rect x="30" y="0" width="24" height="24" rx="3" fill="#fee2e2" stroke="#f87171"/>
+    <text x="42" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">6</text>
+    <rect x="60" y="0" width="24" height="24" rx="3" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="72" y="16" class="mono cell" fill="#92400e" text-anchor="middle">7</text>
+    <rect x="90" y="0" width="24" height="24" rx="3" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="102" y="16" class="mono cell" fill="#92400e" text-anchor="middle">8</text>
+  </g>
+  <text x="352" y="368" class="st-s" text-anchor="middle">排除 1–4，再二分</text>
+
+  <!-- Round 2 arrow -->
+  <line x1="425" y1="336" x2="473" y2="336" stroke="#dc2626" stroke-width="1.8" marker-end="url(#arr-rose)"/>
+  <text x="449" y="324" class="rnd" fill="#dc2626" text-anchor="middle">第 2 轮</text>
+  <text x="449" y="352" class="st-s" text-anchor="middle">左半异常</text>
+
+  <!-- Stage 2: 2 candidates -->
+  <rect x="476" y="292" width="128" height="88" rx="7" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="540" y="311" class="st-t" fill="#dc2626" text-anchor="middle">剩余：2 个候选</text>
+  <g transform="translate(500,322)">
+    <rect x="0" y="0" width="34" height="24" rx="4" fill="#fee2e2" stroke="#ef4444"/>
+    <text x="17" y="16" class="mono cell" fill="#b91c1c" text-anchor="middle">5</text>
+    <rect x="46" y="0" width="34" height="24" rx="4" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="63" y="16" class="mono cell" fill="#475569" text-anchor="middle">6</text>
+  </g>
+  <text x="540" y="368" class="st-s" text-anchor="middle">排除 7–8，终判</text>
+
+  <!-- Round 3 arrow -->
+  <line x1="604" y1="336" x2="652" y2="336" stroke="#059669" stroke-width="1.8" marker-end="url(#arr-green)"/>
+  <text x="628" y="324" class="rnd" fill="#059669" text-anchor="middle">第 3 轮</text>
+  <text x="628" y="352" class="st-s" fill="#047857" text-anchor="middle">锁定单点</text>
+
+  <!-- Stage 3: 1 root cause -->
+  <rect x="655" y="292" width="213" height="88" rx="7" fill="#ecfdf5" stroke="#10b981" stroke-width="1.6"/>
+  <text x="761" y="311" class="st-t" fill="#047857" text-anchor="middle">收敛：锁定唯一根因</text>
+  <rect x="725" y="322" width="72" height="24" rx="5" fill="#059669"/>
+  <text x="761" y="338" class="mono cell" fill="#ffffff" text-anchor="middle">根因 #5</text>
+  <text x="761" y="368" class="st-s" fill="#065f46" text-anchor="middle">3 轮收敛 · 无需 8 次穷举</text>
+
+  <!-- Bottom takeaway -->
+  <text x="36" y="418" class="note">归因铁律：无量化基线的差异无法复现；无单点对照的解释只是猜测；无适用边界的跨芯片结论一旦换版本或负载就会失效。</text>
+</svg>

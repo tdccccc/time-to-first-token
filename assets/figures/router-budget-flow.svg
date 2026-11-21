@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 450" role="img" aria-label="预算网关与多后端智能路由全链路：客户端请求先在预算网关原子预留 reserve 最大 token 预算，经智能路由器按输入长度、复杂度与队列深度分流至 8B 或 70B 模型，带超时熔断与降级路径，响应返回后执行 settle 精准结算退还差额">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 14px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12px; font-weight: 700; }
+    .body { font-size: 11.5px; fill: #334155; }
+    .tiny { font-size: 10.5px; fill: #64748b; }
+    .pill { font-size: 10.5px; font-weight: 700; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3f51b5"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-sky" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#0284c7"/>
+    </marker>
+    <marker id="arr-rose" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="450" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">预算网关与多后端智能路由全链路</text>
+  <text x="36" y="62" class="sub">请求入口先原子预留最大 token 预算，经智能路由按特征分流并支持熔断降级，响应完成后按实耗精准结算。</text>
+
+  <!-- ==================== 1. CLIENT NODE ==================== -->
+  <rect x="36" y="166" width="100" height="110" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="86" y="198" class="h2" text-anchor="middle">客户端请求</text>
+  <text x="86" y="220" class="tiny mono" text-anchor="middle">prompt +</text>
+  <text x="86" y="236" class="tiny mono" text-anchor="middle">max_tokens</text>
+  <rect x="50" y="248" width="72" height="18" rx="9" fill="#e2e8f0"/>
+  <text x="86" y="261" class="tiny" fill="#475569" text-anchor="middle" style="font-weight:600">流式 SSE</text>
+
+  <!-- Client <-> Gateway Arrows -->
+  <line x1="136" y1="192" x2="168" y2="192" stroke="#64748b" stroke-width="1.8" marker-end="url(#arr-slate)"/>
+  <text x="152" y="184" class="tiny" fill="#475569" text-anchor="middle">请求</text>
+
+  <line x1="172" y1="256" x2="140" y2="256" stroke="#059669" stroke-width="1.8" marker-end="url(#arr-emerald)"/>
+  <text x="156" y="272" class="tiny" fill="#047857" text-anchor="middle">返回</text>
+
+  <!-- ==================== 2. QUOTA LEDGER + BUDGET GATEWAY ==================== -->
+  <!-- Ledger pill above gateway -->
+  <rect x="172" y="82" width="170" height="28" rx="7" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
+  <text x="257" y="100" class="tiny" fill="#334155" text-anchor="middle" style="font-weight:600">租户配额账本 (Redis / Lua)</text>
+  <line x1="242" y1="126" x2="242" y2="112" stroke="#d97706" stroke-width="1.3" marker-end="url(#arr-amber)"/>
+  <line x1="272" y1="110" x2="272" y2="124" stroke="#059669" stroke-width="1.3" marker-end="url(#arr-emerald)"/>
+
+  <!-- Budget Gateway Main Box -->
+  <rect x="172" y="126" width="170" height="172" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+  <text x="257" y="148" class="h2" fill="#92400e" text-anchor="middle">预算网关</text>
+
+  <!-- Sub-box A: Atomic Reserve -->
+  <rect x="184" y="158" width="146" height="64" rx="7" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
+  <text x="257" y="176" class="h3" fill="#b45309" text-anchor="middle">① 原子预留 reserve</text>
+  <text x="257" y="195" class="tiny" fill="#475569" text-anchor="middle">锁定 in + max_tokens</text>
+  <text x="257" y="212" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:600">余额不足 → 429 拒流</text>
+
+  <!-- Sub-box B: Accurate Settle -->
+  <rect x="184" y="230" width="146" height="58" rx="7" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.2"/>
+  <text x="257" y="248" class="h3" fill="#047857" text-anchor="middle">④ 精准结算 settle</text>
+  <text x="257" y="266" class="tiny" fill="#065f46" text-anchor="middle">按实耗扣费，退还</text>
+  <text x="257" y="281" class="tiny" fill="#065f46" text-anchor="middle">(预留 − 实耗) 多余差额</text>
+
+  <!-- Gateway -> Router Arrow -->
+  <line x1="342" y1="190" x2="378" y2="190" stroke="#3f51b5" stroke-width="2" marker-end="url(#arr-indigo)"/>
+  <text x="360" y="182" class="tiny" fill="#3f51b5" text-anchor="middle" style="font-weight:600">放行</text>
+
+  <!-- ==================== 3. SMART ROUTER ==================== -->
+  <rect x="382" y="126" width="166" height="172" rx="10" fill="#eef2ff" stroke="#3f51b5" stroke-width="1.6"/>
+  <text x="465" y="149" class="h2" fill="#1e293b" text-anchor="middle">多后端智能路由器</text>
+  <text x="465" y="167" class="tiny" fill="#4338ca" text-anchor="middle" style="font-weight:600">② 多维度实时分流决策</text>
+
+  <rect x="396" y="178" width="138" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+  <text x="465" y="197" class="body" text-anchor="middle">输入长度 (Prompt Len)</text>
+
+  <rect x="396" y="216" width="138" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+  <text x="465" y="235" class="body" text-anchor="middle">任务复杂度 / 分类器</text>
+
+  <rect x="396" y="254" width="138" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+  <text x="465" y="273" class="body" text-anchor="middle">队列深度与实时 TTFT</text>
+
+  <!-- ==================== 4. MODEL BACKENDS + FALLBACK ==================== -->
+  <!-- Split Arrows from Router -->
+  <path d="M 548 184 L 588 184 L 588 136 L 630 136" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#arr-emerald)"/>
+  <text x="590" y="126" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">简单 / 短文</text>
+
+  <path d="M 548 242 L 588 242 L 588 280 L 630 280" fill="none" stroke="#0284c7" stroke-width="2" marker-end="url(#arr-sky)"/>
+  <text x="590" y="298" class="tiny" fill="#0369a1" text-anchor="middle" style="font-weight:700">复杂 / 长文</text>
+
+  <!-- Upper Backend: Lightweight Fast Model 8B -->
+  <rect x="634" y="88" width="224" height="96" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.6"/>
+  <rect x="648" y="100" width="76" height="20" rx="10" fill="#d1fae5"/>
+  <text x="686" y="114" class="pill" fill="#047857" text-anchor="middle">低延迟高吞吐</text>
+  <text x="732" y="115" class="h2" fill="#065f46">轻量模型 8B</text>
+  <text x="648" y="143" class="body" fill="#334155">• 短输入 / 简单问答 / 摘要提取</text>
+  <text x="648" y="166" class="tiny" fill="#047857" style="font-weight:600">单价极低 · 极速首字 · 降级兜底</text>
+
+  <!-- Circuit Breaker & Fallback Arrow (70B -> 8B) -->
+  <rect x="638" y="196" width="182" height="24" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.2"/>
+  <text x="729" y="212" class="pill" fill="#dc2626" text-anchor="middle">⚡ 超时熔断 / 队满降级至 8B</text>
+  <line x1="834" y1="232" x2="834" y2="188" stroke="#dc2626" stroke-width="2.2" stroke-dasharray="5,3" marker-end="url(#arr-rose)"/>
+
+  <!-- Lower Backend: High-Capability Large Model 70B -->
+  <rect x="634" y="232" width="224" height="96" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.6"/>
+  <rect x="648" y="244" width="76" height="20" rx="10" fill="#bae6fd"/>
+  <text x="686" y="258" class="pill" fill="#0369a1" text-anchor="middle">高推理能力</text>
+  <text x="732" y="259" class="h2" fill="#0c4a6e">大模型 70B</text>
+  <text x="648" y="287" class="body" fill="#334155">• 长上下文 / 复杂推理 / 代码生成</text>
+  <text x="648" y="310" class="tiny" fill="#0369a1" style="font-weight:600">单价较高 · 队满或超时触发熔断</text>
+
+  <!-- ==================== 5. RETURN & SETTLEMENT LOOP ==================== -->
+  <!-- Collector lines from 8B & 70B to bottom settle rail -->
+  <path d="M 858 136 L 878 136 L 878 368 L 257 368 L 257 302" fill="none" stroke="#059669" stroke-width="2" marker-end="url(#arr-emerald)"/>
+  <line x1="858" y1="280" x2="878" y2="280" stroke="#059669" stroke-width="2"/>
+  <circle cx="878" cy="280" r="3.5" fill="#059669"/>
+
+  <!-- Status Pill on Return Rail -->
+  <rect x="434" y="354" width="320" height="28" rx="14" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1.2"/>
+  <text x="594" y="372" class="body" fill="#047857" text-anchor="middle" style="font-weight:700">③ 响应流式完成：上报实际 usage (in + out tokens)</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="428" class="note">要点：先原子 reserve 后精准 settle 可彻底杜绝并发透支；智能路由与超时熔断降级共同守住成本上限与尾延迟 SLO。</text>
+</svg>

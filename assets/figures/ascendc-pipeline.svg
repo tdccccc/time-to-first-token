@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 460" role="img" aria-label="AscendC 三级硬件流水对比：单缓冲串行台阶（总耗时 3n）与双缓冲 BUFFER_NUM=2 经 TQue 交接实现流水重叠（总耗时 n+2，代价 UB 翻倍）">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .panel-hd { font-size: 13.5px; font-weight: 700; }
+    .badge { font-size: 11.5px; font-weight: 700; }
+    .lane { font-size: 11px; font-weight: 700; }
+    .lane-s { font-size: 9.5px; fill: #64748b; }
+    .blk { font-size: 10.5px; font-weight: 700; }
+    .blk-s { font-size: 9.5px; }
+    .tick { font-size: 10.5px; fill: #64748b; }
+    .call-t { font-size: 11.5px; font-weight: 700; fill: #b45309; }
+    .call-s { font-size: 10.5px; fill: #334155; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="460" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">AscendC 三级硬件流水：单缓冲 vs 双缓冲</text>
+  <text x="36" y="61" class="sub">MTE2、VEC、MTE3 为独立硬件单元；双缓冲（BUFFER_NUM=2）靠 TQue 交接掩盖访存，代价为 UB 占用翻倍。</text>
+
+  <!-- ==================== Top Panel: Single Buffer (Serial Steps, 3n) ==================== -->
+  <rect x="36" y="76" width="848" height="154" rx="10" fill="#ffffff" stroke="#fecaca" stroke-width="1.3"/>
+  <text x="52" y="98" class="panel-hd" fill="#1e293b">单缓冲（BUFFER_NUM = 1）：单块 UB 互斥串行台阶</text>
+  <rect x="734" y="83" width="136" height="22" rx="5" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="802" y="98" class="badge" fill="#dc2626" text-anchor="middle">总耗时 = 3n 拍</text>
+
+  <!-- Lane headers (top) -->
+  <rect x="50" y="110" width="156" height="28" rx="5" fill="#f0f9ff" stroke="#bae6fd"/>
+  <text x="60" y="128" class="mono lane" fill="#0369a1">MTE2</text>
+  <text x="98" y="128" class="lane-s">GM→UB CopyIn</text>
+
+  <rect x="50" y="144" width="156" height="28" rx="5" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="60" y="162" class="mono lane" fill="#3730a3">VEC</text>
+  <text x="98" y="162" class="lane-s">UB Compute</text>
+
+  <rect x="50" y="178" width="156" height="28" rx="5" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="60" y="196" class="mono lane" fill="#047857">MTE3</text>
+  <text x="98" y="196" class="lane-s">UB→GM CopyOut</text>
+
+  <!-- Vertical gridlines for t0..t8 (x = 216 + i*72, w=66) -->
+  <g stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3">
+    <line x1="285" y1="108" x2="285" y2="208"/>
+    <line x1="357" y1="108" x2="357" y2="208"/>
+    <line x1="429" y1="108" x2="429" y2="208"/>
+    <line x1="501" y1="108" x2="501" y2="208"/>
+    <line x1="573" y1="108" x2="573" y2="208"/>
+    <line x1="645" y1="108" x2="645" y2="208"/>
+    <line x1="717" y1="108" x2="717" y2="208"/>
+    <line x1="789" y1="108" x2="789" y2="208"/>
+  </g>
+
+  <!-- Idle bubble showing serialization bottleneck -->
+  <rect x="288" y="110" width="138" height="28" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="4 3"/>
+  <text x="357" y="128" class="lane-s" fill="#94a3b8" text-anchor="middle">闲置：等 T0 释放 UB</text>
+
+  <rect x="504" y="110" width="138" height="28" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="4 3"/>
+  <text x="573" y="128" class="lane-s" fill="#94a3b8" text-anchor="middle">闲置：等 T1 释放 UB</text>
+
+  <!-- Tile 0 steps -->
+  <rect x="216" y="110" width="66" height="28" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="249" y="128" class="mono blk" fill="#0369a1" text-anchor="middle">T0 In</text>
+
+  <rect x="288" y="144" width="66" height="28" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="321" y="162" class="mono blk" fill="#3730a3" text-anchor="middle">T0 VEC</text>
+
+  <rect x="360" y="178" width="66" height="28" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="393" y="196" class="mono blk" fill="#047857" text-anchor="middle">T0 Out</text>
+
+  <!-- Tile 1 steps -->
+  <rect x="432" y="110" width="66" height="28" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="465" y="128" class="mono blk" fill="#0369a1" text-anchor="middle">T1 In</text>
+
+  <rect x="504" y="144" width="66" height="28" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="537" y="162" class="mono blk" fill="#3730a3" text-anchor="middle">T1 VEC</text>
+
+  <rect x="576" y="178" width="66" height="28" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="609" y="196" class="mono blk" fill="#047857" text-anchor="middle">T1 Out</text>
+
+  <!-- Tile 2 steps -->
+  <rect x="648" y="110" width="66" height="28" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="681" y="128" class="mono blk" fill="#0369a1" text-anchor="middle">T2 In</text>
+
+  <rect x="720" y="144" width="66" height="28" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="753" y="162" class="mono blk" fill="#3730a3" text-anchor="middle">T2 VEC</text>
+
+  <rect x="792" y="178" width="66" height="28" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="825" y="196" class="mono blk" fill="#047857" text-anchor="middle">T2 Out</text>
+
+  <!-- Dependency arrow showing T0 Out -> T1 In -->
+  <path d="M426,192 L430,192 L430,141" fill="none" stroke="#dc2626" stroke-width="1.3" stroke-dasharray="3 2" marker-end="url(#arr-red)"/>
+
+  <!-- Time ticks (top) -->
+  <g class="mono tick" text-anchor="middle">
+    <text x="249" y="222">t0</text>
+    <text x="321" y="222">t1</text>
+    <text x="393" y="222">t2</text>
+    <text x="465" y="222">t3</text>
+    <text x="537" y="222">t4</text>
+    <text x="609" y="222">t5</text>
+    <text x="681" y="222">t6</text>
+    <text x="753" y="222">t7</text>
+    <text x="825" y="222">t8</text>
+  </g>
+
+  <!-- ==================== Bottom Panel: Double Buffer (BUFFER_NUM = 2, n+2) ==================== -->
+  <rect x="36" y="240" width="848" height="178" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.3"/>
+  <text x="52" y="262" class="panel-hd" fill="#047857">双缓冲（BUFFER_NUM = 2）：TQue EnQue / DeQue 流水重叠</text>
+
+  <rect x="632" y="247" width="118" height="22" rx="5" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="691" y="262" class="badge" fill="#047857" text-anchor="middle">总耗时 = n+2 拍</text>
+
+  <rect x="758" y="247" width="112" height="22" rx="5" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="814" y="262" class="badge" fill="#b45309" text-anchor="middle">代价：UB × 2</text>
+
+  <!-- Lane headers (bottom) -->
+  <rect x="50" y="278" width="156" height="32" rx="5" fill="#f0f9ff" stroke="#bae6fd"/>
+  <text x="60" y="298" class="mono lane" fill="#0369a1">MTE2</text>
+  <text x="98" y="298" class="lane-s">GM→UB CopyIn</text>
+
+  <rect x="50" y="318" width="156" height="32" rx="5" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="60" y="338" class="mono lane" fill="#3730a3">VEC</text>
+  <text x="98" y="338" class="lane-s">UB Compute</text>
+
+  <rect x="50" y="358" width="156" height="32" rx="5" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="60" y="378" class="mono lane" fill="#047857">MTE3</text>
+  <text x="98" y="378" class="lane-s">UB→GM CopyOut</text>
+
+  <!-- Gridlines t0..t6 -->
+  <g stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3">
+    <line x1="285" y1="274" x2="285" y2="394"/>
+    <line x1="357" y1="274" x2="357" y2="394"/>
+    <line x1="429" y1="274" x2="429" y2="394"/>
+    <line x1="501" y1="274" x2="501" y2="394"/>
+    <line x1="573" y1="274" x2="573" y2="394"/>
+    <line x1="645" y1="274" x2="645" y2="394"/>
+  </g>
+
+  <!-- Steady-state highlight around t2 -->
+  <rect x="356" y="273" width="74" height="122" rx="6" fill="#fffbeb" fill-opacity="0.55" stroke="#d97706" stroke-width="1.6" stroke-dasharray="4 3"/>
+
+  <!-- MTE2 lane blocks (T0..T4) -->
+  <rect x="216" y="278" width="66" height="32" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="249" y="292" class="mono blk" fill="#0369a1" text-anchor="middle">T0 In</text>
+  <text x="249" y="305" class="blk-s" fill="#0369a1" text-anchor="middle">Buf A</text>
+
+  <rect x="288" y="278" width="66" height="32" rx="5" fill="#bae6fd" stroke="#0284c7"/>
+  <text x="321" y="292" class="mono blk" fill="#0369a1" text-anchor="middle">T1 In</text>
+  <text x="321" y="305" class="blk-s" fill="#0369a1" text-anchor="middle">Buf B</text>
+
+  <rect x="360" y="278" width="66" height="32" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="393" y="292" class="mono blk" fill="#0369a1" text-anchor="middle">T2 In</text>
+  <text x="393" y="305" class="blk-s" fill="#0369a1" text-anchor="middle">Buf A</text>
+
+  <rect x="432" y="278" width="66" height="32" rx="5" fill="#bae6fd" stroke="#0284c7"/>
+  <text x="465" y="292" class="mono blk" fill="#0369a1" text-anchor="middle">T3 In</text>
+  <text x="465" y="305" class="blk-s" fill="#0369a1" text-anchor="middle">Buf B</text>
+
+  <rect x="504" y="278" width="66" height="32" rx="5" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="537" y="292" class="mono blk" fill="#0369a1" text-anchor="middle">T4 In</text>
+  <text x="537" y="305" class="blk-s" fill="#0369a1" text-anchor="middle">Buf A</text>
+
+  <!-- VEC lane blocks (T0..T4 shifted +1) -->
+  <rect x="288" y="318" width="66" height="32" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="321" y="332" class="mono blk" fill="#3730a3" text-anchor="middle">T0 VEC</text>
+  <text x="321" y="345" class="blk-s" fill="#3730a3" text-anchor="middle">Buf A</text>
+
+  <rect x="360" y="318" width="66" height="32" rx="5" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="393" y="332" class="mono blk" fill="#3730a3" text-anchor="middle">T1 VEC</text>
+  <text x="393" y="345" class="blk-s" fill="#3730a3" text-anchor="middle">Buf B</text>
+
+  <rect x="432" y="318" width="66" height="32" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="465" y="332" class="mono blk" fill="#3730a3" text-anchor="middle">T2 VEC</text>
+  <text x="465" y="345" class="blk-s" fill="#3730a3" text-anchor="middle">Buf A</text>
+
+  <rect x="504" y="318" width="66" height="32" rx="5" fill="#e0e7ff" stroke="#4f46e5"/>
+  <text x="537" y="332" class="mono blk" fill="#3730a3" text-anchor="middle">T3 VEC</text>
+  <text x="537" y="345" class="blk-s" fill="#3730a3" text-anchor="middle">Buf B</text>
+
+  <rect x="576" y="318" width="66" height="32" rx="5" fill="#eef2ff" stroke="#4f46e5"/>
+  <text x="609" y="332" class="mono blk" fill="#3730a3" text-anchor="middle">T4 VEC</text>
+  <text x="609" y="345" class="blk-s" fill="#3730a3" text-anchor="middle">Buf A</text>
+
+  <!-- MTE3 lane blocks (T0..T4 shifted +2) -->
+  <rect x="360" y="358" width="66" height="32" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="393" y="372" class="mono blk" fill="#047857" text-anchor="middle">T0 Out</text>
+  <text x="393" y="385" class="blk-s" fill="#047857" text-anchor="middle">Buf A</text>
+
+  <rect x="432" y="358" width="66" height="32" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="465" y="372" class="mono blk" fill="#047857" text-anchor="middle">T1 Out</text>
+  <text x="465" y="385" class="blk-s" fill="#047857" text-anchor="middle">Buf B</text>
+
+  <rect x="504" y="358" width="66" height="32" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="537" y="372" class="mono blk" fill="#047857" text-anchor="middle">T2 Out</text>
+  <text x="537" y="385" class="blk-s" fill="#047857" text-anchor="middle">Buf A</text>
+
+  <rect x="576" y="358" width="66" height="32" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="609" y="372" class="mono blk" fill="#047857" text-anchor="middle">T3 Out</text>
+  <text x="609" y="385" class="blk-s" fill="#047857" text-anchor="middle">Buf B</text>
+
+  <rect x="648" y="358" width="66" height="32" rx="5" fill="#ecfdf5" stroke="#059669"/>
+  <text x="681" y="372" class="mono blk" fill="#047857" text-anchor="middle">T4 Out</text>
+  <text x="681" y="385" class="blk-s" fill="#047857" text-anchor="middle">Buf A</text>
+
+  <!-- TQue handoff diagonal arrows for T0 -->
+  <line x1="278" y1="310" x2="292" y2="318" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-slate)"/>
+  <line x1="350" y1="350" x2="364" y2="358" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-slate)"/>
+
+  <!-- Right Callout Card explaining steady state & TQue -->
+  <rect x="726" y="274" width="144" height="122" rx="8" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.2"/>
+  <text x="798" y="294" class="call-t" text-anchor="middle">稳态重叠（如 t2）</text>
+  <text x="738" y="314" class="call-s" fill="#0369a1">• MTE2 搬入 T2</text>
+  <text x="738" y="332" class="call-s" fill="#3730a3">• VEC  计算 T1</text>
+  <text x="738" y="350" class="call-s" fill="#047857">• MTE3 写回 T0</text>
+  <line x1="738" y1="360" x2="858" y2="360" stroke="#fde68a" stroke-width="1"/>
+  <text x="798" y="375" class="mono" font-size="9.5" font-weight="700" fill="#92400e" text-anchor="middle">TQue EnQue / DeQue</text>
+  <text x="798" y="389" class="lane-s" text-anchor="middle">自动完成三级事件同步</text>
+
+  <!-- Time ticks (bottom) -->
+  <g class="mono tick" text-anchor="middle">
+    <text x="249" y="409">t0</text>
+    <text x="321" y="409">t1</text>
+    <text x="393" y="409" font-weight="700" fill="#d97706">t2</text>
+    <text x="465" y="409">t3</text>
+    <text x="537" y="409">t4</text>
+    <text x="609" y="409">t5</text>
+    <text x="681" y="409">t6 (5块完成)</text>
+  </g>
+
+  <!-- Bottom takeaway -->
+  <text x="36" y="438" class="note">设计权衡：5 个 Tile 单缓冲需 15 拍，双缓冲仅需 7 拍；Tiling 时须确保双份输入/输出与临时空间不超单核 UB 容量上限。</text>
+</svg>

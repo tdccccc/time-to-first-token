@@ -1,60 +1,110 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="覆盖矩阵归因：覆盖率与热点集中度决定瓶颈在算子覆盖还是调度、显存、通信">
-<style>
-text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:26px;font-weight:700;fill:#1f2937}.sub{font-size:16px;fill:#6b7280}
-.label{font-size:20px;font-weight:700}.small{font-size:15px;fill:#4b5563}
-.tick{font-size:15px;fill:#6b7280}.axis{stroke:#94a3b8;stroke-width:1.5}
-.threshold{stroke:#94a3b8;stroke-width:1.5;stroke-dasharray:6 5}
-</style>
-<defs>
-<marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-<path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/>
-</marker>
-</defs>
-<rect width="900" height="430" fill="#fbfcfe"/>
-<text x="40" y="42" class="title">覆盖矩阵的归因：覆盖率 × 热点集中度</text>
-<text x="40" y="68" class="sub">三列覆盖率一起报；横轴是耗时加权执行覆盖率，纵轴是 Top 3 耗时占比。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 460" role="img" aria-label="覆盖矩阵四象限归因：横轴耗时加权执行覆盖率 C_time，纵轴 Top 3 耗时占比 H3，区分补算子、按权重补长尾、查热点实现与查调度显存通信">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .axis-label { font-size: 13px; font-weight: 600; fill: #475569; }
+    .tick { font-size: 13px; fill: #64748b; }
+    .tick-bold { font-size: 13px; font-weight: 700; fill: #1e293b; }
+    .q-title { font-size: 18px; font-weight: 700; }
+    .q-cond { font-size: 12.5px; font-weight: 600; }
+    .q-body { font-size: 13px; }
+    .badge { font-size: 11px; font-weight: 700; text-anchor: middle; }
+    .note { font-size: 12.5px; fill: #334155; }
+    .note-sub { font-size: 12px; fill: #475569; }
+    .axis { stroke: #94a3b8; stroke-width: 1.6; }
+    .threshold { stroke: #64748b; stroke-width: 1.5; stroke-dasharray: 6 5; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#94a3b8"/>
+    </marker>
+  </defs>
 
-<rect x="120" y="96" width="370" height="124" fill="#fff7ed"/>
-<rect x="490" y="96" width="370" height="124" fill="#ecfdf5"/>
-<rect x="120" y="220" width="370" height="124" fill="#eff6ff"/>
-<rect x="490" y="220" width="370" height="124" fill="#eef2ff"/>
+  <rect width="920" height="460" fill="#fbfcfe" rx="8"/>
 
-<line x1="120" y1="344" x2="860" y2="344" class="axis" marker-end="url(#arrow)"/>
-<line x1="120" y1="344" x2="120" y2="96" class="axis" marker-end="url(#arrow)"/>
-<line x1="490" y1="96" x2="490" y2="344" class="threshold"/>
-<line x1="120" y1="220" x2="860" y2="220" class="threshold"/>
+  <!-- Header -->
+  <text x="38" y="38" class="title">覆盖矩阵的归因：覆盖率 × 热点集中度</text>
+  <text x="38" y="62" class="sub">横轴为耗时加权执行覆盖率 C_time，纵轴为 Top 3 热点算子耗时占比 H3；先定象限，再排优化优先级。</text>
 
-<text x="130" y="364" class="tick">低</text>
-<text x="490" y="364" class="tick" text-anchor="middle">80%</text>
-<text x="850" y="364" class="tick" text-anchor="end">高</text>
-<text x="112" y="338" class="tick" text-anchor="end">低</text>
-<text x="112" y="226" class="tick" text-anchor="end">50%</text>
-<text x="112" y="104" class="tick" text-anchor="end">高</text>
+  <text x="114" y="88" class="axis-label">纵轴：Top 3 耗时占比 H3 ↑</text>
 
-<text x="490" y="386" class="small" text-anchor="middle">耗时加权执行覆盖率 C_time →</text>
-<text x="40" y="88" class="small">纵轴：Top 3 耗时占比 H3 ↑</text>
+  <!-- Four quadrants (x: 114..874, split at 494; y: 96..344, split at 220) -->
+  <!-- Top-Left: 补算子 (Amber) -->
+  <rect x="114" y="96" width="380" height="124" fill="#fffbeb"/>
+  <!-- Top-Right: 查热点实现 (Emerald) -->
+  <rect x="494" y="96" width="380" height="124" fill="#ecfdf5"/>
+  <!-- Bottom-Left: 按权重补长尾 (Sky) -->
+  <rect x="114" y="220" width="380" height="124" fill="#e0f2fe"/>
+  <!-- Bottom-Right: 查调度显存通信 (Indigo) -->
+  <rect x="494" y="220" width="380" height="124" fill="#eef2ff"/>
 
-<text x="145" y="132" class="label" fill="#b45309">补算子</text>
-<text x="145" y="157" class="small" fill="#92400e">低覆盖 + 热点集中</text>
-<text x="145" y="181" class="small" fill="#92400e">先补 Top 3 未覆盖项</text>
-<text x="145" y="204" class="small" fill="#92400e">用 1+p(s−1) 估收益</text>
+  <!-- Subtle outer frame on top/right -->
+  <line x1="114" y1="96" x2="874" y2="96" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="874" y1="96" x2="874" y2="344" stroke="#e2e8f0" stroke-width="1"/>
 
-<text x="515" y="132" class="label" fill="#047857">覆盖不是瓶颈</text>
-<text x="515" y="157" class="small" fill="#065f46">高覆盖 + 热点集中</text>
-<text x="515" y="181" class="small" fill="#065f46">查热点算子的实现质量</text>
-<text x="515" y="204" class="small" fill="#065f46">与调度、显存</text>
+  <!-- Threshold dashed crosshairs -->
+  <line x1="494" y1="96" x2="494" y2="344" class="threshold"/>
+  <line x1="114" y1="220" x2="874" y2="220" class="threshold"/>
 
-<text x="145" y="256" class="label" fill="#0369a1">按权重补长尾</text>
-<text x="145" y="281" class="small" fill="#075985">低覆盖 + 热点分散</text>
-<text x="145" y="305" class="small" fill="#075985">只补高权重项</text>
-<text x="145" y="328" class="small" fill="#075985">收益有限</text>
+  <!-- Axes -->
+  <line x1="114" y1="344" x2="878" y2="344" class="axis" marker-end="url(#arrow)"/>
+  <line x1="114" y1="344" x2="114" y2="92" class="axis" marker-end="url(#arrow)"/>
 
-<text x="515" y="256" class="label" fill="#047857">覆盖不是瓶颈</text>
-<text x="515" y="281" class="small" fill="#065f46">高覆盖 + 热点分散</text>
-<text x="515" y="305" class="small" fill="#065f46">查调度、显存、通信</text>
-<text x="515" y="328" class="small" fill="#065f46">与 kernel 效率</text>
+  <!-- Axis ticks -->
+  <text x="124" y="363" class="tick">低</text>
+  <text x="494" y="363" class="tick-bold mono" text-anchor="middle">80%</text>
+  <text x="866" y="363" class="tick" text-anchor="end">高</text>
 
-<text x="40" y="404" class="small">阈值 80% / 50% 为默认值，可按模型调整。</text>
-<text x="40" y="424" class="small">回退算子没有设备时间，C_time 会高估覆盖率，需同时报 C_call 与 CPU 自耗时。</text>
+  <text x="104" y="338" class="tick" text-anchor="end">低</text>
+  <text x="104" y="225" class="tick-bold mono" text-anchor="end">50%</text>
+  <text x="104" y="108" class="tick" text-anchor="end">高</text>
+
+  <text x="494" y="383" class="axis-label" text-anchor="middle">耗时加权执行覆盖率 C_time →</text>
+
+  <!-- Quadrant 1 (Top-Left): 补算子 -->
+  <g>
+    <rect x="406" y="106" width="76" height="22" rx="11" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="444" y="121" class="badge" fill="#b45309">优先级 P0</text>
+    <text x="136" y="128" class="q-title" fill="#b45309">补算子</text>
+    <text x="136" y="152" class="q-cond" fill="#92400e">低覆盖 + 热点集中（C_time &lt; 80%, H3 ≥ 50%）</text>
+    <text x="136" y="176" class="q-body" fill="#78350f">• 优先补齐 Top 3 未覆盖热点算子</text>
+    <text x="136" y="199" class="q-body" fill="#78350f">• 用 1 + p(s − 1) 估算单点补齐加速收益</text>
+  </g>
+
+  <!-- Quadrant 2 (Top-Right): 查热点实现 -->
+  <g>
+    <rect x="780" y="106" width="82" height="22" rx="11" fill="#d1fae5" stroke="#34d399"/>
+    <text x="821" y="121" class="badge" fill="#065f46">覆盖非瓶颈</text>
+    <text x="516" y="128" class="q-title" fill="#047857">查热点实现</text>
+    <text x="516" y="152" class="q-cond" fill="#065f46">高覆盖 + 热点集中（C_time ≥ 80%, H3 ≥ 50%）</text>
+    <text x="516" y="176" class="q-body" fill="#064e3b">• 排查热点算子的 kernel 实现质量与参数配置</text>
+    <text x="516" y="199" class="q-body" fill="#064e3b">• 同步检查算子融合、调度开销与显存访问</text>
+  </g>
+
+  <!-- Quadrant 3 (Bottom-Left): 按权重补长尾 -->
+  <g>
+    <rect x="400" y="230" width="82" height="22" rx="11" fill="#bae6fd" stroke="#38bdf8"/>
+    <text x="441" y="245" class="badge" fill="#075985">按 ROI 排序</text>
+    <text x="136" y="252" class="q-title" fill="#0369a1">按权重补长尾</text>
+    <text x="136" y="276" class="q-cond" fill="#075985">低覆盖 + 热点分散（C_time &lt; 80%, H3 &lt; 50%）</text>
+    <text x="136" y="300" class="q-body" fill="#0c4a6e">• 只补高权重回退项，避免死磕极低占比长尾</text>
+    <text x="136" y="323" class="q-body" fill="#0c4a6e">• 单算子补齐收益有限，需配合图融合降碎片</text>
+  </g>
+
+  <!-- Quadrant 4 (Bottom-Right): 查调度、显存、通信 -->
+  <g>
+    <rect x="780" y="230" width="82" height="22" rx="11" fill="#e0e7ff" stroke="#818cf8"/>
+    <text x="821" y="245" class="badge" fill="#3730a3">覆盖非瓶颈</text>
+    <text x="516" y="252" class="q-title" fill="#3730a3">查调度、显存与通信</text>
+    <text x="516" y="276" class="q-cond" fill="#3730a3">高覆盖 + 热点分散（C_time ≥ 80%, H3 &lt; 50%）</text>
+    <text x="516" y="300" class="q-body" fill="#312e81">• 排查调度下发、小算子 launch 与 H2D/集合通信</text>
+    <text x="516" y="323" class="q-body" fill="#312e81">• 检查整体 kernel 效率与执行图捕获（ACLGraph）</text>
+  </g>
+
+  <!-- Bottom note box with generous 24px bottom canvas margin -->
+  <rect x="38" y="394" width="844" height="44" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="54" y="413" class="note"><tspan font-weight="700" fill="#1e293b">口径说明：</tspan>阈值 80% / 50% 为工程默认值，可按模型结构微调；三列覆盖率应一并报告。</text>
+  <text x="54" y="431" class="note-sub">注意：回退到 CPU 的算子无设备执行时间，单看 C_time 会高估覆盖率，必须同时报告调用覆盖率 C_call 与 CPU 自耗时。</text>
 </svg>

@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 480" role="img" aria-label="同机混跑、Chunked Prefill 与 PD 解耦三轨时间线对比，以及以分布式 KV Cache 池为中心的 Mooncake 集群架构示意">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 13.5px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12.5px; font-weight: 700; }
+    .body { font-size: 11.5px; fill: #334155; }
+    .tiny { font-size: 10.5px; fill: #64748b; }
+    .blk { font-size: 10.5px; font-weight: 700; fill: #ffffff; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3f51b5"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="480" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">PD 干扰治理：三轨时间线对比与 Mooncake 集群架构</text>
+  <text x="36" y="62" class="sub">上：混跑阻塞 Decode 导致 ITL 尖峰，切块可缓解，PD 解耦彻底隔离；下：以 KV Cache 池为中心的集群拓扑。</text>
+
+  <!-- ==================== UPPER SECTION: 3-TRACK TIMELINE ==================== -->
+  <rect x="36" y="76" width="848" height="178" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+  <text x="52" y="98" class="h2">三种调度模式的 GPU 执行时间线对比</text>
+
+  <!-- Legend -->
+  <rect x="448" y="88" width="12" height="12" rx="2" fill="#3f51b5"/>
+  <text x="466" y="98" class="tiny" fill="#334155">Prefill</text>
+  <rect x="514" y="88" width="12" height="12" rx="2" fill="#059669"/>
+  <text x="532" y="98" class="tiny" fill="#334155">Decode 步</text>
+  <rect x="600" y="88" width="12" height="12" rx="2" fill="#d97706"/>
+  <text x="618" y="98" class="tiny" fill="#334155">KV 传输</text>
+  <rect x="676" y="88" width="12" height="12" rx="2" fill="#fef2f2" stroke="#dc2626" stroke-dasharray="2,1"/>
+  <text x="694" y="98" class="tiny" fill="#dc2626">ITL 阻塞尖峰</text>
+
+  <!-- Track 1: Colocated -->
+  <text x="52" y="131" class="h3" fill="#1e293b">1. 同机混跑</text>
+  <line x1="186" y1="126" x2="736" y2="126" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="188" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="202" y="130" class="blk" text-anchor="middle">D1</text>
+  <rect x="220" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="234" y="130" class="blk" text-anchor="middle">D2</text>
+
+  <!-- Long Prefill blocking decode -->
+  <rect x="252" y="114" width="256" height="24" rx="4" fill="#3f51b5" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="4,2"/>
+  <text x="380" y="130" class="blk" text-anchor="middle">长请求 Prefill（阻塞 Decode → ITL 暴涨）</text>
+
+  <rect x="512" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="526" y="130" class="blk" text-anchor="middle">D3</text>
+  <rect x="544" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="558" y="130" class="blk" text-anchor="middle">D4</text>
+  <rect x="576" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="590" y="130" class="blk" text-anchor="middle">D5</text>
+  <rect x="608" y="114" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="622" y="130" class="blk" text-anchor="middle">D6</text>
+
+  <rect x="744" y="114" width="126" height="24" rx="5" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="807" y="130" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:700">ITL 出现严重尖峰</text>
+
+  <!-- Track 2: Chunked Prefill -->
+  <text x="52" y="169" class="h3" fill="#1e293b">2. Chunked 切块</text>
+  <line x1="186" y1="164" x2="736" y2="164" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="188" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="202" y="168" class="blk" text-anchor="middle">D1</text>
+  <rect x="220" y="152" width="52" height="24" rx="4" fill="#6366f1"/>
+  <text x="246" y="168" class="blk" text-anchor="middle">P₁</text>
+  <rect x="276" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="290" y="168" class="blk" text-anchor="middle">D2</text>
+  <rect x="308" y="152" width="52" height="24" rx="4" fill="#6366f1"/>
+  <text x="334" y="168" class="blk" text-anchor="middle">P₂</text>
+  <rect x="364" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="378" y="168" class="blk" text-anchor="middle">D3</text>
+  <rect x="396" y="152" width="52" height="24" rx="4" fill="#6366f1"/>
+  <text x="422" y="168" class="blk" text-anchor="middle">P₃</text>
+  <rect x="452" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="466" y="168" class="blk" text-anchor="middle">D4</text>
+  <rect x="484" y="152" width="52" height="24" rx="4" fill="#6366f1"/>
+  <text x="510" y="168" class="blk" text-anchor="middle">P₄</text>
+  <rect x="540" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="554" y="168" class="blk" text-anchor="middle">D5</text>
+  <rect x="572" y="152" width="28" height="24" rx="4" fill="#059669"/>
+  <text x="586" y="168" class="blk" text-anchor="middle">D6</text>
+
+  <rect x="744" y="152" width="126" height="24" rx="5" fill="#fffbeb" stroke="#fde68a"/>
+  <text x="807" y="168" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">穿插平抑 / 仍争算力</text>
+
+  <!-- Track 3: PD Disaggregated (Dual Lanes) -->
+  <text x="52" y="218" class="h3" fill="#1e293b">3. PD 解耦</text>
+  <text x="176" y="205" class="tiny" fill="#3f51b5" text-anchor="end" style="font-weight:700">P 池</text>
+  <text x="176" y="235" class="tiny" fill="#059669" text-anchor="end" style="font-weight:700">D 池</text>
+
+  <!-- P-pool lane -->
+  <line x1="186" y1="201" x2="736" y2="201" stroke="#e2e8f0" stroke-width="1"/>
+  <rect x="188" y="191" width="174" height="20" rx="4" fill="#3f51b5"/>
+  <text x="275" y="205" class="blk" text-anchor="middle">长请求 Prefill（独立高算力）</text>
+  <rect x="366" y="191" width="76" height="20" rx="4" fill="#d97706"/>
+  <text x="404" y="205" class="blk" text-anchor="middle">KV 传输</text>
+  <rect x="454" y="191" width="142" height="20" rx="4" fill="#818cf8"/>
+  <text x="525" y="205" class="blk" text-anchor="middle">下个请求 Prefill</text>
+
+  <!-- Transfer arrow from KV transfer down to D pool -->
+  <path d="M 442 201 L 450 201 L 450 218" fill="none" stroke="#d97706" stroke-width="1.8" marker-end="url(#arr-amber)"/>
+
+  <!-- D-pool lane (completely smooth Decode cadence) -->
+  <line x1="186" y1="231" x2="736" y2="231" stroke="#e2e8f0" stroke-width="1"/>
+  <g>
+    <rect x="188" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="202" y="235" class="blk" text-anchor="middle">D1</text>
+    <rect x="220" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="234" y="235" class="blk" text-anchor="middle">D2</text>
+    <rect x="252" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="266" y="235" class="blk" text-anchor="middle">D3</text>
+    <rect x="284" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="298" y="235" class="blk" text-anchor="middle">D4</text>
+    <rect x="316" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="330" y="235" class="blk" text-anchor="middle">D5</text>
+    <rect x="348" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="362" y="235" class="blk" text-anchor="middle">D6</text>
+    <rect x="380" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="394" y="235" class="blk" text-anchor="middle">D7</text>
+    <rect x="412" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="426" y="235" class="blk" text-anchor="middle">D8</text>
+    <rect x="444" y="221" width="38" height="20" rx="3" fill="#0284c7"/><text x="463" y="235" class="blk" text-anchor="middle">首字</text>
+    <rect x="486" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="500" y="235" class="blk" text-anchor="middle">D9</text>
+    <rect x="518" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="532" y="235" class="blk" text-anchor="middle">D10</text>
+    <rect x="550" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="564" y="235" class="blk" text-anchor="middle">D11</text>
+    <rect x="582" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="596" y="235" class="blk" text-anchor="middle">D12</text>
+    <rect x="614" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="628" y="235" class="blk" text-anchor="middle">D13</text>
+    <rect x="646" y="221" width="28" height="20" rx="3" fill="#059669"/><text x="660" y="235" class="blk" text-anchor="middle">D14</text>
+  </g>
+
+  <rect x="744" y="196" width="126" height="40" rx="5" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="807" y="213" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">两池互不干扰</text>
+  <text x="807" y="229" class="tiny" fill="#059669" text-anchor="middle">引入显式 KV 传输段</text>
+
+  <!-- ==================== LOWER SECTION: MOONCAKE ARCHITECTURE ==================== -->
+  <rect x="36" y="266" width="848" height="174" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.2"/>
+  <text x="52" y="287" class="h2">大规模集群示例：以 KV Cache 为中心的 Mooncake 架构</text>
+
+  <!-- Request Entry Pill -->
+  <rect x="52" y="294" width="96" height="32" rx="16" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="100" y="314" class="body" fill="#1e293b" text-anchor="middle" style="font-weight:700">客户端请求</text>
+  <line x1="148" y1="310" x2="342" y2="310" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr-slate)"/>
+  <text x="245" y="304" class="tiny" fill="#475569" text-anchor="middle">① 携带 Prompt 到达</text>
+
+  <!-- Conductor (Global Scheduler) -->
+  <rect x="348" y="290" width="224" height="42" rx="8" fill="#eef2ff" stroke="#3f51b5" stroke-width="1.6"/>
+  <text x="460" y="308" class="h3" fill="#1e293b" text-anchor="middle">Conductor（全局调度器）</text>
+  <text x="460" y="325" class="tiny" fill="#4338ca" text-anchor="middle">全局前缀路由 · P/D 负载与过载预测</text>
+
+  <!-- Control arrows from Conductor (clean orthogonal elbows, zero label crossings) -->
+  <!-- To Prefill Pool -->
+  <path d="M 374 332 L 374 349 L 152 349 L 152 358" fill="none" stroke="#3f51b5" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-indigo)"/>
+  <text x="262" y="343" class="tiny" fill="#3f51b5" text-anchor="middle" style="font-weight:600">② 派发未命中片段</text>
+
+  <!-- To KV Pool (index query) -->
+  <line x1="460" y1="332" x2="460" y2="358" stroke="#64748b" stroke-width="1.4" stroke-dasharray="3,2" marker-end="url(#arr-slate)"/>
+  <text x="468" y="349" class="tiny" fill="#475569">查前缀位置</text>
+
+  <!-- To Decode Pool -->
+  <path d="M 546 332 L 546 349 L 768 349 L 768 358" fill="none" stroke="#059669" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-emerald)"/>
+  <text x="658" y="343" class="tiny" fill="#059669" text-anchor="middle" style="font-weight:600">⑤ 调度至低负载 D 节点</text>
+
+  <!-- Prefill Pool -->
+  <rect x="52" y="360" width="200" height="68" rx="8" fill="#eef2ff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="152" y="381" class="h3" fill="#312e81" text-anchor="middle">Prefill 池（算力型 GPU）</text>
+  <text x="152" y="400" class="tiny" fill="#475569" text-anchor="middle">大批量计算 Prompt 首字</text>
+  <text x="152" y="417" class="tiny" fill="#4338ca" text-anchor="middle">读取共享前缀 · 写出新 KV</text>
+
+  <!-- RDMA Write Arrow: Prefill -> KV Pool -->
+  <line x1="252" y1="394" x2="316" y2="394" stroke="#d97706" stroke-width="2.4" marker-end="url(#arr-amber)"/>
+  <text x="284" y="385" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">③ 写 KV</text>
+  <text x="284" y="410" class="tiny mono" fill="#d97706" text-anchor="middle">RDMA</text>
+
+  <!-- Shared Distributed KV Cache Pool -->
+  <rect x="322" y="360" width="276" height="68" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.6"/>
+  <text x="460" y="380" class="h3" fill="#92400e" text-anchor="middle">共享分布式 KV Cache 池 (DRAM / SSD)</text>
+  <text x="460" y="398" class="tiny" fill="#78350f" text-anchor="middle">聚合跨节点闲置内存与 NVMe · 全局前缀复用</text>
+  <rect x="348" y="405" width="224" height="18" rx="9" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="460" y="418" class="tiny mono" fill="#92400e" text-anchor="middle" style="font-weight:700">Transfer Engine (RDMA / NVLink)</text>
+
+  <!-- RDMA Read Arrow: KV Pool -> Decode Pool -->
+  <line x1="598" y1="394" x2="662" y2="394" stroke="#d97706" stroke-width="2.4" marker-end="url(#arr-amber)"/>
+  <text x="630" y="385" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">④ 拉 KV</text>
+  <text x="630" y="410" class="tiny mono" fill="#d97706" text-anchor="middle">RDMA</text>
+
+  <!-- Decode Pool -->
+  <rect x="668" y="360" width="200" height="68" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="768" y="381" class="h3" fill="#065f46" text-anchor="middle">Decode 池（高带宽 GPU）</text>
+  <text x="768" y="400" class="tiny" fill="#475569" text-anchor="middle">稳态低 ITL 逐 token 生成</text>
+  <text x="768" y="417" class="tiny" fill="#047857" text-anchor="middle">持续流式返回响应 → 客户端</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="458" class="note">要点：PD 解耦用可预测的 RDMA 传输换取 Decode 零阻塞；以分布式 KV 池为枢纽，可实现跨节点前缀复用并独立扩缩 P/D 池。</text>
+</svg>

@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 480" role="img" aria-label="量化矩阵乘两条数据流（W8A8 INT8 tl.dot 与 W8A16 Fused Dequant）及四种 Scale 粒度广播形状">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .sec { font-size: 14px; font-weight: 700; fill: #1e293b; }
+    .badge-title { font-size: 14px; font-weight: 700; }
+    .box-title { font-size: 12.5px; font-weight: 700; fill: #1e293b; }
+    .box-sub { font-size: 11px; fill: #475569; }
+    .loop-tag { font-size: 11px; font-weight: 700; }
+    .card-title { font-size: 12.5px; font-weight: 700; fill: #1e293b; }
+    .card-desc { font-size: 11px; fill: #475569; }
+    .card-sub { font-size: 10.5px; fill: #64748b; }
+    .pill-txt { font-size: 10.5px; font-weight: 700; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#6366f1"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="480" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">量化矩阵乘：两条数据流与 Scale 广播粒度</text>
+  <text x="36" y="61" class="sub">W8A8 借 INT8 Tensor Core 提升算力吞吐；W8A16 借循环内融合反量化将权重 HBM 搬运减半。</text>
+
+  <!-- ==================== Path A: W8A8 INT8 tl.dot ==================== -->
+  <rect x="36" y="76" width="848" height="96" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.3"/>
+  <rect x="46" y="86" width="134" height="76" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="113" y="109" class="badge-title" fill="#3f51b5" text-anchor="middle">路径 A：W8A8</text>
+  <text x="113" y="129" class="mono" font-size="11.5" font-weight="700" fill="#3f51b5" text-anchor="middle">INT8 tl.dot</text>
+  <text x="113" y="149" class="box-sub" text-anchor="middle">算力密集 · Prefill</text>
+
+  <!-- K-loop box A -->
+  <rect x="194" y="84" width="388" height="80" rx="8" fill="#f8fafc" stroke="#818cf8" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="206" y="99" class="loop-tag" fill="#3f51b5">K 循环内：全速 INT8 Tensor Core</text>
+
+  <rect x="204" y="107" width="154" height="48" rx="6" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="281" y="127" class="mono" font-size="12" font-weight="700" fill="#1e293b" text-anchor="middle">INT8 A × INT8 B</text>
+  <text x="281" y="145" class="box-sub" text-anchor="middle">双操作数低位宽乘加</text>
+
+  <line x1="358" y1="131" x2="384" y2="131" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arr-indigo)"/>
+
+  <rect x="388" y="107" width="184" height="48" rx="6" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="480" y="127" class="box-title" text-anchor="middle">INT32 累加器 acc</text>
+  <text x="480" y="145" class="box-sub" fill="#0369a1" text-anchor="middle">循环内零反量化开销</text>
+
+  <line x1="582" y1="131" x2="603" y2="131" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arr-indigo)"/>
+
+  <!-- Epilogue A -->
+  <rect x="606" y="94" width="156" height="66" rx="7" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="684" y="113" class="loop-tag" fill="#b45309" text-anchor="middle">K 循环外 Epilogue</text>
+  <text x="684" y="132" class="mono" font-size="12" font-weight="700" fill="#1e293b" text-anchor="middle">acc × s_a · s_b</text>
+  <text x="684" y="150" class="box-sub" text-anchor="middle">循环外一次反量化</text>
+
+  <line x1="762" y1="127" x2="783" y2="127" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arr-indigo)"/>
+
+  <!-- Output A -->
+  <rect x="786" y="102" width="84" height="50" rx="7" fill="#ecfdf5" stroke="#10b981"/>
+  <text x="828" y="124" class="mono" font-size="13" font-weight="700" fill="#047857" text-anchor="middle">FP16</text>
+  <text x="828" y="142" class="box-sub" fill="#065f46" text-anchor="middle">输出写回</text>
+
+  <!-- ==================== Path B: W8A16 Fused Dequant ==================== -->
+  <rect x="36" y="182" width="848" height="96" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.3"/>
+  <rect x="46" y="192" width="134" height="76" rx="8" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="113" y="215" class="badge-title" fill="#047857" text-anchor="middle">路径 B：W8A16</text>
+  <text x="113" y="235" class="mono" font-size="11.5" font-weight="700" fill="#047857" text-anchor="middle">Fused Dequant</text>
+  <text x="113" y="255" class="box-sub" text-anchor="middle">带宽密集 · Decode</text>
+
+  <!-- Load INT8 W -->
+  <rect x="194" y="198" width="138" height="66" rx="7" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="263" y="218" class="box-title" text-anchor="middle">INT8 W 进寄存器</text>
+  <text x="263" y="237" class="loop-tag" fill="#047857" text-anchor="middle">HBM 权重搬运减半</text>
+  <text x="263" y="254" class="box-sub" text-anchor="middle">激活保持 FP16</text>
+
+  <line x1="332" y1="231" x2="351" y2="231" stroke="#059669" stroke-width="1.6" marker-end="url(#arr-emerald)"/>
+
+  <!-- K-loop box B -->
+  <rect x="354" y="190" width="408" height="80" rx="8" fill="#f8fafc" stroke="#10b981" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="366" y="205" class="loop-tag" fill="#047857">K 循环内：寄存器现场反量化 + FP16 Tensor Core</text>
+
+  <rect x="364" y="213" width="168" height="48" rx="6" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="448" y="233" class="mono" font-size="11.5" font-weight="700" fill="#1e293b" text-anchor="middle">W_fp16 = W_i8 × s_w</text>
+  <text x="448" y="251" class="box-sub" fill="#b45309" text-anchor="middle">寄存器内现场反量化</text>
+
+  <line x1="532" y1="237" x2="549" y2="237" stroke="#059669" stroke-width="1.6" marker-end="url(#arr-emerald)"/>
+
+  <rect x="552" y="213" width="200" height="48" rx="6" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="652" y="233" class="mono" font-size="11.5" font-weight="700" fill="#1e293b" text-anchor="middle">tl.dot(A_fp16, W_fp16)</text>
+  <text x="652" y="251" class="box-sub" fill="#0369a1" text-anchor="middle">FP16 乘加 → FP32 累加</text>
+
+  <line x1="762" y1="231" x2="783" y2="231" stroke="#059669" stroke-width="1.6" marker-end="url(#arr-emerald)"/>
+
+  <!-- Output B -->
+  <rect x="786" y="206" width="84" height="50" rx="7" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="828" y="228" class="mono" font-size="13" font-weight="700" fill="#3f51b5" text-anchor="middle">FP16</text>
+  <text x="828" y="246" class="box-sub" text-anchor="middle">输出写回</text>
+
+  <!-- ==================== Bottom: 4 Scale Granularity Broadcast Shapes ==================== -->
+  <text x="36" y="303" class="sec">四种 Scale 粒度与广播形状（激活矩阵 [M, K] / 权重矩阵 [K, N]）</text>
+
+  <!-- Card 1: Per-Tensor [1] -->
+  <rect x="36" y="314" width="200" height="122" rx="9" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.2"/>
+  <text x="48" y="335" class="card-title">Per-Tensor</text>
+  <rect x="176" y="320" width="48" height="20" rx="4" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="200" y="334" class="mono pill-txt" fill="#3f51b5" text-anchor="middle">[1]</text>
+
+  <!-- Mini visual: scalar -> 4x4 grid -->
+  <rect x="54" y="366" width="20" height="20" rx="3" fill="#6366f1"/>
+  <text x="64" y="380" class="mono" font-size="10.5" font-weight="700" fill="#ffffff" text-anchor="middle">s</text>
+  <line x1="78" y1="376" x2="102" y2="376" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-slate)"/>
+  <g transform="translate(108,351)">
+    <rect x="0" y="0" width="52" height="52" rx="3" fill="#e0e7ff" stroke="#818cf8"/>
+    <line x1="13" y1="0" x2="13" y2="52" stroke="#ffffff" stroke-width="1"/>
+    <line x1="26" y1="0" x2="26" y2="52" stroke="#ffffff" stroke-width="1"/>
+    <line x1="39" y1="0" x2="39" y2="52" stroke="#ffffff" stroke-width="1"/>
+    <line x1="0" y1="13" x2="52" y2="13" stroke="#ffffff" stroke-width="1"/>
+    <line x1="0" y1="26" x2="52" y2="26" stroke="#ffffff" stroke-width="1"/>
+    <line x1="0" y1="39" x2="52" y2="39" stroke="#ffffff" stroke-width="1"/>
+  </g>
+  <text x="168" y="380" font-size="10" fill="#64748b">全局同标量</text>
+  <text x="136" y="423" class="card-desc" text-anchor="middle">整张张量共用 1 个 scale</text>
+
+  <!-- Card 2: Per-Channel [1, N] -->
+  <rect x="252" y="314" width="200" height="122" rx="9" fill="#ffffff" stroke="#bae6fd" stroke-width="1.2"/>
+  <text x="264" y="335" class="card-title">Per-Channel</text>
+  <rect x="378" y="320" width="62" height="20" rx="4" fill="#e0f2fe" stroke="#7dd3fc"/>
+  <text x="409" y="334" class="mono pill-txt" fill="#0369a1" text-anchor="middle">[1, N]</text>
+
+  <!-- Mini visual: 1x4 top row -> 4x4 columns -->
+  <g transform="translate(320,347)">
+    <rect x="0" y="0" width="13" height="10" fill="#0284c7" stroke="#ffffff"/>
+    <rect x="13" y="0" width="13" height="10" fill="#0ea5e9" stroke="#ffffff"/>
+    <rect x="26" y="0" width="13" height="10" fill="#38bdf8" stroke="#ffffff"/>
+    <rect x="39" y="0" width="13" height="10" fill="#7dd3fc" stroke="#ffffff"/>
+    <text x="58" y="9" class="mono" font-size="9.5" fill="#0369a1">1×N</text>
+    <line x1="6.5" y1="11" x2="6.5" y2="18" stroke="#0284c7" stroke-width="1"/>
+    <line x1="19.5" y1="11" x2="19.5" y2="18" stroke="#0284c7" stroke-width="1"/>
+    <line x1="32.5" y1="11" x2="32.5" y2="18" stroke="#0284c7" stroke-width="1"/>
+    <line x1="45.5" y1="11" x2="45.5" y2="18" stroke="#0284c7" stroke-width="1"/>
+    <rect x="0" y="19" width="13" height="39" fill="#bae6fd" stroke="#ffffff"/>
+    <rect x="13" y="19" width="13" height="39" fill="#e0f2fe" stroke="#ffffff"/>
+    <rect x="26" y="19" width="13" height="39" fill="#bae6fd" stroke="#ffffff"/>
+    <rect x="39" y="19" width="13" height="39" fill="#f0f9ff" stroke="#ffffff"/>
+    <rect x="0" y="19" width="52" height="39" fill="none" stroke="#38bdf8"/>
+    <text x="-20" y="42" class="mono" font-size="9.5" fill="#64748b">K</text>
+  </g>
+  <text x="352" y="423" class="card-desc" text-anchor="middle">按列广播 · Epilogue 可融合</text>
+
+  <!-- Card 3: Per-Token [M, 1] -->
+  <rect x="468" y="314" width="200" height="122" rx="9" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.2"/>
+  <text x="480" y="335" class="card-title">Per-Token</text>
+  <rect x="594" y="320" width="62" height="20" rx="4" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="625" y="334" class="mono pill-txt" fill="#047857" text-anchor="middle">[M, 1]</text>
+
+  <!-- Mini visual: 4x1 left col -> 4x4 rows -->
+  <g transform="translate(524,352)">
+    <rect x="0" y="0" width="11" height="12" fill="#059669" stroke="#ffffff"/>
+    <rect x="0" y="12" width="11" height="12" fill="#10b981" stroke="#ffffff"/>
+    <rect x="0" y="24" width="11" height="12" fill="#34d399" stroke="#ffffff"/>
+    <rect x="0" y="36" width="11" height="12" fill="#6ee7b7" stroke="#ffffff"/>
+    <text x="-24" y="28" class="mono" font-size="9.5" fill="#047857">M×1</text>
+    <line x1="13" y1="6" x2="22" y2="6" stroke="#059669" stroke-width="1"/>
+    <line x1="13" y1="18" x2="22" y2="18" stroke="#059669" stroke-width="1"/>
+    <line x1="13" y1="30" x2="22" y2="30" stroke="#059669" stroke-width="1"/>
+    <line x1="13" y1="42" x2="22" y2="42" stroke="#059669" stroke-width="1"/>
+    <rect x="24" y="0" width="52" height="12" fill="#a7f3d0" stroke="#ffffff"/>
+    <rect x="24" y="12" width="52" height="12" fill="#d1fae5" stroke="#ffffff"/>
+    <rect x="24" y="24" width="52" height="12" fill="#ecfdf5" stroke="#ffffff"/>
+    <rect x="24" y="36" width="52" height="12" fill="#d1fae5" stroke="#ffffff"/>
+    <rect x="24" y="0" width="52" height="48" fill="none" stroke="#34d399"/>
+    <text x="82" y="28" class="mono" font-size="9.5" fill="#64748b">K</text>
+  </g>
+  <text x="568" y="423" class="card-desc" text-anchor="middle">激活按行动态缩放 · W8A8 标配</text>
+
+  <!-- Card 4: Per-Group [K/g, N] -->
+  <rect x="684" y="314" width="200" height="122" rx="9" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
+  <text x="696" y="335" class="card-title">Per-Group</text>
+  <rect x="798" y="320" width="74" height="20" rx="4" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="835" y="334" class="mono pill-txt" fill="#b45309" text-anchor="middle">[K/g, N]</text>
+
+  <!-- Mini visual: 2x4 scale grid -> 4x4 grouped along K -->
+  <g transform="translate(718,352)">
+    <rect x="0" y="0" width="12" height="24" fill="#d97706" stroke="#ffffff"/>
+    <rect x="12" y="0" width="12" height="24" fill="#f59e0b" stroke="#ffffff"/>
+    <rect x="24" y="0" width="12" height="24" fill="#fbbf24" stroke="#ffffff"/>
+    <rect x="0" y="24" width="12" height="24" fill="#f59e0b" stroke="#ffffff"/>
+    <rect x="12" y="24" width="12" height="24" fill="#fbbf24" stroke="#ffffff"/>
+    <rect x="24" y="24" width="12" height="24" fill="#d97706" stroke="#ffffff"/>
+    <line x1="40" y1="24" x2="62" y2="24" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-slate)"/>
+    <g transform="translate(68,0)">
+      <rect x="0" y="0" width="52" height="24" fill="#fef3c7" stroke="#f59e0b"/>
+      <rect x="0" y="24" width="52" height="24" fill="#fde68a" stroke="#f59e0b"/>
+      <line x1="17" y1="0" x2="17" y2="48" stroke="#ffffff" stroke-width="1"/>
+      <line x1="35" y1="0" x2="35" y2="48" stroke="#ffffff" stroke-width="1"/>
+      <line x1="0" y1="12" x2="52" y2="12" stroke="#ffffff" stroke-width="0.8" stroke-dasharray="2 2"/>
+      <line x1="0" y1="36" x2="52" y2="36" stroke="#ffffff" stroke-width="0.8" stroke-dasharray="2 2"/>
+      <text x="56" y="15" class="mono" font-size="9" fill="#b45309">g</text>
+      <text x="56" y="39" class="mono" font-size="9" fill="#b45309">g</text>
+    </g>
+  </g>
+  <text x="784" y="423" class="card-desc" text-anchor="middle">沿 K 每组独立 · 须在循环内乘</text>
+
+  <!-- Bottom takeaway -->
+  <text x="36" y="458" class="note">要点：Per-Tensor / Channel / Token 均可在 K 循环外 Epilogue 缩放；Per-Group 沿 K 变化，须在循环内反量化。</text>
+</svg>

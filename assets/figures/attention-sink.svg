@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 460" role="img" aria-label="纯滑动窗口与 StreamingLLM（Attention Sink）对比：纯滑动窗口驱逐初始 T0-T3 导致 Softmax 注意力分布崩溃；StreamingLLM 永久保留开头 4 个 Sink token 加最近 W 个 token，并对缓存内位置做连续 RoPE 重排 [0,1,2,3,4,5,6,7]">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 14px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12.5px; font-weight: 700; }
+    .body { font-size: 12px; fill: #334155; }
+    .tok { font-size: 12px; font-weight: 700; }
+    .tiny { font-size: 11px; fill: #64748b; }
+    .pill { font-size: 11.5px; font-weight: 700; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-rose" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="460" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">长序列生成：纯滑动窗口崩溃 vs StreamingLLM（Attention Sink）</text>
+  <text x="36" y="62" class="sub">Softmax 强制注意力权重和为 1；永久保留初始 Sink token 并按缓存槽位重排 RoPE 位置，可稳定无限生成。</text>
+
+  <!-- ==================== UPPER PANEL: PLAIN SLIDING WINDOW ==================== -->
+  <rect x="36" y="78" width="848" height="128" rx="10" fill="#ffffff" stroke="#fecaca" stroke-width="1.3"/>
+  <rect x="52" y="90" width="120" height="22" rx="11" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="112" y="105" class="pill" fill="#dc2626" text-anchor="middle">方案一：纯滑动窗口</text>
+  <text x="182" y="106" class="body" fill="#64748b">窗口大小 W = 4，生成至第 103 步超窗，踢出早期 KV</text>
+
+  <!-- Evicted T0..T3 -->
+  <g>
+    <rect x="54"  y="124" width="40" height="34" rx="5" fill="#f8fafc" stroke="#fca5a5" stroke-dasharray="4,2"/>
+    <text x="74"  y="145" class="tok mono" fill="#94a3b8" text-anchor="middle">T0</text>
+    <line x1="60" y1="130" x2="88" y2="152" stroke="#fca5a5" stroke-width="1.2"/>
+
+    <rect x="100" y="124" width="40" height="34" rx="5" fill="#f8fafc" stroke="#fca5a5" stroke-dasharray="4,2"/>
+    <text x="120" y="145" class="tok mono" fill="#94a3b8" text-anchor="middle">T1</text>
+    <line x1="106" y1="130" x2="134" y2="152" stroke="#fca5a5" stroke-width="1.2"/>
+
+    <rect x="146" y="124" width="40" height="34" rx="5" fill="#f8fafc" stroke="#fca5a5" stroke-dasharray="4,2"/>
+    <text x="166" y="145" class="tok mono" fill="#94a3b8" text-anchor="middle">T2</text>
+    <line x1="152" y1="130" x2="180" y2="152" stroke="#fca5a5" stroke-width="1.2"/>
+
+    <rect x="192" y="124" width="40" height="34" rx="5" fill="#f8fafc" stroke="#fca5a5" stroke-dasharray="4,2"/>
+    <text x="212" y="145" class="tok mono" fill="#94a3b8" text-anchor="middle">T3</text>
+    <line x1="198" y1="130" x2="226" y2="152" stroke="#fca5a5" stroke-width="1.2"/>
+  </g>
+  <text x="143" y="176" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:700">初始 T0–T3（Sink）被踢出缓存！</text>
+
+  <!-- Ellipsis -->
+  <text x="256" y="146" class="body" fill="#94a3b8" text-anchor="middle">···</text>
+  <text x="256" y="164" class="tiny" fill="#94a3b8" text-anchor="middle">已驱逐</text>
+
+  <!-- Retained Window W=4 -->
+  <g>
+    <rect x="282" y="124" width="48" height="34" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+    <text x="306" y="145" class="tok mono" fill="#0c4a6e" text-anchor="middle">T100</text>
+
+    <rect x="336" y="124" width="48" height="34" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+    <text x="360" y="145" class="tok mono" fill="#0c4a6e" text-anchor="middle">T101</text>
+
+    <rect x="390" y="124" width="48" height="34" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+    <text x="414" y="145" class="tok mono" fill="#0c4a6e" text-anchor="middle">T102</text>
+
+    <rect x="444" y="124" width="48" height="34" rx="5" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+    <text x="468" y="145" class="tok mono" fill="#0c4a6e" text-anchor="middle">T103</text>
+  </g>
+  <text x="387" y="176" class="tiny" fill="#0369a1" text-anchor="middle" style="font-weight:600">仅保留最近 W = 4 个 KV</text>
+
+  <!-- Arrow to consequence box -->
+  <line x1="498" y1="141" x2="520" y2="141" stroke="#dc2626" stroke-width="2" marker-end="url(#arr-rose)"/>
+
+  <!-- Consequence Box -->
+  <rect x="526" y="92" width="342" height="100" rx="8" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="542" y="114" class="h3" fill="#b91c1c">后果：Softmax 注意力分布崩溃</text>
+  <text x="542" y="137" class="body" fill="#7f1d1d">• Softmax 强制 Σα = 1，冗余权重原停靠在 T0–T3</text>
+  <text x="542" y="158" class="body" fill="#7f1d1d">• 丢失初始 token 后，权重被迫挤向近邻无关词</text>
+  <text x="542" y="179" class="body" fill="#dc2626" style="font-weight:700">→ 注意力失衡，困惑度 (PPL) 暴涨、输出乱码</text>
+
+  <!-- ==================== LOWER PANEL: STREAMINGLLM ==================== -->
+  <rect x="36" y="218" width="848" height="198" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.3"/>
+  <rect x="52" y="230" width="166" height="22" rx="11" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="135" y="245" class="pill" fill="#059669" text-anchor="middle">方案二：StreamingLLM</text>
+  <text x="228" y="246" class="body" fill="#475569">KV Cache = 固定 4 个 Attention Sink（永久常驻）+ 最近滑动窗口 W 个 token</text>
+
+  <!-- Group Labels -->
+  <text x="150" y="268" class="tiny" fill="#b45309" text-anchor="middle" style="font-weight:700">固定 Attention Sink (S = 4，永不驱逐)</text>
+  <text x="480" y="268" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">最近滑动窗口 (W = 4，滚动更新)</text>
+
+  <!-- 4 Sink tokens -->
+  <g>
+    <rect x="54"  y="276" width="44" height="32" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="76"  y="296" class="tok mono" fill="#92400e" text-anchor="middle">T0</text>
+
+    <rect x="104" y="276" width="44" height="32" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="126" y="296" class="tok mono" fill="#92400e" text-anchor="middle">T1</text>
+
+    <rect x="154" y="276" width="44" height="32" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="176" y="296" class="tok mono" fill="#92400e" text-anchor="middle">T2</text>
+
+    <rect x="204" y="276" width="44" height="32" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.8"/>
+    <text x="226" y="296" class="tok mono" fill="#92400e" text-anchor="middle">T3</text>
+  </g>
+
+  <!-- Evicted middle span -->
+  <line x1="256" y1="292" x2="360" y2="292" stroke="#cbd5e1" stroke-width="1.4" stroke-dasharray="4,3"/>
+  <rect x="266" y="281" width="84" height="22" rx="11" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="308" y="296" class="tiny" fill="#64748b" text-anchor="middle">丢弃 T4..T99</text>
+
+  <!-- 4 Recent Window tokens -->
+  <g>
+    <rect x="368" y="276" width="52" height="32" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+    <text x="394" y="296" class="tok mono" fill="#065f46" text-anchor="middle">T100</text>
+
+    <rect x="426" y="276" width="52" height="32" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+    <text x="452" y="296" class="tok mono" fill="#065f46" text-anchor="middle">T101</text>
+
+    <rect x="484" y="276" width="52" height="32" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+    <text x="510" y="296" class="tok mono" fill="#065f46" text-anchor="middle">T102</text>
+
+    <rect x="542" y="276" width="52" height="32" rx="5" fill="#ecfdf5" stroke="#059669" stroke-width="1.8"/>
+    <text x="568" y="296" class="tok mono" fill="#065f46" text-anchor="middle">T103</text>
+  </g>
+
+  <!-- Right Result Badge -->
+  <line x1="598" y1="292" x2="616" y2="292" stroke="#059669" stroke-width="2" marker-end="url(#arr-emerald)"/>
+  <rect x="622" y="266" width="246" height="48" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="636" y="285" class="h3" fill="#047857">总 KV 显存恒定 O(S + W)</text>
+  <text x="636" y="304" class="tiny" fill="#065f46">Sink 稳接冗余权重，无限生成 PPL 不崩</text>
+
+  <!-- ==================== ROPE POSITION RE-ASSIGNMENT STRIP ==================== -->
+  <rect x="52" y="324" width="816" height="80" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="352" class="h3" fill="#1e293b">RoPE 位置编码对比</text>
+  <text x="68" y="372" class="tiny">决定 Q·K 相对旋转角度</text>
+  <text x="68" y="390" class="tiny">避免超长位置外推失效</text>
+
+  <!-- Row 1: Original Jumping Positions (Wrong) -->
+  <rect x="206" y="334" width="122" height="26" rx="5" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="267" y="351" class="pill" fill="#dc2626" text-anchor="middle">✗ 原始跨跃位置</text>
+
+  <g class="mono" style="font-size:11.5px;font-weight:700" text-anchor="middle">
+    <rect x="338" y="335" width="36" height="24" rx="4" fill="#ffffff" stroke="#fca5a5"/>
+    <text x="356" y="351" fill="#64748b">0</text>
+    <rect x="378" y="335" width="36" height="24" rx="4" fill="#ffffff" stroke="#fca5a5"/>
+    <text x="396" y="351" fill="#64748b">1</text>
+    <rect x="418" y="335" width="36" height="24" rx="4" fill="#ffffff" stroke="#fca5a5"/>
+    <text x="436" y="351" fill="#64748b">2</text>
+    <rect x="458" y="335" width="36" height="24" rx="4" fill="#ffffff" stroke="#fca5a5"/>
+    <text x="476" y="351" fill="#64748b">3</text>
+
+    <!-- Jump gap marker -->
+    <text x="506" y="351" fill="#dc2626" style="font-size:10px">≠</text>
+
+    <rect x="518" y="335" width="40" height="24" rx="4" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="538" y="351" fill="#dc2626">100</text>
+    <rect x="562" y="335" width="40" height="24" rx="4" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="582" y="351" fill="#dc2626">101</text>
+    <rect x="606" y="335" width="40" height="24" rx="4" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="626" y="351" fill="#dc2626">102</text>
+    <rect x="650" y="335" width="40" height="24" rx="4" fill="#fef2f2" stroke="#dc2626"/>
+    <text x="670" y="351" fill="#dc2626">103</text>
+  </g>
+  <text x="702" y="351" class="tiny" fill="#dc2626" style="font-weight:600">存在 Δ=97 断层，超窗外推崩溃</text>
+
+  <!-- Row 2: Cache-Contiguous RoPE Positions (Right) -->
+  <rect x="206" y="368" width="122" height="26" rx="5" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="267" y="385" class="pill" fill="#3f51b5" text-anchor="middle">✓ 缓存内连续重排</text>
+
+  <g class="mono" style="font-size:11.5px;font-weight:700" text-anchor="middle">
+    <rect x="338" y="369" width="36" height="24" rx="4" fill="#fffbeb" stroke="#d97706"/>
+    <text x="356" y="385" fill="#92400e">0</text>
+    <rect x="378" y="369" width="36" height="24" rx="4" fill="#fffbeb" stroke="#d97706"/>
+    <text x="396" y="385" fill="#92400e">1</text>
+    <rect x="418" y="369" width="36" height="24" rx="4" fill="#fffbeb" stroke="#d97706"/>
+    <text x="436" y="385" fill="#92400e">2</text>
+    <rect x="458" y="369" width="36" height="24" rx="4" fill="#fffbeb" stroke="#d97706"/>
+    <text x="476" y="385" fill="#92400e">3</text>
+
+    <!-- Continuous bridge -->
+    <text x="506" y="385" fill="#3f51b5" style="font-size:11px">→</text>
+
+    <rect x="518" y="369" width="40" height="24" rx="4" fill="#eef2ff" stroke="#3f51b5"/>
+    <text x="538" y="385" fill="#312e81">4</text>
+    <rect x="562" y="369" width="40" height="24" rx="4" fill="#eef2ff" stroke="#3f51b5"/>
+    <text x="582" y="385" fill="#312e81">5</text>
+    <rect x="606" y="369" width="40" height="24" rx="4" fill="#eef2ff" stroke="#3f51b5"/>
+    <text x="626" y="385" fill="#312e81">6</text>
+    <rect x="650" y="369" width="40" height="24" rx="4" fill="#eef2ff" stroke="#3f51b5"/>
+    <text x="670" y="385" fill="#312e81">7</text>
+  </g>
+  <text x="702" y="385" class="tiny" fill="#3f51b5" style="font-weight:700">连续相对距离，永不越训练窗</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="438" class="note">要点：StreamingLLM 用极小开销留住开头 Sink KV 充当注意力“泄洪口”，并按缓存内连续索引赋予 RoPE，实现 O(1) 显存稳定流式生成。</text>
+</svg>

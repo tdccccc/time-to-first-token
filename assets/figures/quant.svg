@@ -1,56 +1,173 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-label="FP16、FP8 与 INT4 的位数、权重体积与 scale">
-<style>
-text{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
-.title{font-size:25px;font-weight:700;fill:#1f2937}
-.sub{font-size:15px;fill:#64748b}
-.label{font-size:19px;font-weight:700;fill:#1f2937}
-.small{font-size:14px;fill:#64748b}
-.value{font-size:18px;font-weight:700}
-.note{font-size:13px;fill:#64748b}
-.cell{stroke:#ffffff;stroke-width:1}
-.fp16{fill:#3f51b5}.fp8{fill:#0f9f6e}.int4{fill:#f59e0b}
-</style>
-<rect width="900" height="430" fill="#fbfcfe"/>
-<text x="40" y="40" class="title">量化：位数、体积与 scale</text>
-<text x="40" y="64" class="sub">同一 7B 模型：每格代表 1 bit，位宽决定权重体积；按 70 亿参数、仅权重估算。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 440" role="img" aria-label="Llama-3.1-8B 量化位宽对比：FP16 约 16GB、FP8 约 8GB、INT4 约 4GB，展示 bit 格子、权重搬运减半与 scale/zero-point 精度代价">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .card-title { font-size: 18px; font-weight: 700; fill: #1e293b; }
+    .card-sub { font-size: 12.5px; fill: #64748b; }
+    .metric { font-size: 21px; font-weight: 700; }
+    .metric-sub { font-size: 12px; font-weight: 600; }
+    .bit-label { font-size: 11.5px; fill: #475569; }
+    .bit-ch { font-size: 10px; font-weight: 700; text-anchor: middle; }
+    .bullet { font-size: 12px; fill: #334155; }
+    .badge-txt { font-size: 11px; font-weight: 700; text-anchor: middle; }
+    .note-b { font-size: 12.5px; fill: #1e293b; }
+    .note-m { font-size: 11.5px; fill: #64748b; }
+  </style>
+  <defs>
+    <marker id="arrow-div" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#64748b"/>
+    </marker>
+  </defs>
 
-<g>
-<rect x="50" y="100" width="230" height="200" rx="10" fill="#ffffff" stroke="#dbe3ef"/>
-<text x="70" y="132" class="label">FP16</text>
-<text x="70" y="156" class="small">16 bit / 参数</text>
-<text x="70" y="184" class="value" fill="#3f51b5">7B ≈ 14 GB</text>
-<g transform="translate(70,206)">
-<rect width="15" height="15" class="cell fp16"/><rect x="16" width="15" height="15" class="cell fp16"/><rect x="32" width="15" height="15" class="cell fp16"/><rect x="48" width="15" height="15" class="cell fp16"/><rect x="64" width="15" height="15" class="cell fp16"/><rect x="80" width="15" height="15" class="cell fp16"/><rect x="96" width="15" height="15" class="cell fp16"/><rect x="112" width="15" height="15" class="cell fp16"/>
-<rect y="16" width="15" height="15" class="cell fp16"/><rect x="16" y="16" width="15" height="15" class="cell fp16"/><rect x="32" y="16" width="15" height="15" class="cell fp16"/><rect x="48" y="16" width="15" height="15" class="cell fp16"/><rect x="64" y="16" width="15" height="15" class="cell fp16"/><rect x="80" y="16" width="15" height="15" class="cell fp16"/><rect x="96" y="16" width="15" height="15" class="cell fp16"/><rect x="112" y="16" width="15" height="15" class="cell fp16"/>
-</g>
-<text x="70" y="268" class="note">基线：精度最高，搬运最贵</text>
-</g>
+  <rect width="920" height="440" fill="#fbfcfe" rx="8"/>
 
-<g>
-<rect x="335" y="100" width="230" height="200" rx="10" fill="#ffffff" stroke="#dbe3ef"/>
-<text x="355" y="132" class="label">FP8</text>
-<text x="355" y="156" class="small">8 bit / 参数</text>
-<text x="355" y="184" class="value" fill="#0f9f6e">7B ≈ 7 GB</text>
-<g transform="translate(355,206)">
-<rect width="15" height="15" class="cell fp8"/><rect x="16" width="15" height="15" class="cell fp8"/><rect x="32" width="15" height="15" class="cell fp8"/><rect x="48" width="15" height="15" class="cell fp8"/><rect x="64" width="15" height="15" class="cell fp8"/><rect x="80" width="15" height="15" class="cell fp8"/><rect x="96" width="15" height="15" class="cell fp8"/><rect x="112" width="15" height="15" class="cell fp8"/>
-</g>
-<text x="355" y="268" class="note">需要 scale；误差看粒度与离群值</text>
-<text x="355" y="290" class="note">硬件支持因格式与卡而异</text>
-</g>
+  <!-- Header -->
+  <text x="38" y="38" class="title">量化直觉：位宽、权重体积与精度代价</text>
+  <text x="38" y="62" class="sub">同一 Llama-3.1-8B（8B 参数）模型；每格代表 1 bit，位宽减半直接带来权重体积与 Decode 带宽搬运减半。</text>
 
-<g>
-<rect x="620" y="100" width="230" height="200" rx="10" fill="#ffffff" stroke="#dbe3ef"/>
-<text x="640" y="132" class="label">INT4</text>
-<text x="640" y="156" class="small">4 bit / 参数</text>
-<text x="640" y="184" class="value" fill="#b45309">7B ≈ 3.5 GB</text>
-<g transform="translate(640,206)">
-<rect width="15" height="15" class="cell int4"/><rect x="16" width="15" height="15" class="cell int4"/><rect x="32" width="15" height="15" class="cell int4"/><rect x="48" width="15" height="15" class="cell int4"/>
-</g>
-<text x="640" y="268" class="note">scale / zero point 更关键</text>
-<text x="640" y="290" class="note">质量代价更大</text>
-</g>
+  <!-- Card 1: FP16 -->
+  <g>
+    <rect x="38" y="84" width="252" height="274" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.4"/>
+    <path d="M48,84 L280,84 Q290,84 290,90 L290,92 L38,92 L38,90 Q38,84 48,84 Z" fill="#3f51b5"/>
+    <text x="54" y="119" class="card-title">FP16</text>
+    <rect x="208" y="102" width="66" height="22" rx="11" fill="#eef2ff" stroke="#c7d2fe"/>
+    <text x="241" y="117" class="badge-txt" fill="#3730a3">精度基线</text>
+    <text x="54" y="140" class="card-sub">16 bit / 参数（2 字节）</text>
 
-<text x="50" y="330" class="small">位宽减半，权重体积减半；scale 与反量化是体积之外的代价。</text>
-<text x="50" y="356" class="small">示意：只算权重数据；实际显存还含激活、KV 缓存与框架开销。</text>
-<text x="50" y="382" class="small">质量损失取决于格式、粒度与实现，不能只看体积。</text>
+    <!-- Volume metric box -->
+    <rect x="54" y="152" width="220" height="44" rx="8" fill="#eef2ff"/>
+    <text x="66" y="181" class="metric" fill="#3f51b5">≈ 16 GB</text>
+    <text x="262" y="179" class="metric-sub" fill="#4f46e5" text-anchor="end">权重搬运 1×</text>
+
+    <!-- 16-bit grid (1S + 5E + 10M) -->
+    <text x="54" y="215" class="bit-label">16 bit 分布（1S + 5E + 10M）</text>
+    <g transform="translate(54,224)">
+      <!-- Row 1: 1S + 5E + 2M -->
+      <rect x="0"   y="0" width="22" height="18" rx="3" fill="#312e81"/><text x="11"  y="13" class="bit-ch" fill="#ffffff">S</text>
+      <rect x="25"  y="0" width="22" height="18" rx="3" fill="#4f46e5"/><text x="36"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="50"  y="0" width="22" height="18" rx="3" fill="#4f46e5"/><text x="61"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="75"  y="0" width="22" height="18" rx="3" fill="#4f46e5"/><text x="86"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="100" y="0" width="22" height="18" rx="3" fill="#4f46e5"/><text x="111" y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="125" y="0" width="22" height="18" rx="3" fill="#4f46e5"/><text x="136" y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="150" y="0" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="161" y="13" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="175" y="0" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="186" y="13" class="bit-ch" fill="#1e1b4b">M</text>
+      <!-- Row 2: 8M -->
+      <rect x="0"   y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="11"  y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="25"  y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="36"  y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="50"  y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="61"  y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="75"  y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="86"  y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="100" y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="111" y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="125" y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="136" y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="150" y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="161" y="35" class="bit-ch" fill="#1e1b4b">M</text>
+      <rect x="175" y="22" width="22" height="18" rx="3" fill="#a5b4fc"/><text x="186" y="35" class="bit-ch" fill="#1e1b4b">M</text>
+    </g>
+
+    <line x1="54" y1="278" x2="274" y2="278" stroke="#e2e8f0"/>
+    <text x="54" y="299" class="bullet">• 无需 scale / zero-point 元数据</text>
+    <text x="54" y="320" class="bullet">• 数值保真度最高，作为评测基线</text>
+    <text x="54" y="341" class="bullet">• 显存占用与 Decode 搬运最贵</text>
+  </g>
+
+  <!-- Halving arrow 1: FP16 -> FP8 -->
+  <g>
+    <rect x="293" y="151" width="38" height="22" rx="11" fill="#ecfdf5" stroke="#6ee7b7"/>
+    <text x="312" y="166" font-size="12" font-weight="700" fill="#047857" text-anchor="middle">÷ 2</text>
+    <line x1="294" y1="184" x2="328" y2="184" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-div)"/>
+    <text x="312" y="201" font-size="10.5" fill="#64748b" text-anchor="middle">搬运减半</text>
+  </g>
+
+  <!-- Card 2: FP8 -->
+  <g>
+    <rect x="334" y="84" width="252" height="274" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.4"/>
+    <path d="M344,84 L576,84 Q586,84 586,90 L586,92 L334,92 L334,90 Q334,84 344,84 Z" fill="#059669"/>
+    <text x="350" y="119" class="card-title">FP8 (E4M3)</text>
+    <rect x="504" y="102" width="66" height="22" rx="11" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="537" y="117" class="badge-txt" fill="#065f46">工程甜点</text>
+    <text x="350" y="140" class="card-sub">8 bit / 参数（1 字节）</text>
+
+    <!-- Volume metric box -->
+    <rect x="350" y="152" width="220" height="44" rx="8" fill="#ecfdf5"/>
+    <text x="362" y="181" class="metric" fill="#059669">≈ 8 GB</text>
+    <text x="558" y="179" class="metric-sub" fill="#047857" text-anchor="end">权重搬运 0.5×</text>
+
+    <!-- 8-bit grid + 8 saved ghost slots -->
+    <text x="350" y="215" class="bit-label">8 bit 分布（1S + 4E + 3M）+ 省 8 bit</text>
+    <g transform="translate(350,224)">
+      <!-- Row 1: 1S + 4E + 3M -->
+      <rect x="0"   y="0" width="22" height="18" rx="3" fill="#065f46"/><text x="11"  y="13" class="bit-ch" fill="#ffffff">S</text>
+      <rect x="25"  y="0" width="22" height="18" rx="3" fill="#059669"/><text x="36"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="50"  y="0" width="22" height="18" rx="3" fill="#059669"/><text x="61"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="75"  y="0" width="22" height="18" rx="3" fill="#059669"/><text x="86"  y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="100" y="0" width="22" height="18" rx="3" fill="#059669"/><text x="111" y="13" class="bit-ch" fill="#ffffff">E</text>
+      <rect x="125" y="0" width="22" height="18" rx="3" fill="#6ee7b7"/><text x="136" y="13" class="bit-ch" fill="#064e3b">M</text>
+      <rect x="150" y="0" width="22" height="18" rx="3" fill="#6ee7b7"/><text x="161" y="13" class="bit-ch" fill="#064e3b">M</text>
+      <rect x="175" y="0" width="22" height="18" rx="3" fill="#6ee7b7"/><text x="186" y="13" class="bit-ch" fill="#064e3b">M</text>
+      <!-- Row 2: 8 ghost saved slots -->
+      <rect x="0"   y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="25"  y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="50"  y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="75"  y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="100" y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="125" y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="150" y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="175" y="22" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+    </g>
+
+    <line x1="350" y1="278" x2="570" y2="278" stroke="#e2e8f0"/>
+    <text x="350" y="299" class="bullet">• 需配 per-tensor / block scale</text>
+    <text x="350" y="320" class="bullet">• 精度极接近 FP16（需防离群值）</text>
+    <text x="350" y="341" class="bullet">• H100/Ada 原生 W8A8 算力翻倍</text>
+  </g>
+
+  <!-- Halving arrow 2: FP8 -> INT4 -->
+  <g>
+    <rect x="589" y="151" width="38" height="22" rx="11" fill="#fffbeb" stroke="#fcd34d"/>
+    <text x="608" y="166" font-size="12" font-weight="700" fill="#b45309" text-anchor="middle">÷ 2</text>
+    <line x1="590" y1="184" x2="624" y2="184" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-div)"/>
+    <text x="608" y="201" font-size="10.5" fill="#64748b" text-anchor="middle">再减半</text>
+  </g>
+
+  <!-- Card 3: INT4 -->
+  <g>
+    <rect x="630" y="84" width="252" height="274" rx="10" fill="#ffffff" stroke="#fde68a" stroke-width="1.4"/>
+    <path d="M640,84 L872,84 Q882,84 882,90 L882,92 L630,92 L630,90 Q630,84 640,84 Z" fill="#d97706"/>
+    <text x="646" y="119" class="card-title">INT4 (W4A16)</text>
+    <rect x="800" y="102" width="66" height="22" rx="11" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="833" y="117" class="badge-txt" fill="#92400e">极致压缩</text>
+    <text x="646" y="140" class="card-sub">4 bit / 参数（0.5 字节）</text>
+
+    <!-- Volume metric box -->
+    <rect x="646" y="152" width="220" height="44" rx="8" fill="#fffbeb"/>
+    <text x="658" y="181" class="metric" fill="#d97706">≈ 4 GB</text>
+    <text x="854" y="179" class="metric-sub" fill="#b45309" text-anchor="end">权重搬运 0.25×</text>
+
+    <!-- 4-bit grid + ghost slots + group scale/zp bar -->
+    <text x="646" y="215" class="bit-label">4 bit 整数（每组附加 scale + zp）</text>
+    <g transform="translate(646,224)">
+      <!-- Row 1: 4 solid INT4 bits + 4 ghost -->
+      <rect x="0"   y="0" width="22" height="18" rx="3" fill="#d97706"/><text x="11" y="13" class="bit-ch" fill="#ffffff">b3</text>
+      <rect x="25"  y="0" width="22" height="18" rx="3" fill="#d97706"/><text x="36" y="13" class="bit-ch" fill="#ffffff">b2</text>
+      <rect x="50"  y="0" width="22" height="18" rx="3" fill="#d97706"/><text x="61" y="13" class="bit-ch" fill="#ffffff">b1</text>
+      <rect x="75"  y="0" width="22" height="18" rx="3" fill="#d97706"/><text x="86" y="13" class="bit-ch" fill="#ffffff">b0</text>
+      <rect x="100" y="0" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="125" y="0" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="150" y="0" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <rect x="175" y="0" width="22" height="18" rx="3" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+      <!-- Row 2: group scale / zero-point metadata bar -->
+      <rect x="0" y="22" width="197" height="18" rx="4" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="98.5" y="34.5" font-size="10.5" font-weight="600" fill="#92400e" text-anchor="middle">+ 分组 scale &amp; zero-point（如 g=128）</text>
+    </g>
+
+    <line x1="646" y1="278" x2="866" y2="278" stroke="#e2e8f0"/>
+    <text x="646" y="299" class="bullet">• 依赖 scale / zero-point 保真</text>
+    <text x="646" y="320" class="bullet">• 运行期需反量化（Dequant）融合</text>
+    <text x="646" y="341" class="bullet">• 精度代价最大，须经业务评测验收</text>
+  </g>
+
+  <!-- Bottom takeaway -->
+  <rect x="38" y="372" width="844" height="48" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="54" y="393" class="note-b"><tspan font-weight="700">核心取舍：</tspan>位宽每减半，Decode 权重搬运量直降 50%；但 scale / zero-point、反量化算子与精度退化随位宽降低而增大。</text>
+  <text x="54" y="411" class="note-m">估算口径：Llama-3.1-8B（≈80 亿参数）仅统计纯权重体积；线上部署显存还需叠加 KV 缓存、激活张量与框架预留空间。</text>
 </svg>

@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-label="LLM 推理工程四层全栈地图：从服务接入与路由层、推理引擎调度层、模型架构与算子 Kernel 层到异构硬件与软件栈层，左侧贯穿性能度量与 Profiling 主轴">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .layer-title { font-size: 15px; font-weight: 700; }
+    .layer-hint { font-size: 11.5px; }
+    .ch-pill { font-size: 11px; font-weight: 700; text-anchor: middle; }
+    .chip-txt { font-size: 12px; font-weight: 600; fill: #1e293b; text-anchor: middle; }
+    .spine-title { font-size: 14.5px; font-weight: 700; fill: #3730a3; text-anchor: middle; }
+    .spine-card-t { font-size: 12px; font-weight: 700; fill: #1e293b; text-anchor: middle; }
+    .spine-card-s { font-size: 10.5px; fill: #64748b; text-anchor: middle; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arrow-spine" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#6366f1"/>
+    </marker>
+    <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 Z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="470" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="38" y="38" class="title">LLM 推理工程四层全栈地图</text>
+  <text x="38" y="62" class="sub">自上而下打通请求接入、调度引擎、算子 Kernel 与异构硬件；全书 5 篇 23 章坐标与排障定位全景。</text>
+
+  <!-- Left Vertical Spine: 性能度量与 Profiling 主轴 -->
+  <g>
+    <rect x="38" y="82" width="118" height="340" rx="10" fill="#eef2ff" stroke="#818cf8" stroke-width="1.5"/>
+    <rect x="53" y="94" width="88" height="22" rx="11" fill="#3f51b5"/>
+    <text x="97" y="109" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">贯穿四层主轴</text>
+
+    <text x="97" y="140" class="spine-title">性能度量与</text>
+    <text x="97" y="159" class="spine-title">Profiling</text>
+
+    <rect x="48" y="176" width="98" height="50" rx="7" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="97" y="197" class="spine-card-t">Roofline 模型</text>
+    <text x="97" y="215" class="spine-card-s">带宽 vs 算力定性</text>
+
+    <rect x="48" y="236" width="98" height="50" rx="7" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="97" y="257" class="spine-card-t">SLO 指标体系</text>
+    <text x="97" y="275" class="spine-card-s">TTFT · ITL · TPOT</text>
+
+    <rect x="48" y="296" width="98" height="50" rx="7" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="97" y="317" class="spine-card-t">Profiler 溯源</text>
+    <text x="97" y="335" class="spine-card-s">Trace / 覆盖归因</text>
+
+    <rect x="48" y="362" width="98" height="46" rx="7" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="97" y="381" font-size="11" font-weight="700" fill="#3730a3" text-anchor="middle">第一篇 Ch 1, 3, 4</text>
+    <text x="97" y="398" font-size="11" font-weight="700" fill="#3730a3" text-anchor="middle">第五篇 Ch 23</text>
+  </g>
+
+  <!-- Spine-to-layer horizontal connectors -->
+  <line x1="156" y1="120" x2="174" y2="120" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arrow-spine)"/>
+  <line x1="156" y1="208" x2="174" y2="208" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arrow-spine)"/>
+  <line x1="156" y1="296" x2="174" y2="296" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arrow-spine)"/>
+  <line x1="156" y1="384" x2="174" y2="384" stroke="#6366f1" stroke-width="1.6" marker-end="url(#arrow-spine)"/>
+
+  <!-- Band 1: 服务接入与路由层 -->
+  <g>
+    <rect x="176" y="82" width="706" height="76" rx="10" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1.4"/>
+    <rect x="182" y="92" width="4" height="56" rx="2" fill="#0284c7"/>
+    <text x="196" y="106" class="layer-title" fill="#075985">① 服务接入与路由层</text>
+    <text x="352" y="106" class="layer-hint" fill="#0284c7">面向线上流量、SLO 保障与多副本调度</text>
+    <rect x="742" y="90" width="128" height="22" rx="11" fill="#e0f2fe" stroke="#7dd3fc"/>
+    <text x="806" y="105" class="ch-pill" fill="#0369a1">第二篇 Ch 7, 11</text>
+
+    <rect x="196" y="118" width="161" height="30" rx="6" fill="#ffffff" stroke="#bae6fd"/>
+    <text x="276.5" y="137" class="chip-txt">OpenAI API 协议接入</text>
+    <rect x="368" y="118" width="161" height="30" rx="6" fill="#ffffff" stroke="#bae6fd"/>
+    <text x="448.5" y="137" class="chip-txt">Prometheus 监控观测</text>
+    <rect x="540" y="118" width="161" height="30" rx="6" fill="#ffffff" stroke="#bae6fd"/>
+    <text x="620.5" y="137" class="chip-txt">PD 解耦与弹性扩缩容</text>
+    <rect x="712" y="118" width="158" height="30" rx="6" fill="#ffffff" stroke="#bae6fd"/>
+    <text x="791" y="137" class="chip-txt">容量评估与成本路由</text>
+  </g>
+
+  <!-- Connector 1 -> 2 -->
+  <line x1="529" y1="158" x2="529" y2="168" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-down)"/>
+
+  <!-- Band 2: 推理引擎调度层 -->
+  <g>
+    <rect x="176" y="170" width="706" height="76" rx="10" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.4"/>
+    <rect x="182" y="180" width="4" height="56" rx="2" fill="#4f46e5"/>
+    <text x="196" y="194" class="layer-title" fill="#3730a3">② 推理引擎调度层</text>
+    <text x="342" y="194" class="layer-hint" fill="#4f46e5">vLLM · SGLang · TensorRT-LLM 核心机制</text>
+    <rect x="742" y="178" width="128" height="22" rx="11" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="806" y="193" class="ch-pill" fill="#3730a3">第二篇 Ch 5–10</text>
+
+    <rect x="196" y="206" width="161" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="276.5" y="225" class="chip-txt">连续批处理 / 分块预填充</text>
+    <rect x="368" y="206" width="161" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="448.5" y="225" class="chip-txt">PagedAttention 分页KV</text>
+    <rect x="540" y="206" width="161" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="620.5" y="225" class="chip-txt">RadixAttention 前缀复用</text>
+    <rect x="712" y="206" width="158" height="30" rx="6" fill="#ffffff" stroke="#c7d2fe"/>
+    <text x="791" y="225" class="chip-txt">量化调度与投机解码</text>
+  </g>
+
+  <!-- Connector 2 -> 3 -->
+  <line x1="529" y1="246" x2="529" y2="256" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-down)"/>
+
+  <!-- Band 3: 模型架构与算子 Kernel 层 -->
+  <g>
+    <rect x="176" y="258" width="706" height="76" rx="10" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.4"/>
+    <rect x="182" y="268" width="4" height="56" rx="2" fill="#059669"/>
+    <text x="196" y="282" class="layer-title" fill="#065f46">③ 模型架构与算子 Kernel 层</text>
+    <text x="414" y="282" class="layer-hint" fill="#047857">模型账本、定制算子与融合内核实现</text>
+    <rect x="684" y="266" width="186" height="22" rx="11" fill="#d1fae5" stroke="#6ee7b7"/>
+    <text x="777" y="281" class="ch-pill" fill="#065f46">第一篇 Ch 2 · 第三篇 Ch 12–17</text>
+
+    <rect x="196" y="294" width="128" height="30" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+    <text x="260" y="313" class="chip-txt">GQA / MLA / MoE</text>
+    <rect x="333" y="294" width="128" height="30" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+    <text x="397" y="313" class="chip-txt">GEMM 四版优化</text>
+    <rect x="470" y="294" width="128" height="30" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+    <text x="534" y="313" class="chip-txt">Triton 算子编写</text>
+    <rect x="607" y="294" width="128" height="30" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+    <text x="671" y="313" class="chip-txt">FlashAttention</text>
+    <rect x="744" y="294" width="126" height="30" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+    <text x="807" y="313" class="chip-txt">量化 Matmul 融合</text>
+  </g>
+
+  <!-- Connector 3 -> 4 -->
+  <line x1="529" y1="334" x2="529" y2="344" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-down)"/>
+
+  <!-- Band 4: 异构硬件与软件栈层 -->
+  <g>
+    <rect x="176" y="346" width="706" height="76" rx="10" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.4"/>
+    <rect x="182" y="356" width="4" height="56" rx="2" fill="#d97706"/>
+    <text x="196" y="370" class="layer-title" fill="#92400e">④ 异构硬件与软件栈层</text>
+    <text x="372" y="370" class="layer-hint" fill="#b45309">跨芯片生态对比、算子覆盖与精度回归</text>
+    <rect x="638" y="354" width="232" height="22" rx="11" fill="#fef3c7" stroke="#fcd34d"/>
+    <text x="754" y="369" class="ch-pill" fill="#92400e">第一篇 Ch 1, 4 · 第四/五篇 Ch 18–23</text>
+
+    <rect x="196" y="382" width="320" height="30" rx="6" fill="#ffffff" stroke="#fde68a"/>
+    <text x="356" y="401" class="chip-txt">NVIDIA A100 / H100  +  CUDA / CUTLASS / NCCL</text>
+
+    <rect x="522" y="386" width="24" height="22" rx="11" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="534" y="401" font-size="11" font-weight="700" fill="#b45309" text-anchor="middle">vs</text>
+
+    <rect x="552" y="382" width="318" height="30" rx="6" fill="#ffffff" stroke="#fde68a"/>
+    <text x="711" y="401" class="chip-txt">昇腾 910B  +  CANN / AscendC / HCCL</text>
+  </g>
+
+  <!-- Bottom takeaway -->
+  <rect x="38" y="432" width="844" height="24" rx="5" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="50" y="448" class="note"><tspan font-weight="700" fill="#1e293b">阅读与排障路径：</tspan>面对延迟或吞吐异常，先用左侧度量主轴定性（算力 / 带宽 / 调度 / 通信），再沿四层逐级下钻定位。</text>
+</svg>

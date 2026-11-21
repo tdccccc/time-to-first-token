@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 500" role="img" aria-label="FlashAttention-1 Split-K 与 FlashAttention-2 Split-Q 的 Warp 分工对比，以及 FlashAttention-3 Hopper 异步流水与 Ping-Pong 双泳道">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .card-hd { font-size: 14px; font-weight: 700; }
+    .badge { font-size: 11px; font-weight: 700; }
+    .lbl { font-size: 11.5px; font-weight: 700; fill: #1e293b; }
+    .tiny { font-size: 10.5px; fill: #475569; }
+    .cell-t { font-size: 10.5px; font-weight: 700; }
+    .cell-s { font-size: 9.5px; fill: #475569; }
+    .note { font-size: 12.5px; fill: #334155; }
+  </style>
+  <defs>
+    <marker id="arr-rose" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="500" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">FlashAttention 演进：Warp 分工与 Hopper 异步流水</text>
+  <text x="36" y="61" class="sub">FA2 改切 Q 行块消除跨 Warp 归约；FA3 借 TMA 与 Ping-Pong 双泳道实现搬运、WGMMA 与 Softmax 三路重叠。</text>
+
+  <!-- ==================== Top Left: FA1 (Split-K) ==================== -->
+  <rect x="36" y="76" width="414" height="172" rx="10" fill="#ffffff" stroke="#fecaca" stroke-width="1.3"/>
+  <text x="52" y="99" class="card-hd" fill="#dc2626">FA1：Split-K（4 Warp 瓜分 K/V）</text>
+  <rect x="314" y="83" width="124" height="22" rx="5" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="376" y="98" class="badge" fill="#dc2626" text-anchor="middle">需 SMEM 归约通信</text>
+
+  <!-- Shared Q -->
+  <rect x="52" y="114" width="46" height="104" rx="6" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="75" y="162" class="lbl" fill="#3f51b5" text-anchor="middle">Q</text>
+  <text x="75" y="179" class="tiny" text-anchor="middle">共享</text>
+
+  <!-- Fan out arrows Q -> Warps -->
+  <line x1="98" y1="126" x2="114" y2="126" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="98" y1="153" x2="114" y2="153" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="98" y1="180" x2="114" y2="180" stroke="#94a3b8" stroke-width="1.2"/>
+  <line x1="98" y1="207" x2="114" y2="207" stroke="#94a3b8" stroke-width="1.2"/>
+
+  <!-- 4 Warps split K/V -->
+  <rect x="116" y="114" width="136" height="22" rx="4" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="184" y="129" class="mono cell-t" fill="#92400e" text-anchor="middle">W0: Q × K0, V0</text>
+  <rect x="116" y="141" width="136" height="22" rx="4" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="184" y="156" class="mono cell-t" fill="#92400e" text-anchor="middle">W1: Q × K1, V1</text>
+  <rect x="116" y="168" width="136" height="22" rx="4" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="184" y="183" class="mono cell-t" fill="#92400e" text-anchor="middle">W2: Q × K2, V2</text>
+  <rect x="116" y="195" width="136" height="22" rx="4" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="184" y="210" class="mono cell-t" fill="#92400e" text-anchor="middle">W3: Q × K3, V3</text>
+
+  <!-- Converging red arrows to SMEM Reduce -->
+  <line x1="252" y1="125" x2="282" y2="148" stroke="#dc2626" stroke-width="1.3" marker-end="url(#arr-rose)"/>
+  <line x1="252" y1="152" x2="282" y2="160" stroke="#dc2626" stroke-width="1.3" marker-end="url(#arr-rose)"/>
+  <line x1="252" y1="179" x2="282" y2="172" stroke="#dc2626" stroke-width="1.3" marker-end="url(#arr-rose)"/>
+  <line x1="252" y1="206" x2="282" y2="184" stroke="#dc2626" stroke-width="1.3" marker-end="url(#arr-rose)"/>
+
+  <!-- SMEM Reduce box -->
+  <rect x="286" y="124" width="84" height="84" rx="7" fill="#fef2f2" stroke="#ef4444" stroke-width="1.3"/>
+  <text x="328" y="148" class="lbl" fill="#dc2626" text-anchor="middle">SMEM</text>
+  <text x="328" y="166" class="tiny" fill="#991b1b" text-anchor="middle">写部分和</text>
+  <text x="328" y="182" class="tiny" fill="#991b1b" text-anchor="middle">屏障同步</text>
+  <text x="328" y="198" class="tiny" fill="#991b1b" text-anchor="middle">归约合并</text>
+
+  <line x1="370" y1="166" x2="387" y2="166" stroke="#64748b" stroke-width="1.4" marker-end="url(#arr-slate)"/>
+  <rect x="390" y="144" width="48" height="44" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="414" y="170" class="lbl" text-anchor="middle">O 块</text>
+
+  <text x="52" y="237" class="tiny" fill="#b91c1c">4 个 Warp 算同行部分和 → 频繁读写 SMEM + __syncthreads()</text>
+
+  <!-- ==================== Top Right: FA2 (Split-Q) ==================== -->
+  <rect x="470" y="76" width="414" height="172" rx="10" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.3"/>
+  <text x="486" y="99" class="card-hd" fill="#059669">FA2：Split-Q（4 Warp 各管 Q 行段）</text>
+  <rect x="760" y="83" width="112" height="22" rx="5" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="816" y="98" class="badge" fill="#047857" text-anchor="middle">零跨 Warp 通信</text>
+
+  <!-- 4 Q slices -->
+  <rect x="486" y="114" width="46" height="22" rx="4" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="509" y="129" class="mono cell-t" fill="#3f51b5" text-anchor="middle">Q0</text>
+  <rect x="486" y="141" width="46" height="22" rx="4" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="509" y="156" class="mono cell-t" fill="#3f51b5" text-anchor="middle">Q1</text>
+  <rect x="486" y="168" width="46" height="22" rx="4" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="509" y="183" class="mono cell-t" fill="#3f51b5" text-anchor="middle">Q2</text>
+  <rect x="486" y="195" width="46" height="22" rx="4" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="509" y="210" class="mono cell-t" fill="#3f51b5" text-anchor="middle">Q3</text>
+
+  <!-- Parallel Warps -->
+  <line x1="532" y1="125" x2="546" y2="125" stroke="#059669" stroke-width="1.3"/>
+  <line x1="532" y1="152" x2="546" y2="152" stroke="#059669" stroke-width="1.3"/>
+  <line x1="532" y1="179" x2="546" y2="179" stroke="#059669" stroke-width="1.3"/>
+  <line x1="532" y1="206" x2="546" y2="206" stroke="#059669" stroke-width="1.3"/>
+
+  <rect x="548" y="114" width="168" height="22" rx="4" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="632" y="129" class="mono cell-t" fill="#047857" text-anchor="middle">W0: Q0 × 全部 K, V</text>
+  <rect x="548" y="141" width="168" height="22" rx="4" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="632" y="156" class="mono cell-t" fill="#047857" text-anchor="middle">W1: Q1 × 全部 K, V</text>
+  <rect x="548" y="168" width="168" height="22" rx="4" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="632" y="183" class="mono cell-t" fill="#047857" text-anchor="middle">W2: Q2 × 全部 K, V</text>
+  <rect x="548" y="195" width="168" height="22" rx="4" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="632" y="210" class="mono cell-t" fill="#047857" text-anchor="middle">W3: Q3 × 全部 K, V</text>
+
+  <!-- Direct arrows to O0..O3 -->
+  <line x1="716" y1="125" x2="745" y2="125" stroke="#059669" stroke-width="1.4" marker-end="url(#arr-emerald)"/>
+  <line x1="716" y1="152" x2="745" y2="152" stroke="#059669" stroke-width="1.4" marker-end="url(#arr-emerald)"/>
+  <line x1="716" y1="179" x2="745" y2="179" stroke="#059669" stroke-width="1.4" marker-end="url(#arr-emerald)"/>
+  <line x1="716" y1="206" x2="745" y2="206" stroke="#059669" stroke-width="1.4" marker-end="url(#arr-emerald)"/>
+
+  <rect x="748" y="114" width="122" height="22" rx="4" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="809" y="129" class="cell-t" fill="#0369a1" text-anchor="middle">O0（寄存器直出）</text>
+  <rect x="748" y="141" width="122" height="22" rx="4" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="809" y="156" class="cell-t" fill="#0369a1" text-anchor="middle">O1（寄存器直出）</text>
+  <rect x="748" y="168" width="122" height="22" rx="4" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="809" y="183" class="cell-t" fill="#0369a1" text-anchor="middle">O2（寄存器直出）</text>
+  <rect x="748" y="195" width="122" height="22" rx="4" fill="#e0f2fe" stroke="#38bdf8"/>
+  <text x="809" y="210" class="cell-t" fill="#0369a1" text-anchor="middle">O3（寄存器直出）</text>
+
+  <text x="486" y="237" class="tiny" fill="#047857">各 Warp 独立累加所属行 O_i → 无 SMEM 归约，提升矩阵算力占比</text>
+
+  <!-- ==================== Bottom: FA3 Hopper Async Pipeline & Ping-Pong ==================== -->
+  <rect x="36" y="260" width="848" height="200" rx="10" fill="#ffffff" stroke="#bae6fd" stroke-width="1.3"/>
+  <text x="52" y="283" class="card-hd" fill="#0369a1">FA3 (Hopper)：TMA 异步流水与 Ping-Pong 双泳道</text>
+
+  <!-- Legend pills -->
+  <rect x="548" y="268" width="96" height="20" rx="4" fill="#e0e7ff" stroke="#6366f1"/>
+  <text x="596" y="282" class="badge" fill="#3f51b5" text-anchor="middle">TMA 异步搬运</text>
+  <rect x="652" y="268" width="106" height="20" rx="4" fill="#d1fae5" stroke="#059669"/>
+  <text x="705" y="282" class="badge" fill="#047857" text-anchor="middle">WGMMA 矩阵</text>
+  <rect x="766" y="268" width="106" height="20" rx="4" fill="#fef3c7" stroke="#d97706"/>
+  <text x="819" y="282" class="badge" fill="#b45309" text-anchor="middle">Softmax 向量</text>
+
+  <!-- Lane 1: Producer Warpgroup -->
+  <rect x="52" y="298" width="164" height="38" rx="6" fill="#eef2ff" stroke="#818cf8"/>
+  <text x="134" y="315" class="lbl" fill="#3f51b5" text-anchor="middle">Producer Warpgroup</text>
+  <text x="134" y="330" class="tiny" text-anchor="middle">TMA 专职搬运 K/V</text>
+
+  <!-- 6 TMA slots (x=226 + i*107, w=101) -->
+  <g>
+    <rect x="226" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="276" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K0/V0</text>
+    <text x="276" y="330" class="cell-s" text-anchor="middle">写入 Ring[0]</text>
+
+    <rect x="333" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="383" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K1/V1</text>
+    <text x="383" y="330" class="cell-s" text-anchor="middle">写入 Ring[1]</text>
+
+    <rect x="440" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="490" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K2/V2</text>
+    <text x="490" y="330" class="cell-s" text-anchor="middle">写入 Ring[2]</text>
+
+    <rect x="547" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="597" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K3/V3</text>
+    <text x="597" y="330" class="cell-s" text-anchor="middle">写入 Ring[0]</text>
+
+    <rect x="654" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="704" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K4/V4</text>
+    <text x="704" y="330" class="cell-s" text-anchor="middle">写入 Ring[1]</text>
+
+    <rect x="761" y="298" width="101" height="38" rx="5" fill="#e0e7ff" stroke="#6366f1"/>
+    <text x="811" y="315" class="mono cell-t" fill="#3730a3" text-anchor="middle">TMA K5/V5</text>
+    <text x="811" y="330" class="cell-s" text-anchor="middle">写入 Ring[2]</text>
+  </g>
+
+  <!-- Ring Buffer Strip -->
+  <rect x="52" y="344" width="810" height="20" rx="4" fill="#f1f5f9" stroke="#cbd5e1" stroke-dasharray="5 3"/>
+  <text x="457" y="358" class="tiny" fill="#334155" text-anchor="middle">SMEM 环形片上缓冲（Ring Buffer）：mbarrier 信号量解耦生产与消费，无全局停顿</text>
+
+  <!-- Highlight steady-state overlap columns (t2..t5) -->
+  <rect x="436" y="368" width="430" height="84" rx="6" fill="none" stroke="#0284c7" stroke-width="1.2" stroke-dasharray="4 3"/>
+
+  <!-- Lane 2: Consumer WG 1 (Ping) -->
+  <rect x="52" y="372" width="164" height="36" rx="6" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="134" y="388" class="lbl" fill="#047857" text-anchor="middle">Consumer WG 1</text>
+  <text x="134" y="402" class="tiny" text-anchor="middle">Ping 泳道（处理 Q_A）</text>
+
+  <rect x="226" y="372" width="101" height="36" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+  <text x="276" y="394" class="tiny" text-anchor="middle">等待 K0 就绪</text>
+
+  <rect x="333" y="372" width="101" height="36" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="383" y="388" class="mono cell-t" fill="#065f46" text-anchor="middle">WGMMA</text>
+  <text x="383" y="402" class="cell-s" text-anchor="middle">Q_A · K0</text>
+
+  <rect x="440" y="372" width="101" height="36" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="490" y="388" class="mono cell-t" fill="#92400e" text-anchor="middle">Softmax</text>
+  <text x="490" y="402" class="cell-s" text-anchor="middle">S0 归一化</text>
+
+  <rect x="547" y="372" width="101" height="36" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="597" y="388" class="mono cell-t" fill="#065f46" text-anchor="middle">WGMMA</text>
+  <text x="597" y="402" class="cell-s" text-anchor="middle">P0·V0 / Q·K1</text>
+
+  <rect x="654" y="372" width="101" height="36" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="704" y="388" class="mono cell-t" fill="#92400e" text-anchor="middle">Softmax</text>
+  <text x="704" y="402" class="cell-s" text-anchor="middle">S1 归一化</text>
+
+  <rect x="761" y="372" width="101" height="36" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="811" y="388" class="mono cell-t" fill="#065f46" text-anchor="middle">WGMMA</text>
+  <text x="811" y="402" class="cell-s" text-anchor="middle">P1·V1 / Q·K2</text>
+
+  <!-- Lane 3: Consumer WG 2 (Pong) -->
+  <rect x="52" y="413" width="164" height="36" rx="6" fill="#fffbeb" stroke="#fbbf24"/>
+  <text x="134" y="429" class="lbl" fill="#b45309" text-anchor="middle">Consumer WG 2</text>
+  <text x="134" y="443" class="tiny" text-anchor="middle">Pong 泳道（处理 Q_B）</text>
+
+  <rect x="226" y="413" width="101" height="36" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+  <text x="276" y="435" class="tiny" text-anchor="middle">等待 K0 就绪</text>
+
+  <rect x="333" y="413" width="101" height="36" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 2"/>
+  <text x="383" y="435" class="tiny" text-anchor="middle">错峰让出 TC</text>
+
+  <rect x="440" y="413" width="101" height="36" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="490" y="429" class="mono cell-t" fill="#065f46" text-anchor="middle">WGMMA</text>
+  <text x="490" y="443" class="cell-s" text-anchor="middle">Q_B · K0</text>
+
+  <rect x="547" y="413" width="101" height="36" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="597" y="429" class="mono cell-t" fill="#92400e" text-anchor="middle">Softmax</text>
+  <text x="597" y="443" class="cell-s" text-anchor="middle">S0 归一化</text>
+
+  <rect x="654" y="413" width="101" height="36" rx="5" fill="#d1fae5" stroke="#059669"/>
+  <text x="704" y="429" class="mono cell-t" fill="#065f46" text-anchor="middle">WGMMA</text>
+  <text x="704" y="443" class="cell-s" text-anchor="middle">P0·V0 / Q·K1</text>
+
+  <rect x="761" y="413" width="101" height="36" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="811" y="429" class="mono cell-t" fill="#92400e" text-anchor="middle">Softmax</text>
+  <text x="811" y="443" class="cell-s" text-anchor="middle">S1 归一化</text>
+
+  <!-- Bottom takeaway -->
+  <text x="36" y="478" class="note">稳态特征（虚线框内）：每一拍同时运行 TMA 搬运 + 一路 Tensor Core WGMMA + 一路 Vector Softmax，计算与访存完全重叠。</text>
+</svg>

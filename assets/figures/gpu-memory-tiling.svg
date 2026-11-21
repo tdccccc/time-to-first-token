@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 500" role="img" aria-label="GPU GEMM Shared Memory 分块滑动（Tiling）与 32-Bank 冲突消除：左半展示矩阵 A 行条带与 B 列条带沿 K 维逐块载入片上 As、Bs 复算 BLOCK 次使算术强度从 0.25 跃升至 8；右半对比 BsT[32][32] 按列读全撞 Bank 0（32 路串行）与 BsT[32][33] 加一列 Padding 错开到 Bank 0..31 零冲突并行">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 14px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12.5px; font-weight: 700; }
+    .body { font-size: 11.5px; fill: #334155; }
+    .tiny { font-size: 10.5px; fill: #64748b; }
+    .cell { font-size: 10px; font-weight: 700; }
+    .pill { font-size: 11px; font-weight: 700; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3f51b5"/>
+    </marker>
+    <marker id="arr-sky" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#0284c7"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-slate" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="920" height="500" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">GPU GEMM 分块滑动（Tiling）与 Shared Memory Bank 错位</text>
+  <text x="36" y="62" class="sub">左：沿 K 维将 A/B 块搬入片上 Shared Memory 复用 BLOCK 次；右：+1 列 Padding 消除 32-Bank 串行冲突。</text>
+
+  <!-- ==================== LEFT PANEL: GEMM TILING ==================== -->
+  <rect x="36" y="78" width="424" height="378" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.3"/>
+  <rect x="52" y="92" width="128" height="22" rx="11" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="116" y="107" class="pill" fill="#3f51b5" text-anchor="middle">分块滑动 Tiling</text>
+  <text x="190" y="108" class="body" fill="#475569">BLOCK = 32（片上复算 32 次）</text>
+
+  <!-- Matrix B (K x N) top-right -->
+  <rect x="236" y="128" width="120" height="76" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="364" y="144" class="h3 mono" fill="#1e293b">B (K×N)</text>
+  <!-- Highlighted Col Strip of B -->
+  <rect x="278" y="128" width="30" height="76" fill="#e0f2fe" stroke="#38bdf8" stroke-width="1"/>
+  <line x1="278" y1="147" x2="308" y2="147" stroke="#7dd3fc" stroke-width="0.9"/>
+  <line x1="278" y1="166" x2="308" y2="166" stroke="#7dd3fc" stroke-width="0.9"/>
+  <line x1="278" y1="185" x2="308" y2="185" stroke="#7dd3fc" stroke-width="0.9"/>
+  <!-- Active Tile Bs -->
+  <rect x="278" y="147" width="30" height="19" fill="#0284c7"/>
+  <text x="293" y="160" class="cell mono" fill="#ffffff" text-anchor="middle">Bs</text>
+  <!-- Sliding arrow along K for B -->
+  <line x1="322" y1="138" x2="322" y2="192" stroke="#0284c7" stroke-width="1.5" marker-end="url(#arr-sky)"/>
+  <text x="364" y="172" class="tiny" fill="#0284c7" style="font-weight:600">沿 K 向下滑动</text>
+
+  <!-- Matrix A (M x K) bottom-left -->
+  <rect x="58" y="220" width="136" height="82" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="58" y="212" class="h3 mono" fill="#1e293b">A (M×K)</text>
+  <!-- Highlighted Row Strip of A -->
+  <rect x="58" y="246" width="136" height="28" fill="#eef2ff" stroke="#818cf8" stroke-width="1"/>
+  <line x1="92"  y1="246" x2="92"  y2="274" stroke="#a5b4fc" stroke-width="0.9"/>
+  <line x1="126" y1="246" x2="126" y2="274" stroke="#a5b4fc" stroke-width="0.9"/>
+  <line x1="160" y1="246" x2="160" y2="274" stroke="#a5b4fc" stroke-width="0.9"/>
+  <!-- Active Tile As -->
+  <rect x="92" y="246" width="34" height="28" fill="#3f51b5"/>
+  <text x="109" y="264" class="cell mono" fill="#ffffff" text-anchor="middle">As</text>
+  <!-- Sliding arrow along K for A -->
+  <line x1="74" y1="288" x2="178" y2="288" stroke="#3f51b5" stroke-width="1.5" marker-end="url(#arr-indigo)"/>
+  <text x="126" y="300" class="tiny" fill="#3f51b5" text-anchor="middle" style="font-weight:600">沿 K 向右滑动</text>
+
+  <!-- Projection dashed lines into C_tile -->
+  <line x1="194" y1="260" x2="276" y2="260" stroke="#818cf8" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <line x1="293" y1="204" x2="293" y2="244" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="216" y="254" class="tiny" fill="#64748b" text-anchor="middle">×</text>
+
+  <!-- Matrix C (M x N) bottom-right -->
+  <rect x="236" y="220" width="120" height="82" rx="4" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="364" y="236" class="h3 mono" fill="#1e293b">C (M×N)</text>
+  <!-- Target Output Tile C_tile -->
+  <rect x="278" y="246" width="30" height="28" fill="#059669"/>
+  <text x="293" y="264" class="cell mono" fill="#ffffff" text-anchor="middle">C_t</text>
+  <text x="364" y="262" class="tiny" fill="#047857" style="font-weight:700">累加输出块</text>
+  <text x="364" y="278" class="tiny mono" fill="#059669">C_tile</text>
+
+  <!-- On-chip Shared Memory Compute Pipeline Box -->
+  <rect x="52" y="314" width="392" height="66" rx="8" fill="#f0f9ff" stroke="#bae6fd"/>
+  <rect x="64" y="330" width="54" height="34" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="91" y="346" class="cell mono" fill="#334155" text-anchor="middle">HBM</text>
+  <text x="91" y="359" class="tiny" text-anchor="middle" style="font-size:9.5px">搬入 1 次</text>
+
+  <line x1="118" y1="347" x2="136" y2="347" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr-slate)"/>
+
+  <rect x="140" y="322" width="166" height="50" rx="6" fill="#ffffff" stroke="#0284c7" stroke-width="1.3"/>
+  <text x="223" y="341" class="cell mono" fill="#0369a1" text-anchor="middle">Shared Memory (SRAM)</text>
+  <text x="223" y="359" class="tiny" fill="#1e293b" text-anchor="middle" style="font-weight:600">As × Bs 片上复用 BLOCK 次</text>
+
+  <line x1="306" y1="347" x2="324" y2="347" stroke="#059669" stroke-width="1.6" marker-end="url(#arr-emerald)"/>
+
+  <rect x="328" y="328" width="104" height="38" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.3"/>
+  <text x="380" y="345" class="cell" fill="#065f46" text-anchor="middle">累加 C_tile</text>
+  <text x="380" y="360" class="tiny" fill="#047857" text-anchor="middle" style="font-size:9.5px">寄存器驻留</text>
+
+  <!-- Arithmetic Intensity Jump Box -->
+  <rect x="52" y="390" width="392" height="54" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="66" y="410" class="h3" fill="#065f46">算术强度跃升（FP32，BLOCK = 32）：</text>
+  <text x="66" y="432" class="mono" style="font-size:11px;fill:#334155">
+    朴素访存 <tspan fill="#dc2626" style="font-weight:700">0.25</tspan> FLOP/B → Tiling 后 <tspan fill="#059669" style="font-weight:700">8.0</tspan> FLOP/B <tspan fill="#047857" style="font-weight:700">(提升 32×)</tspan>
+  </text>
+
+  <!-- ==================== RIGHT PANEL: 32-BANK CONFLICT VS +1 PADDING ==================== -->
+  <rect x="474" y="78" width="410" height="378" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.3"/>
+  <rect x="490" y="92" width="154" height="22" rx="11" fill="#fffbeb" stroke="#fde68a"/>
+  <text x="567" y="107" class="pill" fill="#b45309" text-anchor="middle">Shared Memory 32-Bank</text>
+  <text x="654" y="108" class="body" fill="#475569">Warp 32 线程同时按列读取</text>
+
+  <!-- Sub-panel 1: Conflict BsT[32][32] -->
+  <rect x="490" y="124" width="378" height="154" rx="8" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="504" y="144" class="h3" fill="#b91c1c">✗ 无 Padding：BsT[32][32]（行跨度 stride = 32）</text>
+
+  <!-- Column headers -->
+  <g class="tiny mono" text-anchor="middle">
+    <text x="572" y="162" fill="#dc2626" style="font-weight:700">Col 0</text>
+    <text x="616" y="162">Col 1</text>
+    <text x="660" y="162">Col 2</text>
+    <text x="702" y="162">···</text>
+    <text x="744" y="162">Col 31</text>
+  </g>
+
+  <!-- Row labels -->
+  <g class="tiny mono" text-anchor="end">
+    <text x="544" y="182">Row 0</text>
+    <text x="544" y="204">Row 1</text>
+    <text x="544" y="226">Row 2</text>
+    <text x="544" y="248">Row 3</text>
+  </g>
+
+  <!-- Matrix Cells: BsT[32][32] (4 rows x 5 display cols) -->
+  <!-- Row 0 -->
+  <g class="cell mono" text-anchor="middle">
+    <rect x="552" y="168" width="40" height="19" rx="3" fill="#dc2626"/><text x="572" y="181" fill="#ffffff">B0</text>
+    <rect x="596" y="168" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="616" y="181" fill="#64748b">B1</text>
+    <rect x="640" y="168" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="660" y="181" fill="#64748b">B2</text>
+    <text x="702" y="181" fill="#94a3b8">···</text>
+    <rect x="724" y="168" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="744" y="181" fill="#64748b">B31</text>
+
+    <!-- Row 1 -->
+    <rect x="552" y="190" width="40" height="19" rx="3" fill="#dc2626"/><text x="572" y="203" fill="#ffffff">B0</text>
+    <rect x="596" y="190" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="616" y="203" fill="#64748b">B1</text>
+    <rect x="640" y="190" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="660" y="203" fill="#64748b">B2</text>
+    <text x="702" y="203" fill="#94a3b8">···</text>
+    <rect x="724" y="190" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="744" y="203" fill="#64748b">B31</text>
+
+    <!-- Row 2 -->
+    <rect x="552" y="212" width="40" height="19" rx="3" fill="#dc2626"/><text x="572" y="225" fill="#ffffff">B0</text>
+    <rect x="596" y="212" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="616" y="225" fill="#64748b">B1</text>
+    <rect x="640" y="212" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="660" y="225" fill="#64748b">B2</text>
+    <text x="702" y="225" fill="#94a3b8">···</text>
+    <rect x="724" y="212" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="744" y="225" fill="#64748b">B31</text>
+
+    <!-- Row 3 -->
+    <rect x="552" y="234" width="40" height="19" rx="3" fill="#dc2626"/><text x="572" y="247" fill="#ffffff">B0</text>
+    <rect x="596" y="234" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="616" y="247" fill="#64748b">B1</text>
+    <rect x="640" y="234" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="660" y="247" fill="#64748b">B2</text>
+    <text x="702" y="247" fill="#94a3b8">···</text>
+    <rect x="724" y="234" width="40" height="19" rx="3" fill="#ffffff" stroke="#e2e8f0"/><text x="744" y="247" fill="#64748b">B31</text>
+  </g>
+
+  <!-- Right Side Conflict Callout -->
+  <rect x="774" y="172" width="84" height="76" rx="6" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="816" y="193" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:700">32 线程同列</text>
+  <text x="816" y="212" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:700">全撞 Bank 0</text>
+  <text x="816" y="233" class="tiny" fill="#991b1b" text-anchor="middle" style="font-weight:700">32 路串行！</text>
+
+  <text x="504" y="270" class="tiny" fill="#991b1b">同列步长 32 → addr % 32 恒为 0，单次访问被迫拆成 32 个周期串行</text>
+
+  <!-- Sub-panel 2: Zero Conflict BsT[32][33] -->
+  <rect x="490" y="288" width="378" height="158" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="504" y="308" class="h3" fill="#047857">✓ +1 Padding：BsT[32][33]（行跨度 stride = 33）</text>
+
+  <!-- Column headers -->
+  <g class="tiny mono" text-anchor="middle">
+    <text x="568" y="326" fill="#047857" style="font-weight:700">Col 0</text>
+    <text x="606" y="326">Col 1</text>
+    <text x="644" y="326">Col 2</text>
+    <text x="676" y="326">···</text>
+    <text x="708" y="326">Col 31</text>
+    <text x="748" y="326" fill="#d97706" style="font-weight:700">+1 Pad</text>
+  </g>
+
+  <!-- Row labels -->
+  <g class="tiny mono" text-anchor="end">
+    <text x="544" y="346">Row 0</text>
+    <text x="544" y="368">Row 1</text>
+    <text x="544" y="390">Row 2</text>
+    <text x="544" y="412">Row 3</text>
+  </g>
+
+  <!-- Matrix Cells: BsT[32][33] with shifted Banks -->
+  <g class="cell mono" text-anchor="middle">
+    <!-- Row 0 -->
+    <rect x="550" y="332" width="35" height="19" rx="3" fill="#059669"/><text x="567.5" y="345" fill="#ffffff">B0</text>
+    <rect x="588" y="332" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="605.5" y="345" fill="#475569">B1</text>
+    <rect x="626" y="332" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="643.5" y="345" fill="#475569">B2</text>
+    <text x="676" y="345" fill="#94a3b8">···</text>
+    <rect x="690" y="332" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="707.5" y="345" fill="#475569">B31</text>
+    <rect x="729" y="332" width="37" height="19" rx="3" fill="#fffbeb" stroke="#f59e0b" stroke-dasharray="3,2"/><text x="747.5" y="345" fill="#b45309">B0</text>
+
+    <!-- Row 1 -->
+    <rect x="550" y="354" width="35" height="19" rx="3" fill="#0284c7"/><text x="567.5" y="367" fill="#ffffff">B1</text>
+    <rect x="588" y="354" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="605.5" y="367" fill="#475569">B2</text>
+    <rect x="626" y="354" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="643.5" y="367" fill="#475569">B3</text>
+    <text x="676" y="367" fill="#94a3b8">···</text>
+    <rect x="690" y="354" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="707.5" y="367" fill="#475569">B0</text>
+    <rect x="729" y="354" width="37" height="19" rx="3" fill="#fffbeb" stroke="#f59e0b" stroke-dasharray="3,2"/><text x="747.5" y="367" fill="#b45309">B1</text>
+
+    <!-- Row 2 -->
+    <rect x="550" y="376" width="35" height="19" rx="3" fill="#3f51b5"/><text x="567.5" y="389" fill="#ffffff">B2</text>
+    <rect x="588" y="376" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="605.5" y="389" fill="#475569">B3</text>
+    <rect x="626" y="376" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="643.5" y="389" fill="#475569">B4</text>
+    <text x="676" y="389" fill="#94a3b8">···</text>
+    <rect x="690" y="376" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="707.5" y="389" fill="#475569">B1</text>
+    <rect x="729" y="376" width="37" height="19" rx="3" fill="#fffbeb" stroke="#f59e0b" stroke-dasharray="3,2"/><text x="747.5" y="389" fill="#b45309">B2</text>
+
+    <!-- Row 3 -->
+    <rect x="550" y="398" width="35" height="19" rx="3" fill="#7c3aed"/><text x="567.5" y="411" fill="#ffffff">B3</text>
+    <rect x="588" y="398" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="605.5" y="411" fill="#475569">B4</text>
+    <rect x="626" y="398" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="643.5" y="411" fill="#475569">B5</text>
+    <text x="676" y="411" fill="#94a3b8">···</text>
+    <rect x="690" y="398" width="35" height="19" rx="3" fill="#ffffff" stroke="#cbd5e1"/><text x="707.5" y="411" fill="#475569">B2</text>
+    <rect x="729" y="398" width="37" height="19" rx="3" fill="#fffbeb" stroke="#f59e0b" stroke-dasharray="3,2"/><text x="747.5" y="411" fill="#b45309">B3</text>
+  </g>
+
+  <!-- Right Side Zero-Conflict Callout -->
+  <rect x="774" y="336" width="84" height="76" rx="6" fill="#ffffff" stroke="#a7f3d0"/>
+  <text x="816" y="357" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">每行右移 1</text>
+  <text x="816" y="376" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:700">落 Bank 0..31</text>
+  <text x="816" y="397" class="tiny" fill="#065f46" text-anchor="middle" style="font-weight:700">零冲突并行！</text>
+
+  <text x="504" y="436" class="tiny" fill="#065f46">仅多占 1/32 空间，32 线程同时命中 32 个独立 Bank → 单周期满速并行</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="478" class="note">要点：Tiling 消除 HBM 带宽瓶颈（算术强度 0.25 → 8），+1 Padding 消除片上 Shared Memory 的 32-Bank 串行冲突。</text>
+</svg>

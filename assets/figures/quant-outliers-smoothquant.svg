@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 460" role="img" aria-label="激活离群值量化痛点与 SmoothQuant 迁移直觉：左半展示激活 X 的少数极高通道撑爆 scale 导致正常值被压进极少整数格点；右半展示 Y=(X·diag(s)^-1)·(diag(s)·W) 把尖峰迁移给平滑权重 W，使两边平稳落入 INT8/FP8 有效范围">
+  <style>
+    text { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+    .title { font-size: 23px; font-weight: 700; fill: #1e293b; }
+    .sub { font-size: 14px; fill: #64748b; }
+    .h2 { font-size: 15px; font-weight: 700; fill: #1e293b; }
+    .h3 { font-size: 12.5px; font-weight: 700; }
+    .body { font-size: 12px; fill: #334155; }
+    .tiny { font-size: 11px; fill: #64748b; }
+    .pill { font-size: 11.5px; font-weight: 700; }
+    .note { font-size: 13px; fill: #475569; }
+  </style>
+  <defs>
+    <marker id="arr-indigo" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3f51b5"/>
+    </marker>
+    <marker id="arr-sky" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#0284c7"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#059669"/>
+    </marker>
+    <marker id="arr-rose" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0,1 L9,5 L0,9 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="920" height="460" fill="#fbfcfe" rx="8"/>
+
+  <!-- Header -->
+  <text x="36" y="38" class="title">激活离群值与 SmoothQuant 难度迁移</text>
+  <text x="36" y="62" class="sub">少数通道的极大激活值会撑爆量化 scale；SmoothQuant 通过逐通道因子 s 将量化难度平滑迁移给权重。</text>
+
+  <!-- ==================== LEFT PANEL: PAIN POINT ==================== -->
+  <rect x="36" y="80" width="406" height="334" rx="10" fill="#ffffff" stroke="#fecaca" stroke-width="1.3"/>
+  <rect x="52" y="94" width="90" height="22" rx="11" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="97" y="109" class="pill" fill="#dc2626" text-anchor="middle">痛点：离群值</text>
+  <text x="152" y="110" class="h2">激活 X 少数尖峰撑爆 scale</text>
+
+  <!-- Chart Axes -->
+  <line x1="80" y1="136" x2="80" y2="256" stroke="#94a3b8" stroke-width="1.3"/>
+  <line x1="80" y1="256" x2="418" y2="256" stroke="#94a3b8" stroke-width="1.3"/>
+  <text x="74" y="146" class="tiny mono" text-anchor="end">62</text>
+  <text x="74" y="198" class="tiny mono" text-anchor="end">30</text>
+  <text x="74" y="242" class="tiny mono" text-anchor="end">2</text>
+  <text x="74" y="260" class="tiny mono" text-anchor="end">0</text>
+  <text x="58" y="196" class="tiny" text-anchor="middle" transform="rotate(-90 58 196)">激活幅值 |X|</text>
+
+  <!-- Dashed max(|X|) ceiling line -->
+  <line x1="80" y1="142" x2="418" y2="142" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="416" y="137" class="tiny mono" fill="#dc2626" text-anchor="end" style="font-weight:700">scale ∝ max(|X|) ≈ 62</text>
+
+  <!-- 12 Channel Bars (x start = 92, width = 18, step = 26 -> ends at 396) -->
+  <!-- Normal channels -->
+  <rect x="92"  y="241" width="18" height="15" rx="2" fill="#6366f1"/>
+  <rect x="118" y="236" width="18" height="20" rx="2" fill="#6366f1"/>
+  <rect x="144" y="243" width="18" height="13" rx="2" fill="#6366f1"/>
+  <!-- Outlier c3 -->
+  <rect x="170" y="142" width="18" height="114" rx="2" fill="#dc2626"/>
+  <!-- Normal channels -->
+  <rect x="196" y="240" width="18" height="16" rx="2" fill="#6366f1"/>
+  <rect x="222" y="237" width="18" height="19" rx="2" fill="#6366f1"/>
+  <rect x="248" y="244" width="18" height="12" rx="2" fill="#6366f1"/>
+  <rect x="274" y="239" width="18" height="17" rx="2" fill="#6366f1"/>
+  <!-- Outlier c8 -->
+  <rect x="300" y="160" width="18" height="96" rx="2" fill="#ef4444"/>
+  <!-- Normal channels -->
+  <rect x="326" y="242" width="18" height="14" rx="2" fill="#6366f1"/>
+  <rect x="352" y="236" width="18" height="20" rx="2" fill="#6366f1"/>
+  <rect x="378" y="241" width="18" height="15" rx="2" fill="#6366f1"/>
+
+  <!-- Callout pointing to the two outlier channels -->
+  <rect x="200" y="168" width="90" height="36" rx="6" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="245" y="183" class="tiny" fill="#dc2626" text-anchor="middle" style="font-weight:700">离群通道尖峰</text>
+  <text x="245" y="198" class="tiny" fill="#991b1b" text-anchor="middle">大 10–100×</text>
+  <line x1="200" y1="184" x2="190" y2="176" stroke="#dc2626" stroke-width="1.2" marker-end="url(#arr-rose)"/>
+  <line x1="290" y1="184" x2="299" y2="180" stroke="#dc2626" stroke-width="1.2" marker-end="url(#arr-rose)"/>
+
+  <!-- X-axis labels -->
+  <text x="179" y="270" class="tiny mono" fill="#dc2626" text-anchor="middle" style="font-weight:700">c3</text>
+  <text x="309" y="270" class="tiny mono" fill="#dc2626" text-anchor="middle" style="font-weight:700">c8</text>
+  <text x="249" y="271" class="tiny" text-anchor="middle">通道维</text>
+
+  <!-- Quantization Grid Collapse Box -->
+  <rect x="52" y="284" width="374" height="114" rx="8" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="66" y="304" class="h3" fill="#b91c1c">强行 INT8 量化：整数格点 [0, 127] 严重浪费</text>
+
+  <!-- Number line -->
+  <line x1="72" y1="342" x2="408" y2="342" stroke="#94a3b8" stroke-width="1.5"/>
+  <!-- Ticks -->
+  <line x1="72"  y1="336" x2="72"  y2="348" stroke="#64748b" stroke-width="1.4"/>
+  <line x1="156" y1="338" x2="156" y2="346" stroke="#cbd5e1" stroke-width="1.2"/>
+  <line x1="240" y1="336" x2="240" y2="348" stroke="#64748b" stroke-width="1.4"/>
+  <line x1="324" y1="338" x2="324" y2="346" stroke="#cbd5e1" stroke-width="1.2"/>
+  <line x1="408" y1="336" x2="408" y2="348" stroke="#64748b" stroke-width="1.4"/>
+  <text x="72"  y="362" class="tiny mono" text-anchor="middle">0</text>
+  <text x="240" y="362" class="tiny mono" text-anchor="middle">64</text>
+  <text x="408" y="362" class="tiny mono" text-anchor="middle">127</text>
+
+  <!-- Cramped normal dots around 0..4 -->
+  <rect x="74" y="334" width="22" height="16" rx="3" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.2"/>
+  <circle cx="79" cy="342" r="2.6" fill="#4f46e5"/>
+  <circle cx="84" cy="342" r="2.6" fill="#4f46e5"/>
+  <circle cx="89" cy="342" r="2.6" fill="#4f46e5"/>
+  <circle cx="93" cy="342" r="2.6" fill="#4f46e5"/>
+  <text x="108" y="362" class="tiny" fill="#4338ca" style="font-weight:700">正常值全挤在 1~4</text>
+
+  <!-- Wasted gap annotation -->
+  <line x1="106" y1="326" x2="336" y2="326" stroke="#dc2626" stroke-width="1.1" stroke-dasharray="3,2"/>
+  <text x="222" y="322" class="tiny" fill="#dc2626" text-anchor="middle">95%+ 整数格点空置浪费</text>
+
+  <!-- 2 Outlier dots -->
+  <circle cx="348" cy="342" r="4.5" fill="#ef4444"/>
+  <circle cx="406" cy="342" r="4.5" fill="#dc2626"/>
+  <text x="376" y="322" class="tiny" fill="#b91c1c" text-anchor="middle">仅 2 个尖峰</text>
+
+  <text x="66" y="386" class="body" fill="#7f1d1d" style="font-weight:600">→ 有效位宽跌至 2~3 bit，舍入误差剧增、生成精度崩坏</text>
+
+  <!-- ==================== CENTER ARROW ==================== -->
+  <line x1="446" y1="247" x2="470" y2="247" stroke="#3f51b5" stroke-width="2.4" marker-end="url(#arr-indigo)"/>
+
+  <!-- ==================== RIGHT PANEL: SMOOTHQUANT ==================== -->
+  <rect x="476" y="80" width="408" height="334" rx="10" fill="#ffffff" stroke="#c7d2fe" stroke-width="1.3"/>
+  <rect x="492" y="94" width="98" height="22" rx="11" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="541" y="109" class="pill" fill="#059669" text-anchor="middle">SmoothQuant</text>
+  <text x="600" y="110" class="h2">数学等价的逐通道缩放迁移</text>
+
+  <!-- Formula Banner -->
+  <rect x="492" y="126" width="376" height="42" rx="8" fill="#eef2ff" stroke="#c7d2fe"/>
+  <text x="680" y="152" class="mono" text-anchor="middle" style="font-size:13.5px;font-weight:700;fill:#1e293b">
+    Y = (<tspan fill="#0284c7">X · diag(s)⁻¹</tspan>) · (<tspan fill="#059669">diag(s) · W</tspan>) = <tspan fill="#0284c7">X̂</tspan> · <tspan fill="#059669">Ŵ</tspan>
+  </text>
+
+  <!-- Sub-box 1: Smoothed Activation X_hat -->
+  <rect x="492" y="180" width="182" height="160" rx="8" fill="#f0f9ff" stroke="#bae6fd"/>
+  <text x="583" y="198" class="h3" fill="#0369a1" text-anchor="middle">平滑激活 X̂ = X / s</text>
+  <text x="583" y="213" class="tiny" fill="#059669" text-anchor="middle" style="font-size:10px">绿虚线：INT8/FP8 有效范围</text>
+
+  <!-- Mini Chart 1 (baseline y=306, ceiling y=252) -->
+  <line x1="508" y1="306" x2="660" y2="306" stroke="#64748b" stroke-width="1.2"/>
+  <line x1="508" y1="252" x2="660" y2="252" stroke="#059669" stroke-width="1.1" stroke-dasharray="4,2"/>
+
+  <!-- 7 bars: x = 514, 535, 556, 577, 598, 619, 640 (w=13) -->
+  <rect x="514" y="286" width="13" height="20" rx="2" fill="#38bdf8"/>
+  <rect x="535" y="282" width="13" height="24" rx="2" fill="#38bdf8"/>
+  <!-- Squashed outlier 1 -->
+  <rect x="556" y="222" width="13" height="40" rx="2" fill="none" stroke="#fca5a5" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <rect x="556" y="262" width="13" height="44" rx="2" fill="#0284c7"/>
+  <line x1="562.5" y1="227" x2="562.5" y2="257" stroke="#0284c7" stroke-width="1.6" marker-end="url(#arr-sky)"/>
+  <text x="548" y="240" class="tiny mono" fill="#0284c7" text-anchor="end" style="font-size:10px;font-weight:700">÷s</text>
+
+  <rect x="577" y="288" width="13" height="18" rx="2" fill="#38bdf8"/>
+  <rect x="598" y="284" width="13" height="22" rx="2" fill="#38bdf8"/>
+  <!-- Squashed outlier 2 -->
+  <rect x="619" y="228" width="13" height="36" rx="2" fill="none" stroke="#fca5a5" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <rect x="619" y="264" width="13" height="42" rx="2" fill="#0284c7"/>
+  <line x1="625.5" y1="232" x2="625.5" y2="259" stroke="#0284c7" stroke-width="1.6" marker-end="url(#arr-sky)"/>
+  <text x="612" y="242" class="tiny mono" fill="#0284c7" text-anchor="end" style="font-size:10px;font-weight:700">÷s</text>
+
+  <rect x="640" y="285" width="13" height="21" rx="2" fill="#38bdf8"/>
+  <text x="583" y="327" class="tiny" fill="#0369a1" text-anchor="middle" style="font-weight:600">激活尖峰被 ÷ s 压平</text>
+
+  <!-- Sub-box 2: Migrated Weight W_hat -->
+  <rect x="686" y="180" width="182" height="160" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="777" y="198" class="h3" fill="#047857" text-anchor="middle">迁移权重 Ŵ = s · W</text>
+  <text x="777" y="213" class="tiny" fill="#059669" text-anchor="middle" style="font-size:10px">绿虚线：仍在安全动态范围</text>
+
+  <!-- Mini Chart 2 (baseline y=306, ceiling y=252) -->
+  <line x1="702" y1="306" x2="854" y2="306" stroke="#64748b" stroke-width="1.2"/>
+  <line x1="702" y1="252" x2="854" y2="252" stroke="#059669" stroke-width="1.1" stroke-dasharray="4,2"/>
+
+  <!-- 7 bars: x = 708, 729, 750, 771, 792, 813, 834 (w=13) -->
+  <rect x="708" y="290" width="13" height="16" rx="2" fill="#6ee7b7"/>
+  <rect x="729" y="288" width="13" height="18" rx="2" fill="#6ee7b7"/>
+  <!-- Lifted weight channel 1 -->
+  <rect x="750" y="264" width="13" height="42" rx="2" fill="#059669"/>
+  <line x1="750" y1="290" x2="763" y2="290" stroke="#ffffff" stroke-width="1" stroke-dasharray="2,1"/>
+  <line x1="756.5" y1="292" x2="756.5" y2="269" stroke="#ffffff" stroke-width="1.4"/>
+  <text x="742" y="274" class="tiny mono" fill="#047857" text-anchor="end" style="font-size:10px;font-weight:700">×s</text>
+
+  <rect x="771" y="291" width="13" height="15" rx="2" fill="#6ee7b7"/>
+  <rect x="792" y="289" width="13" height="17" rx="2" fill="#6ee7b7"/>
+  <!-- Lifted weight channel 2 -->
+  <rect x="813" y="266" width="13" height="40" rx="2" fill="#059669"/>
+  <line x1="813" y1="290" x2="826" y2="290" stroke="#ffffff" stroke-width="1" stroke-dasharray="2,1"/>
+  <line x1="819.5" y1="292" x2="819.5" y2="271" stroke="#ffffff" stroke-width="1.4"/>
+  <text x="806" y="276" class="tiny mono" fill="#047857" text-anchor="end" style="font-size:10px;font-weight:700">×s</text>
+
+  <rect x="834" y="290" width="13" height="16" rx="2" fill="#6ee7b7"/>
+  <text x="777" y="327" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:600">原本平滑的 W 承接 × s 仍可控</text>
+
+  <!-- Bottom Calibration & Fusion Box -->
+  <rect x="492" y="350" width="376" height="48" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="680" y="369" class="mono" text-anchor="middle" style="font-size:10.8px;fill:#1e293b;font-weight:600">s_j = max(|X_j|)^α / max(|W_j|)^(1−α) <tspan fill="#64748b" style="font-weight:400">(常取 α=0.5)</tspan></text>
+  <text x="680" y="388" class="tiny" fill="#047857" text-anchor="middle" style="font-weight:600">X̂ 与 Ŵ 均平稳落入 INT8/FP8；diag(s)⁻¹ 可融合进前层 Norm</text>
+
+  <!-- Bottom Takeaway Note -->
+  <text x="36" y="438" class="note">要点：SmoothQuant 不改变矩阵乘结果，通过离线校准 s 让激活尖峰与权重充裕范围互补，实现 W8A8 高精度量化且零推理开销。</text>
+</svg>
