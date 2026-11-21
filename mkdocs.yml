@@ -19,7 +19,6 @@ strict: true
 theme:
   name: material
   language: zh
-  custom_dir: overrides
   font: false
   icon:
     logo: material/book-open-page-variant
@@ -29,7 +28,6 @@ theme:
     - navigation.top
     - navigation.footer
     - navigation.tracking
-    - toc.integrate
     - toc.follow
     - search.suggest
     - search.highlight
@@ -59,9 +57,7 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js
   - assets/math.js
   - assets/lightbox.js
-  - assets/notes.js
   - assets/progress.js
-  - assets/toc.js
 
 plugins:
   - search:

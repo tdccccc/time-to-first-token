@@ -23,7 +23,8 @@ class Page(HTMLParser):
         self.chapters: list[int] = []
         self.heading: list[str] = []
         self.in_heading = False
-        self.note_key: str | None = None
+        self.has_toc_sidebar = False
+        self.has_notes_panel = False
         self.figure_count = 0
         self.feed(text)
 
@@ -31,8 +32,11 @@ class Page(HTMLParser):
         attrs = dict(attributes)
         if attrs.get("id"):
             self.ids.add(attrs["id"])
-        if tag == "meta" and attrs.get("name") == "notes-page":
-            self.note_key = attrs.get("content")
+            if attrs["id"] == "notes-panel":
+                self.has_notes_panel = True
+        classes = set((attrs.get("class") or "").split())
+        if "md-sidebar--secondary" in classes:
+            self.has_toc_sidebar = True
         for name in ("href", "src"):
             if attrs.get(name):
                 self.references.append(attrs[name])
@@ -111,8 +115,10 @@ def validate_site(root: Path = ROOT) -> list[str]:
         page = Page(text)
         if page.title != f"第 {number} 章 {title}":
             problems.append(f"chapter {number}: title {page.title!r} != expected '第 {number} 章 {title}'")
-        if page.note_key != f"docs/chapters/chapter-{number:02d}/":
-            problems.append(f"chapter {number}: note key mismatch: {page.note_key!r}")
+        if not page.has_toc_sidebar:
+            problems.append(f"chapter {number}: missing native right-hand TOC sidebar")
+        if page.has_notes_panel:
+            problems.append(f"chapter {number}: obsolete notes panel still present")
         if page.figure_count < 1:
             problems.append(f"chapter {number}: missing visual figure")
         if 'class="term-def"' in text:

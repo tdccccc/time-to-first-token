@@ -1,8 +1,8 @@
 /* ---------------------------------------------------------------------------
-   Book layout + notes panel for 边做边学 LLM 推理服务
+   Book layout for 《LLM 推理工程：原理与方法》
    - Chinese-first system font stack (no Google Fonts request)
-   - Left: chapter-level book navigation (no page subsection TOC)
-   - Right: page notes panel; turns into a drawer below desktop width
+   - Left: chapter-level book navigation
+   - Right: native MkDocs Material page TOC sidebar (H2/H3)
    --------------------------------------------------------------------------- */
 
 :root {
@@ -11,7 +11,6 @@
     "Source Han Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
   --md-code-font: "JetBrains Mono", "Cascadia Code", "SFMono-Regular",
     Consolas, "Liberation Mono", monospace;
-  --notes-width: 17rem;
 }
 
 /* Material 默认把正文字体解析成 Roboto；这里直接覆盖 body 上的变量，
@@ -25,28 +24,35 @@ body {
   --md-default-bg-color: #fcfcfd;
 }
 
-/* A three-column book: navigation | content | notes.
-   The nav stays at chapter level: hide the integrated page subsection TOC
-   and Material's separate page TOC sidebar. */
-.md-nav--primary .md-nav__item--active > nav.md-nav--secondary,
-.md-nav--primary .md-nav__item--active > label.md-nav__link[for="__toc"],
-.md-nav--primary .md-nav__item--active > input#__toc,
-.md-sidebar--secondary {
-  display: none !important;
-}
-
-/* Material hides the active page link under 76.25em because it expects the
-   TOC toggle label to take its place. We keep the chapter link instead. */
-.md-nav--primary .md-nav__item--active > a.md-nav__link {
-  display: flex !important;
-}
-
 @media screen and (min-width: 76.25em) {
   .md-grid {
-    /* 1rem = 20px under Material's desktop scale; 72rem = 1440px.
-       Keeps the reading column around 730-750px at large widths. */
-    max-width: 69.5rem;
+    max-width: 74rem;
   }
+}
+
+/* Native right-hand page TOC polish */
+.md-sidebar--secondary .md-nav--secondary {
+  border-left: 0.05rem solid var(--md-default-fg-color--lightest);
+  padding-left: 0.35rem;
+}
+
+.md-sidebar--secondary .md-nav__title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-sidebar--secondary .md-nav__link {
+  font-size: 0.68rem;
+  line-height: 1.5;
+  padding-top: 0.14rem;
+  padding-bottom: 0.14rem;
+}
+
+.md-sidebar--secondary .md-nav__link--active {
+  font-weight: 600;
+  color: var(--md-accent-fg-color);
 }
 
 .md-typeset table:not([class]) {
@@ -55,341 +61,6 @@ body {
 
 .md-typeset .md-button {
   margin: 0.2rem 0.5rem 0.2rem 0;
-}
-
-/* ---------------------------------------------------------------------------
-   Notes panel (desktop column)
-   --------------------------------------------------------------------------- */
-
-.notes-panel {
-  order: 2;
-  flex: 0 0 var(--notes-width);
-  align-self: flex-start;
-  position: sticky;
-  top: 2.4rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  height: calc(100vh - 4rem);
-  max-height: calc(100vh - 4rem);
-  margin-left: 1rem;
-  padding: 0.2rem 0.1rem 0.6rem 1rem;
-  border-left: 0.05rem solid var(--md-default-fg-color--lightest);
-  overflow-y: auto;
-  font-size: 0.7rem;
-  line-height: 1.5;
-}
-
-.notes-panel__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 0.2rem 0 0.4rem;
-  background: var(--md-default-bg-color);
-}
-
-.notes-panel__heading {
-  min-width: 0;
-}
-
-.notes-panel__title {
-  display: block;
-  font-weight: 700;
-  font-size: 0.82rem;
-  letter-spacing: 0.02em;
-}
-
-.notes-panel__page {
-  display: block;
-  margin-top: 0.1rem;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.63rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notes-panel__close {
-  display: none;
-  flex: 0 0 auto;
-  width: 1.8rem;
-  height: 1.8rem;
-  border: 0;
-  border-radius: 50%;
-  background: var(--md-default-fg-color--lightest);
-  color: var(--md-default-fg-color);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.notes-panel__input {
-  flex: 1 1 12rem;
-  width: 100%;
-  min-height: 12rem;
-  padding: 0.55rem 0.6rem;
-  border: 0.05rem solid var(--md-default-fg-color--lightest);
-  border-radius: 0.2rem;
-  background: var(--md-default-bg-color);
-  color: var(--md-typeset-color);
-  font-family: var(--md-text-font-family);
-  font-size: 0.72rem;
-  line-height: 1.6;
-  resize: vertical;
-}
-
-.notes-panel__input:focus {
-  outline: none;
-  border-color: var(--md-accent-fg-color);
-}
-
-.notes-panel__input::placeholder {
-  color: var(--md-default-fg-color--light);
-  opacity: 0.8;
-}
-
-.notes-panel__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.62rem;
-}
-
-.notes-panel__actions,
-.notes-settings__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.notes-panel .md-button {
-  padding: 0.22rem 0.55rem;
-  font-size: 0.66rem;
-  line-height: 1.4;
-}
-
-.notes-panel__link {
-  display: block;
-  color: var(--md-accent-fg-color);
-  font-size: 0.65rem;
-  word-break: break-all;
-}
-
-.notes-panel__link[hidden],
-.notes-backdrop[hidden] {
-  display: none !important;
-}
-
-.notes-feedback {
-  min-height: 1.1em;
-  margin: 0;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.63rem;
-  word-break: break-word;
-}
-
-.notes-feedback.is-error {
-  color: #c62828;
-}
-
-.notes-settings {
-  margin-top: 0.2rem;
-  padding-top: 0.4rem;
-  border-top: 0.05rem solid var(--md-default-fg-color--lightest);
-  font-size: 0.65rem;
-}
-
-.notes-settings summary {
-  cursor: pointer;
-  color: var(--md-default-fg-color);
-  font-weight: 600;
-}
-
-.notes-settings label {
-  display: block;
-  margin-top: 0.4rem;
-  color: var(--md-default-fg-color--light);
-}
-
-.notes-settings input {
-  display: block;
-  width: 100%;
-  margin-top: 0.15rem;
-  padding: 0.3rem 0.4rem;
-  border: 0.05rem solid var(--md-default-fg-color--lightest);
-  border-radius: 0.15rem;
-  background: var(--md-default-bg-color);
-  color: var(--md-typeset-color);
-  font-family: var(--md-code-font-family);
-  font-size: 0.64rem;
-}
-
-.notes-settings__hint {
-  margin: 0.5rem 0;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.61rem;
-  line-height: 1.55;
-}
-
-[data-md-color-scheme="slate"] .notes-feedback.is-error {
-  color: #ff8a80;
-}
-
-/* Mobile / tablet: turn the notes column into a right drawer. */
-.notes-fab {
-  display: none;
-}
-
-.notes-backdrop {
-  display: none;
-}
-
-.page-toc {
-  flex: 0 0 auto;
-  margin: 0 0 0.55rem;
-  padding: 0 0 0.55rem;
-  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
-}
-
-.page-toc > summary {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  cursor: pointer;
-  list-style: none;
-}
-
-.page-toc > summary::-webkit-details-marker {
-  display: none;
-}
-
-.page-toc > summary::before {
-  content: "▸";
-  color: var(--md-accent-fg-color);
-}
-
-.page-toc[open] > summary::before {
-  content: "▾";
-}
-
-.page-toc__list {
-  max-height: 11rem;
-  margin: 0.4rem 0 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.page-toc__item a {
-  display: block;
-  padding: 0.14rem 0.3rem 0.14rem 0.45rem;
-  border-left: 0.1rem solid transparent;
-  border-radius: 0 0.15rem 0.15rem 0;
-  color: var(--md-default-fg-color--light);
-  font-size: 0.63rem;
-  line-height: 1.45;
-  text-decoration: none;
-}
-
-.page-toc__item--3 a {
-  padding-left: 1rem;
-  font-size: 0.6rem;
-}
-
-.page-toc__item a:hover {
-  color: var(--md-accent-fg-color);
-  background: var(--md-default-fg-color--lightest);
-}
-
-.page-toc__item a.is-active {
-  border-left-color: var(--md-accent-fg-color);
-  background: var(--md-accent-fg-color--transparent);
-  color: var(--md-accent-fg-color);
-}
-
-@media screen and (max-width: 76.234375em) {
-  .notes-panel {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 6;
-    width: min(90vw, 20rem);
-    height: 100%;
-    max-height: none;
-    margin: 0;
-    padding: 1rem;
-    border-left: 0;
-    background: var(--md-default-bg-color);
-    box-shadow: var(--md-shadow-z3);
-    transform: translateX(105%);
-    visibility: hidden;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.25s;
-  }
-
-  html.notes-open {
-    overflow: hidden;
-  }
-
-  html.notes-open .notes-panel {
-    transform: none;
-    visibility: visible;
-  }
-
-  .notes-panel__close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .notes-fab {
-    position: fixed;
-    right: 1rem;
-    bottom: 5rem;
-    z-index: 5;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.5rem 0.8rem;
-    border: 0;
-    border-radius: 2rem;
-    background: var(--md-primary-fg-color);
-    color: var(--md-primary-bg-color);
-    font-size: 0.7rem;
-    font-family: var(--md-text-font-family);
-    cursor: pointer;
-    box-shadow: var(--md-shadow-z2);
-  }
-
-  html.notes-open .notes-fab {
-    display: none;
-  }
-
-  html.notes-open .notes-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 5;
-    display: block;
-    background: rgba(0, 0, 0, 0.45);
-  }
-}
-
-@media print {
-  .notes-panel,
-  .notes-fab,
-  .notes-backdrop {
-    display: none !important;
-  }
 }
 
 /* ---------------------------------------------------------------------------

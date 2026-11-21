@@ -54,12 +54,13 @@ class SiteValidationTests(unittest.TestCase):
         self.assertIn("escapes site", problems[0])
 
     def test_title_and_progress_ids_keep_semantic_text(self):
-        page = CHECK.Page('<meta name="notes-page" content="docs/chapters/chapter-06/">'
+        page = CHECK.Page('<div class="md-sidebar md-sidebar--secondary"></div>'
                           '<h1>第 6 章 <em>推理瓶颈</em><a>¶</a></h1>'
                           '<input type="checkbox" data-chapter="6">')
         self.assertEqual(page.title, "第 6 章 推理瓶颈")
         self.assertEqual(page.chapters, [6])
-        self.assertEqual(page.note_key, "docs/chapters/chapter-06/")
+        self.assertTrue(page.has_toc_sidebar)
+        self.assertFalse(page.has_notes_panel)
 
 
 if __name__ == "__main__":
